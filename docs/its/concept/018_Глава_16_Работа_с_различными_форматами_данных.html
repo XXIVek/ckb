@@ -1,0 +1,844 @@
+<!DOCTYPE HTML>
+<html lang="ru" class="sidebar_level0 no-touchscreen js-disabled">
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=Windows-1251">
+		<title id="w_title" class="w">Глава 16. Работа с различными форматами данных :: Руководство разработчика :: 1С:Предприятие 8.3.27. Документация</title>		<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+		<meta name="theme-color" content="#ffdf16">
+		<link rel="preconnect" href="https://mc.yandex.ru">
+		<link rel="preconnect" href="https://counter.yadro.ru">
+		<base id="w_base" class="l" data-nonce="1789134206" href="/db/content/v8327doc/src/руководство разработчика/глава 16. работа с различными форматами данных.htm" target="w_metadata_doc_frame">		
+		<link id="w_canonical" rel="canonical" class="l" href="https://its.1c.ru/db/v8327doc/bookmark/dev/TI000001824">		<script type="text/javascript">
+			(function(){
+				var n = navigator, d = document, de = d.documentElement, dc = de.className.replace(/(^|\s+)js-disabled(\s+|$)/, ' '), rxos = /(^|\s+)(android|ios)(\s+|$)/;
+				if(window.TouchEvent && 'standalone' in n || window.matchMedia && matchMedia('(any-pointer: coarse)').matches){
+					dc = dc.replace(/(^|\s+)no-touchscreen(\s+|$)/, ' touchscreen ');
+					if(window.TouchEvent && 'standalone' in n){
+						dc = dc.replace(rxos, ' ios ');
+						d.addEventListener('touchstart', (function(){return function(){}})());
+					}
+					else if(n.userAgentData && n.userAgentData.platform === 'Android'
+					|| (!n.userAgentData || !n.userAgentData.platform && n.vendor === 'Google Inc.') && n.userAgent.match(/\bAndroid\b/))
+						dc = dc.replace(rxos, ' android ');
+					else
+						dc = dc.replace(rxos, ' ');
+				}else
+					dc = dc.replace(rxos, ' ').replace(/(^|\s+)touchscreen(\s+|$)/, ' no-touchscreen ');
+				de.className = dc;
+			})();
+		</script>
+		<script type="text/javascript">
+window.deferred=[];window.errors=[];;
+history.replaceState(null, document.title, '/db/v8327doc/bookmark/dev/TI000001824');;
+deferred.push(function(){App.User.init(false, 'BITRIX_SM_LOGIN', 'SUBSCRIBE_PERIOD', 'PARTWEB_LOGIN', 'FRESH_LOGIN', 'BITRIX_SM_UIDH', '/user/auth/ping.json', 1380);});
+</script>		<script type="text/javascript">
+			window.TEMPLATE_NEW = true;
+			window.MOBILE_ENABLED = true;
+		</script>
+		<style>
+		@font-face {
+			font-family: 'Roboto';
+			src: url('/font/roboto/Roboto-Regular.woff2') format('woff2'),
+				 url('/font/roboto/Roboto-Regular.woff') format('woff');
+			font-weight: normal;
+			font-style: normal;
+			font-display: block;
+		}
+		@font-face {
+			font-family: 'Roboto';
+			src: url('/font/roboto/Roboto-Bold.woff2') format('woff2'),
+				 url('/font/roboto/Roboto-Bold.woff') format('woff');
+			font-weight: bold;
+			font-style: normal;
+			font-display: block;
+		}
+		@font-face {
+			font-family: 'FuturaMediumC';
+			src: url('/font/futura/FuturaMediumC.woff2') format('woff2'),
+				 url('/font/futura/FuturaMediumC.woff') format('woff');
+			font-weight: 500;
+			font-style: normal;
+			font-display: block;
+		}
+		@font-face {
+			font-family: 'FuturaDemiC';
+			src: url('/font/futura/FuturaDemiC.woff2') format('woff2'),
+				 url('/font/futura/FuturaDemiC.woff') format('woff');
+			font-weight: normal;
+			font-style: normal;
+			font-display: block;
+		}
+		@font-face {
+			font-family: 'FuturaBookC';
+			src: url('/font/futura/FuturaBookC.woff2') format('woff2'),
+				 url('/font/futura/FuturaBookC.woff') format('woff');
+			font-weight: normal;
+			font-style: normal;
+			font-display: block;
+		}
+		@font-face {
+			font-family: 'FuturaLightC';
+			src: url('/font/futura/FuturaLightC.woff2') format('woff2'),
+				 url('/font/futura/FuturaLightC.woff') format('woff');
+			font-weight: 300;
+			font-style: normal;
+			font-display: block;
+		}
+		</style>
+												<link rel="stylesheet" type="text/css" href="/common/page/css/1789134243/core__new.css_?_=1789134243"><link rel="stylesheet" type="text/css" href="/common/page/css/1789134243/its__new.css_?_=1789134243"><link rel="stylesheet" type="text/css" href="/css/mobile.css?_=1758294439">							<script type="text/javascript" onload="this.loaded=true" defer src="/common/page/js/1789134243/core__new.js_?_=1789134243"></script><script type="text/javascript" onload="this.loaded=true" defer src="/common/page/js/1789134243/its__new.js_?_=1789134243"></script>						<style>
+				html
+		{contain:strict}
+		html::-webkit-scrollbar,
+		body::-webkit-scrollbar
+		{display:none}
+				</style>
+		<link id="favicon_static" type="image/x-icon" rel="icon" href="/favicon.ico">
+				<link rel="apple-touch-icon" sizes="120x120" href="/img_new/logo_its_apple_touch_120.png?_=1621642314">
+		<link rel="apple-touch-icon" sizes="152x152" href="/img_new/logo_its_apple_touch_152.png?_=1621642321">
+		<link rel="apple-touch-icon" sizes="180x180" href="/img_new/logo_its_apple_touch_180.png?_=1621642327">
+		<meta name="og:image" content="https://its.1c.ru/db/content/v8327doc/_metaimage/61/hdoc/696x394.png?_=0000005B1E792009-v2">
+		<meta name="og:image" content="https://its.1c.ru/db/content/v8327doc/_metaimage/61/hdoc/770x342.png?_=0000005B1E792009-v2">
+		<meta name="og:image" content="https://its.1c.ru/img_new/logo_its_og_image_300.png?_=1686643598">
+		<meta name="robots" content="noarchive">
+		<link rel="search" type="application/opensearchdescription+xml" title="1С:ИТС" href="/search/opensearch.xml">
+	</head>
+	<body class="ru lang_ru its main main_main tabbed unauthorized" data-app="its" data-module="main" data-action="main">
+		<div id="main_container" class="sidebar-fixed " data-viewport-shift-media-max-width-portrait="478px" data-viewport-shift-media-max-width-landscape="991px" data-viewport-shift-snap-padding="5px" data-viewport-shift-scrollbar-width="10px" data-viewport-shift-scrollbar-border-width="3px" data-viewport-shift-translate-x="0px" data-viewport-shift-absolute-max-shift="265">
+<!-- noindex -->
+		<div id="header">
+						<div class="top-personal">
+				<div id="w_user_login" class="w unauthorized null nofreezelayout"><iframe id="auth_check" name="auth_check" style="display:none" src="https://login.1c.ru/login?service=https%3A%2F%2Fits.1c.ru%2Flogin%2F%3Faction%3Daftercheck%26provider%3Dlogin&amp;gateway=true" class="nojs"></iframe>
+<div id="personal_info">
+	<a id="login" class="nojs" href="/user/auth?backurl=%2Fdb%2Fv8327doc%2Fbookmark%2Fdev%2Fti000001824" target="_top" rel="nofollow" onclick="this.href=this.href.replace(/\?backurl=.*$/,'?backurl='+encodeURIComponent(location.href.replace(/^https?:\/\/[^\/]+/, '')))">Вход</a>
+</div>
+<div class="avatar">
+	<a class="nojs" href="/user/auth?backurl=%2Fdb%2Fv8327doc%2Fbookmark%2Fdev%2Fti000001824" target="_top" rel="nofollow" onclick="this.href=this.href.replace(/\?backurl=.*$/,'?backurl='+encodeURIComponent(location.href.replace(/^https?:\/\/[^\/]+/, '')))" aria-label="Вход">&nbsp;</a>
+</div>
+</div>			</div>
+			<div id="top_menu">
+				<div id="top_menu_burger_space">
+					<div id="top_menu_burger" onClick="setTimeout(function(){var d=document,de=d.documentElement,db=d.body,mc=d.getElementById('main_container'),rx=/\bshow-menu\b/,hc=db.className.match(rx);if(!d.getElementById('w_sidebar_menu')||window.styleDeferred&&styleDeferred.usingShell&&!styleDeferred.inactive){alert(window.styleDeferred.error?'Произошла ошибка. Пожалуйста, перезагрузите страницу.':'Пожалуйста, подождите...');return}if(hc){de.className=de.className.replace(rx, '');db.className=db.className.replace(rx, '')}else{de.className+=' show-menu';db.className+=' show-menu'}if(window.SSP&&window.App){!hc&&App.Sidebar.load(false,false,function(){});!hc&&App.Viewport.hasShift()&&db.addEventListener('transitionend',App.Viewport.resetShift,false);if(App.sidebarCarousel.getPosition()){App.sidebarCarousel.adjust();!hc&&App.sidebarCarousel.moveTo(0);}}}, 0)"></div>
+				</div>
+				<div class="top_menu1">
+					<div class="top_menu_item"><a target="_top" href="/db/aboutitsnew">Об 1С:ИТС</a></div>
+										<div class="top_menu_item"><a target="_top" href="/test-drive">Тест-драйв</a></div>
+					<div class="top_menu_item"><a target="_top" href="/zakaz?order[comment]=Заявка на заключение договора ИТС">Заказать ИТС</a></div>
+															<div class="top_menu_item"><a target="_top" href="/docs/question/">Задать вопрос</a></div>
+															<div class="top_menu_item"><a target="_top" href="/docs/update1c/">Обновить ПО</a></div>
+															<div class="top_menu_item"><a target="_top" href="/personal/qos">Оценить 1С</a></div>
+															<div class="top_menu_item"><a target="_blank" rel="noopener" href="https://torg.1c.ru/equipment/onlayn-kassy/?utm_source=its&utm_medium=tmenu">Купить кассу</a></div>
+									</div>
+				<div class="top_menu2">
+										<div class="top_menu_item"><a target="_top" href="/db/itsrev">Тематические подборки</a></div>
+															<div class="top_menu_item"><a target="_top" href="/calendar">Календарь бухгалтера</a></div>
+															<div class="top_menu_item"><a target="_top" href="/docs/calc_help/">Калькуляторы</a></div>
+					<div class="top_menu_item"><a target="_top" href="/kbk">Подбор КБК</a></div>
+															<div class="top_menu_item last_search_link"><a target="_top" href="/db/morphmerged/search">Последние результаты поиска</a></div>
+																				<div class="top_menu_item"><a target="_top" href="/news/subscription">Подписаться на рассылку</a></div>
+																								</div>
+			</div>
+			<script type="text/javascript">
+				document.getElementById('top_menu').style.setProperty('--menu-item-count', document.getElementsByClassName('top_menu_item').length);
+			</script>
+		</div>
+		<!-- /noindex -->			<script type="text/javascript">
+				if(window.performance
+				&& (performance.getEntriesByName || performance.getEntriesByType)
+				&& window.PerformancePaintTiming
+				&& window.requestAnimationFrame)
+					(function(){
+						var disableFaultyPaintReporting = function(){
+							if(performance.faultyPaintReportingDisabled)
+								return;
+							else if(document.visibilityState === 'hidden' && !performance.getEntriesByType('paint').length)
+								performance.faultyPaintReportingDisabled = document.prerendering ? 'prerender' : 'hidden';
+							else if(!('standalone' in navigator) && (!window.styleDeferred || !styleDeferred.waitingPaint))
+								requestAnimationFrame(function(){
+									requestAnimationFrame(function(){
+										setTimeout(function(){
+											if(performance.faultyPaintReportingDisabled || performance.getEntriesByType('paint').length)
+												return;
+											performance.faultyPaintReportingDisabled = 'timeout';
+										}, 500);
+									});
+								});
+						};
+						if(window.styleDeferred && !styleDeferred.inactive && !styleDeferred.usingShell){
+							styleDeferred.push(disableFaultyPaintReporting);
+							var splashPreload = document.getElementById('css_shell_splash_preload');
+							if(splashPreload)
+								splashPreload.onload = disableFaultyPaintReporting;
+						}
+						else
+							disableFaultyPaintReporting();
+					})();
+			</script>
+<script type="text/javascript">
+			deferred.push(function(){
+				App.navChainCarousel = new App.Carousel('navchain_inner', 'w_navchain', 'navchain_left', 'navchain_right', null, {
+					bypixel:false,
+					absolute:true,
+					step:1,
+					wrap:false
+				});
+				var navChain = SSP.DOM.byId('w_navchain');
+				SSP.DOM.listen(navChain, 'click', App.Handler.navChainClick);
+				if(SSP.Browser.hasTouchScreen)
+					SSP.DOM.listen(navChain, 'touchstart', App.Handler.navChainTouchStart);
+							});
+		</script><div id="navchain"><div class="navchain_carousel__navigation left disabled" id="navchain_left"></div><div id="navchain_inner">
+		<ol id="w_navchain" class="blank w" itemtype="http://schema.org/BreadcrumbList" itemscope><!--noindex-->
+<li itemprop="itemListElement" itemscope itemtype="http://schema.org/ListItem" class="inline-block">
+<a class="inline-block" href="/" id="navchain_level_1" target="_top" itemprop="item">Главная</a>
+<meta itemprop="name" content="Главная" />
+<meta itemprop="position" content="1" />
+</li>
+<!--/noindex-->
+<li itemprop="itemListElement" itemscope itemtype="http://schema.org/ListItem" class="inline-block">
+<a class="inline-block" href="/section/dev" id="navchain_level_2" target="_top" itemprop="item">Инструкции по разработке на 1С</a>
+<meta itemprop="name" content="Инструкции по разработке на 1С" />
+<meta itemprop="position" content="2" />
+</li>
+<li itemprop="itemListElement" itemscope itemtype="http://schema.org/ListItem" class="inline-block">
+<a class="inline-block" href="/section/dev/doc_dev" id="navchain_level_3" target="_top" title="Платформа 1С:Предприятие. Документация" itemprop="item">Платформа 1С:Предприятие. Документация</a>
+<meta itemprop="name" content="Платформа 1С:Предприятие. Документация" />
+<meta itemprop="position" content="3" />
+</li>
+<li itemprop="itemListElement" itemscope itemtype="http://schema.org/ListItem" class="inline-block">
+<a class="inline-block" href="/db/v8327doc" id="navchain_level_4" target="_top" title="Платформа 1С:Предприятие 8.3.27" itemprop="item">Платформа 1С:Предприятие 8.3.27</a>
+<meta itemprop="name" content="Платформа 1С:Предприятие 8.3.27" />
+<meta itemprop="position" content="4" />
+</li>
+<li itemprop="itemListElement" itemscope itemtype="http://schema.org/ListItem" class="inline-block">
+<a class="inline-block" href="/db/v8327doc/browse/13/-1/1" id="navchain_level_5" target="_top" title="Руководство разработчика" itemprop="item">Руководство разработчика</a>
+<meta itemprop="name" content="Руководство разработчика" />
+<meta itemprop="position" content="5" />
+</li>
+<li class="inline-block">
+<h1 class="inline-block" id="navchain_level_6" title="Глава 16. Работа с различными форматами данных"><noscript id="navchain_autofocus_noscript"><input class="autofocus_noscript" type="text" tabindex="-1" autofocus></noscript>Глава 16. Работа с различными форматами данных</h1>
+</li>
+<script type="text/javascript">
+	deferred.push(function(){
+		if(App.navChainCarousel)
+		{
+			App.navChainCarousel.adjust();
+						App.navChainCarousel.moveTo(5, App.Carousel.MOVETO_ALIGN_LEFT, true);
+		}
+	});
+	(function(){
+		var nans = document.getElementById('navchain_autofocus_noscript');
+		if(nans)
+			nans.parentNode.removeChild(nans);
+		var ribbon = document.getElementById('w_navchain');
+		ribbon.style.visibility = 'hidden';
+		var enableButton = function(id){
+			var button = document.getElementById(id);
+			if(button){
+				button.className = button.className.replace(/\bdisabled\b/g, ' ');
+				return true;
+			}
+		};
+		var removePseudo = function(){
+			document.documentElement.className = document.documentElement.className.replace(/(^|\s+)pseudo-navchain-chevron-(left|right)\b[^\s]*/g, ' ');
+			if(window.styleDeferred && !styleDeferred.inactive && styleDeferred.appendShell)
+				styleDeferred.appendShell('body::before{display:none}');
+		};
+		var adjustCarousel = function(isEager){
+			var style = ribbon.style;
+			if(style.display !== 'block')
+				style.display = 'block'
+			try{
+				var aperture = document.getElementById('navchain_inner');
+				var apertureRect = aperture.getBoundingClientRect();
+				var apertureSize = Math.round(apertureRect.right) - Math.round(apertureRect.left);
+				var ribbonSize = ribbon.scrollWidth;
+				if(ribbonSize > apertureSize){
+					var moveTo = ribbon.children[5];
+					var moveToRect = moveTo.getBoundingClientRect();
+					var ribbonPosition = Math.round(apertureRect.left) - Math.round(moveToRect.left);
+					var supportsTransform = window.CSS && CSS.supports && CSS.supports('transform: translate(0px, 0px)');
+					var existingMatch = supportsTransform ? style.transform.match(/^translate\((-?\d+[\.\d]*)px\b/) : style.left.match(/^(-?\d+[\.\d]*)px$/);
+					var existingPosition = existingMatch ? parseInt(existingMatch[1], 10) : 0;
+					if(existingPosition)
+						ribbonPosition += existingPosition;
+					if(ribbonPosition > 0)
+						ribbonPosition = 0;
+					else{
+						if(isEager && !document.getElementById('navchain_left'))
+							setTimeout(function(){
+								enableButton('navchain_left') || setTimeout(function(){enableButton('navchain_left')}, 0);
+							}, 0);
+						else
+							enableButton('navchain_left');
+					}
+					if(ribbonPosition < apertureSize - ribbonSize)
+						ribbonPosition = apertureSize - ribbonSize;
+					else{
+						if(isEager && !document.getElementById('navchain_right'))
+							setTimeout(function(){
+								enableButton('navchain_right') || setTimeout(function(){enableButton('navchain_right')}, 0);
+							}, 0);
+						else
+							enableButton('navchain_right');
+					}
+					if(window.requestAnimationFrame)
+						requestAnimationFrame(function(){
+							requestAnimationFrame(function(){
+								requestAnimationFrame(removePseudo);
+							});
+						});
+					else
+						setTimeout(removePseudo, 0);
+					if(ribbonPosition){
+						if(supportsTransform)
+							style.transform = 'translate(' + ribbonPosition + 'px, 0px)';
+						else
+							style.left = ribbonPosition + 'px';
+						if(window.App&&App.navChainCarousel)
+							App.navChainCarousel.syncPosition(ribbonPosition);
+					}
+				}
+			}catch(e){
+				console.log(e);
+			}
+			style.visibility = 'visible';
+			if(isEager && window.styleDeferred && !styleDeferred.inactive && styleDeferred.appendShell)
+				styleDeferred.appendShell('html::before{display:none}');
+		};
+		if(window.styleDeferred){
+			if(styleDeferred.waitingPaint)
+				;
+			else if(styleDeferred.inactive
+			|| styleDeferred.usingShell && ('standalone' in navigator || !document.documentElement.className.match(/(^|\s+)pseudo-navchain-chevron-right(\s+|$)/)))
+				adjustCarousel(true);
+			else
+				styleDeferred.push(adjustCarousel);
+			if(styleDeferred.waitingPaint || window.TouchEvent && 'standalone' in navigator){
+				var fonts = document.fonts;
+				if(fonts && (!fonts.check || !fonts.ready))
+					fonts = void 0;
+				var bodyFont = 'normal 400 1px Roboto';
+				var adjustCarouselWithFonts = function(){
+					if(fonts && 'standalone' in navigator){
+						if(fonts.check(bodyFont))
+							adjustCarousel();
+						else
+							fonts.ready.then(function(){
+								adjustCarousel();
+							});
+					}else
+						setTimeout(adjustCarousel, 0);
+				};
+				if(styleDeferred.waitingPaint)
+					var waitingPaintInterval = setInterval(function(){
+						if(styleDeferred.inactive
+						|| !styleDeferred.waitingPaint
+						|| window.PerformancePaintTiming && performance.getEntriesByType('paint').length && (!('standalone' in navigator) || fonts && fonts.check(bodyFont))){
+							clearInterval(waitingPaintInterval);
+							if(window.requestAnimationFrame)
+								requestAnimationFrame(function(){
+									requestAnimationFrame(adjustCarouselWithFonts);
+								});
+							else
+								setTimeout(adjustCarouselWithFonts, 0);
+							ribbon.className += ' not-waiting-paint';
+						}
+					}, 16);
+				else
+					setTimeout(adjustCarouselWithFonts, 0);
+			}
+		}
+		else
+			adjustCarousel(true);
+	})();
+</script>
+</ol>		</div><div class="navchain_carousel__navigation right disabled" id="navchain_right"></div></div>						<script type="text/javascript">
+				deferred.push(function(){try{SSP.Scroll.mimicByClass('mimic_scroll');}catch(e){}});
+							deferred.push(function(){if(!SSP.Browser.Android && !SSP.Browser.IOS && document.activeElement == document.body || document.activeElement == document.documentElement)SSP.DOM.requestAnimationFrame(function(){SSP.DOM.focus(SSP.DOM.byId('w_content'));});});
+						</script>
+<div id="w_content" class="l"><div id="l_classifier" class="l" style="display:none"></div><div id="l_content" class="l with-toc null" style="display:"><div id="l_doc" class="l" style="display:"><div id="l_doc_frame" class="l" data-db="v8327doc" data-doc="61" data-tab="hdoc" style="display:"><div id="l_doc_frame_inner" class="l loading null paywall" data-wait-fonts="" data-wait-images="" style="display:"><iframe id="w_metadata_doc_frame" class="l mimic_scroll" name="w_metadata_doc_frame" frameborder="0" scrolling="auto" title="Документ" src="/db/content/v8327doc/src/руководство разработчика/глава 16. работа с различными форматами данных.htm"></iframe></div><div id="w_metadata_doc_tabs" class="w null" style="display:none"></div><div id="w_metadata_doc_title" class="w" style="display:"><div id="doc_title" title="Глава 16. Работа с различными форматами данных"><!--noindex-->Глава 16. Работа с различными форматами данных<!--/noindex--></div><div id="l_doc_controls" class="l null"><div id="w_back_link" class="l"><a id="w_back_href" class="inline-block nojs l" href="javascript:history.back()" rel="nofollow" onClick="return window.App ? App.Its.Handler.backLinkClick.call(this, event) : true"><!--noindex-->Назад<!--/noindex--></a></div><div id="w_review_link" class="w" title="Оставить отзыв" style="display:none"><a href="/db/review/edit/v8327doc/61/1" class="popup" target="_top" rel="nofollow">&nbsp;</a></div><div id="w_review_likelink" class="w" title="Мне нравится" onClick="return App.Its.Handler.likeClick.call(this, event)" style="display:none"></div><div id="w_extended_search_button_doc" class="l" style="display:none"><a id="w_extended_search_href_doc" title="Расширенный поиск" class="inline-block l" target="_top" href="javascript:">&nbsp;</a></div><div id="w_metadata_findintoc" class="l" style="display:"><a id="w_metadata_findintoc_href" title="Оглавление" class="inline-block l" target="_top" href="/db/v8327doc/browse/13/-1/1" onclick="if(window.styleDeferred&amp;&amp;styleDeferred.usingShell&amp;&amp;!styleDeferred.inactive)return true;var lc=document.getElementById('l_content');lc.className=lc.className.replace(/\bhide-toc\b/,'');if(lc.className.match(/\bshow-toc\b/)){lc.className=lc.className.replace(/\bshow-toc\b/,'')}else{lc.className+=' show-toc'}return false" onmousedown="window.SSP&amp;&amp;window.App&amp;&amp;App.Its.Handler.findInTocMouseDown()">&nbsp;</a></div><div id="w_metadata_findinclassifier" class="l" style="display:"><a id="w_metadata_findinclassifier_href" title="Найти в содержании" class="inline-block l" target="_top" href="/db/v8327doc/browse/13/-1/1">&nbsp;</a></div><div id="w_metadata_archive_button" class="l" style="display:none"><a id="w_metadata_archive_href" target="_top" class="inline-block nojs l" title="Актуальность" rel="nofollow" href="javascript:" onClick="return App.Its.Handler.archiveButtonClick.call(this, event)" data-title>&nbsp;</a></div><div id="w_metadata_print_button" class="l"><a id="w_metadata_print_href" target="print" class="inline-block nojs l" title="Версия для печати" rel="nofollow" onClick="return App.Its.Handler.printButtonClick.call(this, event)" href="/db/content/v8327doc/src/руководство разработчика/глава 16. работа с различными форматами данных.htm#_print">&nbsp;</a></div><div id="w_favorite_link" class="w" title="Избранное" onClick="return App.Its.Handler.favoriteClick.call(this, event)" style="display:none"></div><select id="w_metadata_versionselect" class="w" onChange="return App.Its.Handler.versionSelectChange.call(this, event)" style="display:">	<option data-doc="18" data-dbnick="v854doc">8.5.4</option>
+	<option data-doc="19" data-dbnick="v851doc">8.5.1</option>
+	<option data-doc="61" data-dbnick="v8327doc" selected>8.3.27</option>
+	<option data-doc="55" data-dbnick="v8326doc">8.3.26</option>
+	<option data-doc="67" data-dbnick="v8325doc">8.3.25</option>
+	<option data-doc="67" data-dbnick="v8324doc">8.3.24</option>
+	<option data-doc="55" data-dbnick="v8323doc">8.3.23</option>
+	<option data-doc="55" data-dbnick="v8322doc">8.3.22</option>
+	<option data-doc="55" data-dbnick="v8321doc">8.3.21</option>
+	<option data-doc="55" data-dbnick="v8320doc">8.3.20</option>
+	<option data-doc="233" data-dbnick="v8319doc">8.3.19</option>
+	<option data-doc="321" data-dbnick="v8318doc">8.3.18</option>
+	<option data-doc="338" data-dbnick="v8317doc">8.3.17</option>
+	<option data-doc="336" data-dbnick="v8316doc">8.3.16</option>
+	<option data-doc="188" data-dbnick="v8315doc">8.3.15</option>
+	<option data-doc="18" data-dbnick="v8314doc">8.3.14</option>
+	<option data-doc="18" data-dbnick="v8313doc">8.3.13</option>
+	<option data-doc="18" data-dbnick="v8312doc">8.3.12</option>
+	<option data-doc="18" data-dbnick="v8311doc">8.3.11</option>
+	<option data-doc="120" data-dbnick="v8310doc">8.3.10</option>
+	<option data-doc="18" data-dbnick="v839doc">8.3.9</option>
+<script type="text/javascript">
+	deferred.push(function(){
+		var id = "w_metadata_versionselect";
+		SSP.DOM.Select.destroy(id);
+		SSP.DOM.Select.create(id);
+	});
+</script></select><div id="w_search_highlight" class="w null down" title="Подсветка найденного" onClick="return App.Its.Handler.searchHighlightClick.call(this, event)" style="display:none"></div></div></div></div><div id="l_toc" class="l" style="display:"><script type="text/javascript">(function(){if(window.styleDeferred && window.matchMedia && matchMedia('(max-width: 991px)').matches && !styleDeferred.inactive){var tocLayoutStyle = document.getElementById('l_toc').style;tocLayoutStyle.display = 'none';var show = function(){tocLayoutStyle.removeProperty('display');};styleDeferred.unshift(function(){if(window.SSP){show();}else{setTimeout(function(){if(window.SSP){show();}else{setTimeout(show, 0);}}, 0);}});}})();</script><div id="w_metadata_toc_button" class="l" onClick="var lc=document.getElementById('l_content');if(lc.className.match(/\bshow-toc\b/)){if(window.SSP&amp;&amp;window.App&amp;&amp;App.Viewport&amp;&amp;App.Viewport.hasShift&amp;&amp;App.Viewport.hasShift()&amp;&amp;App.Viewport.adjustLayout){App.Viewport.adjustLayout()}lc.className=lc.className.replace(/\bshow-toc\b/,'')}else if(lc.className.match(/\bhide-toc\b/)){lc.className=lc.className.replace(/\bhide-toc\b/,'')}else{lc.className+=' hide-toc'}" style="display:"><div id="toc_button_hide" title="Скрыть оглавление"></div><div id="toc_button_show" title="Показать оглавление"></div><noscript><style>#w_metadata_toc_button{display:none!important}</style></noscript></div><div id="l_toc_inner" class="l metadata-spacer native_scroll view-hideable view-expandable null"><div id="w_metadata_toc" class="w mimic_scroll" src="/db/metadata/v8327doc/toc/61_?_=1789134206" data-book="dev" data-deferred-media-query="(max-width: 991px)" style="display:"><ul class="tree top active tid"><li class="expanded active" id="toc_61_ti000001824"><a href="#TI000001824">Глава 16. Работа с различными форматами данных</a><ul><li class="collapsed" id="toc_61_ti000000762"><a href="#TI000000762">16.1. Механизм XDTO</a><ul><li id="toc_61_ti000001474"><a href="#TI000001474">16.1.1. Общая информация</a></li><li class="collapsed" id="toc_61_ti000000763"><a href="#TI000000763">16.1.2. Фабрика XDTO</a><ul><li id="toc_61_ti000001585"><a href="#TI000001585">16.1.2.1. Общая информация</a></li><li id="toc_61_ti000001586"><a href="#TI000001586">16.1.2.2. Получение фабрики XDTO из файла-схемы XSD</a></li><li id="toc_61_ti000000764"><a href="#TI000000764">16.1.2.3. Получение фабрики XDTO из нескольких источников</a></li><li id="toc_61_ti000002780"><a href="#TI000002780">16.1.2.4. Получение фабрики XDTO из объекта данных XDTO</a></li></ul></li><li class="collapsed" id="toc_61_ti000000765"><a href="#TI000000765">16.1.3. Типы данных XDTO</a><ul><li id="toc_61_ti000001710"><a href="#TI000001710">16.1.3.1. Общая информация</a></li><li id="toc_61_ti000000766"><a href="#TI000000766">16.1.3.2. Тип значения XDTO</a></li><li id="toc_61_ti000000767"><a href="#TI000000767">16.1.3.3. Тип объекта XDTO</a></li><li id="toc_61_ti000000768"><a href="#TI000000768">16.1.3.4. Свойство XDTO</a></li></ul></li><li class="collapsed" id="toc_61_ti000000769"><a href="#TI000000769">16.1.4. Экземпляры данных XDTO</a><ul><li id="toc_61_ti000000770"><a href="#TI000000770">16.1.4.1. Значение XDTO</a></li><li id="toc_61_ti000000771"><a href="#TI000000771">16.1.4.2. Объект XDTO</a></li><li id="toc_61_ti000000772"><a href="#TI000000772">16.1.4.3. Последовательность XDTO</a></li><li id="toc_61_ti000000773"><a href="#TI000000773">16.1.4.4. Список XDTO</a></li><li id="toc_61_ti000000774"><a href="#TI000000774">16.1.4.5. XРath</a></li></ul></li><li id="toc_61_ti000000775"><a href="#TI000000775">16.1.5. XML-сериализация на основе XDTO</a></li><li id="toc_61_ti000000776"><a href="#TI000000776">16.1.6. Рекомендации по оформлению схем XML</a></li><li class="collapsed" id="toc_61_ti000000777"><a href="#TI000000777">16.1.7. Правила проверки фабрики XDTO</a><ul><li id="toc_61_ti000000778"><a href="#TI000000778">16.1.7.1. Правила проверки непосредственно фабрики XDTO</a></li><li id="toc_61_ti000000779"><a href="#TI000000779">16.1.7.2. Правила проверки пакета XDTO</a></li><li id="toc_61_ti000000780"><a href="#TI000000780">16.1.7.3. Правила проверки типа значения XDTO</a></li><li id="toc_61_ti000000781"><a href="#TI000000781">16.1.7.4. Правила проверки типа объекта XDTO</a></li><li id="toc_61_ti000000782"><a href="#TI000000782">16.1.7.5. Правила ограничения фасетов</a></li></ul></li></ul></li><li class="collapsed" id="toc_61_ti000001490"><a href="#TI000001490">16.2. Работа с JSON</a><ul><li id="toc_61_ti000001491"><a href="#TI000001491">16.2.1. Общая информация</a></li><li id="toc_61_ti000002635"><a href="#TI000002635">16.2.2. Простая техника работы</a></li><li class="collapsed" id="toc_61_ti000001492"><a href="#TI000001492">16.2.3. Объектная техника работы</a><ul><li id="toc_61_ti000001493"><a href="#TI000001493">16.2.3.1. Общая информация</a></li><li id="toc_61_ti000001494"><a href="#TI000001494">16.2.3.2. Запись</a></li><li class="collapsed" id="toc_61_ti000001495"><a href="#TI000001495">16.2.3.3. Чтение</a><ul><li id="toc_61_ti000001583"><a href="#TI000001583">16.2.3.3.1. Общая схема</a></li><li id="toc_61_ti000001496"><a href="#TI000001496">16.2.3.3.2. Чтение с постобработкой</a></li><li id="toc_61_ti000001497"><a href="#TI000001497">16.2.3.3.3. Чтение с функцией восстановления</a></li></ul></li></ul></li><li class="collapsed" id="toc_61_ti000001578"><a href="#TI000001578">16.2.4. Работа с XDTO-объектами</a><ul><li id="toc_61_ti000001579"><a href="#TI000001579">16.2.4.1. Общая информация</a></li><li id="toc_61_ti000001580"><a href="#TI000001580">16.2.4.2. Запись</a></li><li id="toc_61_ti000001581"><a href="#TI000001581">16.2.4.3. Чтение</a></li></ul></li><li class="collapsed" id="toc_61_ti000001498"><a href="#TI000001498">16.2.5. Потоковая техника работы</a><ul><li id="toc_61_ti000001499"><a href="#TI000001499">16.2.5.1. Общая информация</a></li><li id="toc_61_ti000001500"><a href="#TI000001500">16.2.5.2. Запись</a></li><li id="toc_61_ti000001501"><a href="#TI000001501">16.2.5.3. Чтение</a></li></ul></li><li id="toc_61_ti000001502"><a href="#TI000001502">16.2.6. Совмещение техник</a></li></ul></li><li class="collapsed" id="toc_61_ti000001825"><a href="#TI000001825">16.3. Работа с двоичными данными</a><ul><li id="toc_61_ti000001826"><a href="#TI000001826">16.3.1. Общая информация</a></li><li id="toc_61_ti000001827"><a href="#TI000001827">16.3.2. Чтение двоичных данных</a></li><li id="toc_61_ti000001828"><a href="#TI000001828">16.3.3. Запись двоичных данных</a></li><li id="toc_61_ti000001829"><a href="#TI000001829">16.3.4. Работа с буфером двоичных данных</a></li><li id="toc_61_ti000001885"><a href="#TI000001885">16.3.5. Значения в двоичной и шестнадцатеричной системах и логические операции</a></li><li id="toc_61_ti000001830"><a href="#TI000001830">16.3.6. Особенности использования</a></li></ul></li><li class="collapsed" id="toc_61_ti000002221"><a href="#TI000002221">16.4. Работа с форматом PDF</a><ul><li id="toc_61_ti000002222"><a href="#TI000002222">16.4.1. Общая информация</a></li><li class="collapsed" id="toc_61_ti000002248"><a href="#TI000002248">16.4.2. Вложения</a><ul><li id="toc_61_ti000002223"><a href="#TI000002223">16.4.2.1. Запись вложений</a></li><li id="toc_61_ti000002224"><a href="#TI000002224">16.4.2.2. Чтение вложений</a></li></ul></li><li class="collapsed" id="toc_61_ti000002249"><a href="#TI000002249">16.4.3. Электронная цифровая подпись</a><ul><li id="toc_61_ti000002250"><a href="#TI000002250">16.4.3.1. Общая информация</a></li><li id="toc_61_ti000002251"><a href="#TI000002251">16.4.3.2. Добавление подписи</a></li><li id="toc_61_ti000002252"><a href="#TI000002252">16.4.3.3. Проверка подписи</a></li><li id="toc_61_ti000002400"><a href="#TI000002400">16.4.3.4. Добавление представления подписи</a></li></ul></li><li class="collapsed" id="toc_61_ti000002565"><a href="#TI000002565">16.4.4. Документ PDF</a><ul><li id="toc_61_ti000002566"><a href="#TI000002566">16.4.4.1. Общая информация</a></li><li id="toc_61_ti000002567"><a href="#TI000002567">16.4.4.2. Чтение и запись документа</a></li><li id="toc_61_ti000002568"><a href="#TI000002568">16.4.4.3. Работа с вложениями</a></li><li id="toc_61_ti000002809"><a href="#TI000002809">16.4.4.4. Страницы документа</a></li><li id="toc_61_ti000002569"><a href="#TI000002569">16.4.4.5. Работа с подписями и отображаемыми объектами</a></li><li id="toc_61_ti000002570"><a href="#TI000002570">16.4.4.6. Просмотр и печать документа</a></li></ul></li><li id="toc_61_ti000002602"><a href="#TI000002602">16.4.5. Прочие возможности</a></li></ul></li><li class="collapsed" id="toc_61_ti000002650"><a href="#TI000002650">16.5. Регулярные выражения</a><ul><li id="toc_61_ti000002651"><a href="#TI000002651">16.5.1. Общая информация</a></li><li id="toc_61_ti000002652"><a href="#TI000002652">16.5.2. Описание языка</a></li><li id="toc_61_ti000002653"><a href="#TI000002653">16.5.3. Работа с регулярными выражениями из встроенного языка</a></li><li class="collapsed" id="toc_61_ti000002654"><a href="#TI000002654">16.5.4. Примеры использования регулярных выражений</a><ul><li id="toc_61_ti000002655"><a href="#TI000002655">16.5.4.1. Общая информация</a></li><li id="toc_61_ti000002656"><a href="#TI000002656">16.5.4.2. Поиск нужных версий в массиве текста</a></li><li id="toc_61_ti000002657"><a href="#TI000002657">16.5.4.3. Поиск всех дат в тексте</a></li><li id="toc_61_ti000002658"><a href="#TI000002658">16.5.4.4. Поиск даты выпуска нужных версий</a></li><li id="toc_61_ti000002708"><a href="#TI000002708">16.5.4.5. Получение даты выпуска всех версий</a></li><li id="toc_61_ti000002659"><a href="#TI000002659">16.5.4.6. Фамилии с именами на определенную букву</a></li><li id="toc_61_ti000002660"><a href="#TI000002660">16.5.4.7. Проверка на номер телефона</a></li><li id="toc_61_ti000002661"><a href="#TI000002661">16.5.4.8. Получить номера телефонов из текста</a></li><li id="toc_61_ti000002662"><a href="#TI000002662">16.5.4.9. Проверка на URL</a></li><li id="toc_61_ti000002663"><a href="#TI000002663">16.5.4.10. Получить URL из текста</a></li><li id="toc_61_ti000002664"><a href="#TI000002664">16.5.4.11. Проверка корректности ввода адреса IPv4</a></li><li id="toc_61_ti000002665"><a href="#TI000002665">16.5.4.12. Проверка корректности ввода адреса IPv6</a></li><li id="toc_61_ti000002666"><a href="#TI000002666">16.5.4.13. Получить из текста все слова, написанные кириллицей</a></li><li id="toc_61_ti000002709"><a href="#TI000002709">16.5.4.14. Чтение конфигурационного файла</a></li></ul></li></ul></li><li class="collapsed" id="toc_61_ti000002764"><a href="#TI000002764">16.6. Работа с речью</a><ul><li id="toc_61_ti000002765"><a href="#TI000002765">16.6.1. Общая информация</a></li><li class="collapsed" id="toc_61_ti000002684"><a href="#TI000002684">16.6.2. Распознавание речи</a><ul><li id="toc_61_ti000002685"><a href="#TI000002685">16.6.2.1. Общая информация</a></li><li class="collapsed" id="toc_61_ti000002686"><a href="#TI000002686">16.6.2.2. Программный интерфейс</a><ul><li id="toc_61_ti000002687"><a href="#TI000002687">16.6.2.2.1. Общая информация</a></li><li id="toc_61_ti000002688"><a href="#TI000002688">16.6.2.2.2. Подключение к серверу работы с речью</a></li><li id="toc_61_ti000002689"><a href="#TI000002689">16.6.2.2.3. Распознавание речи</a></li><li id="toc_61_ti000002690"><a href="#TI000002690">16.6.2.2.4. Модели распознавания и работа с ними</a></li><li id="toc_61_ti000002691"><a href="#TI000002691">16.6.2.2.5. Дополнительные грамматики распознавания речи</a></li><li id="toc_61_ti000002692"><a href="#TI000002692">16.6.2.2.6. Перенос данных распознавания речи в другую информационную базу</a></li></ul></li></ul></li><li class="collapsed" id="toc_61_ti000002766"><a href="#TI000002766">16.6.3. Синтез речи</a><ul><li id="toc_61_ti000002767"><a href="#TI000002767">16.6.3.1. Общая информация</a></li><li id="toc_61_ti000002768"><a href="#TI000002768">16.6.3.2. Программный интерфейс</a></li></ul></li></ul></li><li class="collapsed" id="toc_61_ti000002787"><a href="#TI000002787">16.7. Работа с архивами</a><ul><li id="toc_61_ti000002788"><a href="#TI000002788">16.7.1. Общая информация</a></li><li id="toc_61_ti000002789"><a href="#TI000002789">16.7.2. Запись архива</a></li><li id="toc_61_ti000002790"><a href="#TI000002790">16.7.3. Чтение архива</a></li></ul></li></ul></li></ul><script type="text/javascript">
+		deferred.push(function(){
+			App.Viewport.attachToScroller('l_toc_inner', 'l_toc_inner');
+						if(SSP.DOM.byId('cms_remove_link'))
+				App.Its.Handler.CMSRefreshRemovedInfo();
+					});
+	</script></div></div></div></div></div><div id="l_search" class="l" style="display:none"></div><div id="l_extended_search" class="l" style="display:none"></div><div id="w_metadata_section" class="w"><div id="database_menu_section" data-section="dev/doc_dev" style="display:none"></div>
+<script type="text/javascript">
+	deferred.push(function(){
+				SSP.DOM.removeClass(SSP.DOM.byId('main_container'), 'sidebar-no-initial');
+			});
+</script></div><script type="text/javascript">
+	deferred.push(function()
+	{
+		App.Search.chatbotJs = 'https://portalchat.1c.ai/chatbot/widget/widget.js';
+		App.Search.chatbotCss = 'https://portalchat.1c.ai/chatbot/widget/style.css';
+
+		SSP.Bus.init(
+			'/db/',
+			['browse', 'content', 'bookmark', 'search', 'extsearch'],
+			App.Its.Router,
+			{"w_metadata_toc":{"5":{"listen":[{"event":"mouseover","callback":"App.Its.Handler.tocMouseOver"},{"event":"click","callback":"App.Its.Handler.tocClick"},{"event":"click","callback":"SSP.Tree.handleClick"}],"trigger":[]},"3":{"select":["toc_61_ti000001824"],"reload":["\/db\/metadata\/v8327doc\/toc\/61_?_=1789134206"]}},"w_metadata_toc_button":{"5":{"listen":[{"event":"click","callback":"App.Its.Handler.tocButtonClick"}],"trigger":[]},"3":{"reload":[null]}},"w_metadata_doc_frame":{"5":{"listen":[{"event":"DOMContentLoaded","callback":"App.Its.Handler.docFrameDOMContentLoaded"}],"trigger":[]}},"w_title":{"3":{"reload":[null]}},"w_navchain":{"3":{"reload":[null]}},"w_searchlink":{"3":{"reload":[null]}},"w_search":{"3":{"reload":[null]}},"w_main_tabclassifier":{"3":{"reload":[null]}},"w_main_tabdocument":{"3":{"reload":[null]}},"w_main_tabsearch":{"3":{"reload":[null]}},"w_metadata_doc_title":{"3":{"reload":[null]}},"w_review_link":{"3":{"reload":[null]}},"w_metadata_versionselect":{"3":{"reload":[null]}},"w_metadata_findinclassifier":{"3":{"reload":[null]}},"w_metadata_findintoc":{"3":{"reload":[null]}},"w_metadata_section":{"3":{"reload":[null]}}},
+			'/img/loading-tpt.gif',
+			false,
+			false,
+			["l_doc_frame_inner","search_filter_toggle"]		);
+		
+		
+		App.Its.Router.selectedTab = App.Its.Router.getRememberedTab();
+		
+		App.Its.Handler.listenBasket(false);
+	});
+</script>
+<script>
+	deferred.push(function()
+	{
+		SSP.DOM.triggerReflow();
+		setTimeout(function()
+		{
+			var match = App.Its.Router.match(App.Its.Router.toInternal(window.location.toString()));
+			if(match)
+			{
+				var content = SSP.Widget('l_content');
+				var classifier = SSP.Widget('l_classifier');
+				var search = SSP.Widget('l_search');
+				var extsearch = SSP.Widget('l_extended_search');
+				
+				if(content.node && content.getStyle('display') !== 'none'
+				|| classifier.node && classifier.getStyle('display') !== 'none'
+				|| search.node && search.getStyle('display') !== 'none'
+				|| extsearch.node && extsearch.getStyle('display') !== 'none')
+					;
+				else
+				{
+					if(match.context.mode === 'content' || match.context.mode === 'bookmark')
+						content.show();
+					else if(match.context.mode === 'browse')
+						classifier.show();
+					/*else if(match.context.mode === 'search')
+						search.show();*/
+					else if(match.context.mode === 'extsearch')
+						extsearch.show();
+				}
+			}
+			try
+			{
+				SSP.Scroll.mimicByClass('mimic_scroll');
+			}
+			catch(e)
+			{
+				//debugger;
+			}
+			if(!SSP.Browser.hasTouchScreen)
+				SSP.DOM.triggerReflow();
+		}, 1000);
+	});
+</script>
+<noscript><style>
+li.collapsed > ul
+{display:block!important}
+#w_search_history div.collapsed div,
+#w_search_history div.collapsed ul
+{display:block!important}
+ul.tree li.collapsed
+{background-image:none !important}
+#w_metadata_toc li.collapsed,
+#w_search_history div.collapsed,
+#w_search_history li.collapsed
+{background-image:url('/img_new/r_minus.png') !important}
+#w_metadata_toc a:active::before,
+#w_metadata_navtree a:active::before,
+#w_metadata_toc a:focus::before,
+#w_metadata_navtree a:focus::before
+{position:absolute;top:0;bottom:0;right:0;width:100vw;display:block;content:'';z-index:-2}
+#w_metadata_toc a:active,
+#w_metadata_toc a:active::before,
+#w_metadata_navtree a:active,
+#w_metadata_navtree a:active::before,
+#w_metadata_toc a:focus,
+#w_metadata_toc a:focus::before,
+#w_metadata_navtree a:focus,
+#w_metadata_navtree a:focus::before
+{background-color:#dedede}
+#l_toc_inner,
+#l_nav_inner
+{overflow:auto;padding-right:0}
+</style></noscript>
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "Article",
+    "mainEntityOfPage": {
+        "@type": "WebPage",
+        "@id": "https://its.1c.ru/db/v8327doc/bookmark/dev/TI000001824"
+    },
+    "headline": "Глава 16. Работа с различными форматами данных :: Руководство разработчика",
+    "image": [
+        "https://its.1c.ru/db/content/v8327doc/_metaimage/61/hdoc/696x394.png?_=0000005B1E792009-v2",
+        "https://its.1c.ru/img_new/logo_its_og_image_300.png?_=1686643598"
+    ],
+    "author": {
+        "@type": "Organization",
+        "name": "1С",
+        "url": "https://1c.ru/"
+    },
+    "publisher": {
+        "@type": "Organization",
+        "name": "1С",
+        "url": "https://1c.ru/",
+        "logo": {
+            "@type": "ImageObject",
+            "url": "https://its.1c.ru/img_new/logo_its_og_image_300.png?_=1686643598"
+        }
+    },
+    "isAccessibleForFree": "False",
+    "hasPart": {
+        "@type": "WebPageElement",
+        "isAccessibleForFree": "False",
+        "cssSelector": ".paywall"
+    },
+    "dateModified": "2026-08-31T00:00:00+03:00",
+    "articleSection": "1С:Предприятие 8.3.27. Документация"
+}
+</script>
+</div><!--noindex--><ul id="l_tabs" class="tab tab1 l"><li id="w_main_tabclassifier" class="w png null" style="display:"><span class="inline-block"><a href="/db/v8327doc/browse/13/-1/1" class="inline-block" target="_top">Содержание</a></span></li><li id="w_main_tabdocument" class="w png active" data-access="false" style="display:"><span class="inline-block"><a href="/db/v8327doc/content/61/1" class="inline-block" target="_top">Документ</a></span><script type="text/javascript">
+	deferred.push(function(){
+		var access = SSP.Widget('w_main_tabdocument').getData('access');
+		if(access === 'false'){
+			var frameWidget = SSP.Widget('l_doc_frame');
+			var dbnickDocIdTab = frameWidget.getData('db') + ':' + frameWidget.getData('doc') + ':' + frameWidget.getData('tab');
+			App.Its.Handler.restrictedDbnickDocTabIds[dbnickDocIdTab] = true;
+		}
+	});
+</script></li><li id="w_main_tabsearch" class="w png null" style="display:none"><span class="inline-block"><a href="/db/v8327doc/search" class="inline-block" target="_top" rel="nofollow">Результаты поиска</a></span><script type="text/javascript">
+deferred.push(function()
+{
+	if(SSP.Bus.cookie('SEARCH'))
+		document.getElementById('w_main_tabsearch').style.display = '';
+});
+</script></li><li id="w_main_tabextendedsearch" class="w png null" style="display:none"></li></ul><style>#l_tabs {display:none!important}</style><!--/noindex-->			<!--noindex-->
+			<div id="footer">
+				<div id="copyright">
+										&copy; Фирма «1С». Все права защищены									</div>
+			</div>
+			<!--/noindex-->
+						<!--noindex-->
+						<script type="text/javascript">
+				deferred.push(function(){
+					App.sidebarCarousel = new App.Carousel('sidebar_container', 'sidebar', 'sidebar_up_button', 'sidebar_down_button', null, {
+						vertical:true,
+						bypixel:true,
+						absolute:true,
+						step:38,
+						wrap:false
+					});
+				});
+			</script>
+			<div id="sidebar_container" data-nosnippet>
+						<script type="text/javascript">
+				(function(){
+					if(window.styleDeferred && styleDeferred.usingShell && !styleDeferred.inactive){
+						var sidebarContainerStyle = document.getElementById('sidebar_container').style;
+						sidebarContainerStyle.display = 'none';
+						var show = function(){
+							sidebarContainerStyle.removeProperty('display');
+						};
+						styleDeferred.unshift(function(){
+							if(window.SSP)
+								show();
+							else
+								setTimeout(show, 0);
+						});
+					}
+				})();
+			</script>
+							<div id="sidebar_close_button" onclick="var d=document,de=d.documentElement,db=d.body,rx=/\bshow-menu\b/,hc=db.className.match(rx);de.className=de.className.replace(rx, '');db.className=db.className.replace(rx, '');if(window.SSP&&window.App&&App.sidebarCarousel.getPosition()){App.sidebarCarousel.adjust()}"></div>
+				<div id="sidebar_up_button" class="sidebar_updown_button disabled"></div>
+				<div id="sidebar" class="sidebar_level0">
+					<div class="sidebar-main_container">
+						<div id="logo">
+							<a href="/" target="_top" title="Информационная система 1С:ИТС" class="logo_its"></a>
+							<a href="/" target="_top" title="Информационная система 1С:ИТС" class="hide_on_small">
+								<span class="about_its">
+									Информационная система 1С:ИТС								</span>
+							</a>
+						</div>
+						<div id="w_sidebar_search" class="w"><div id="search" class="logo search" onclick="!navigator.maxTouchPoints&&(!window.TouchEvent||!('standalone' in navigator))&&document.getElementById('sidebar_search_input').focus();">
+	<form id="sidebar_search_form" name="sidebar_search_form" method="GET" action="/db/v8327doc/search/all" autocomplete="off" target="_top">
+		<input id="sidebar_search_input" type="text" name="query" value="" spellcheck="false" autocapitalize="off" onclick="if(window.msCrypto || window.msWriteProfilerMark || window.TouchEvent && 'standalone' in navigator){document.getElementById('search').className=document.getElementById('search').className.replace(/(\b\hover\b|$)/g, ' hover ')}" data-autocomplete-notrim data-autocomplete-autosubmit data-autocomplete-cache data-autocomplete-suggest="sidebar_search_input_suggest" aria-label="Ввести поисковый запрос" placeholder="Поиск по сайту">
+		<input id="sidebar_search_reset" type="reset" onclick="if(!document.getElementById('sidebar_search_input').value){this.blur();document.documentElement.focus();if(window.msCrypto || window.msWriteProfilerMark || window.TouchEvent && 'standalone' in navigator){document.getElementById('search').className=document.getElementById('search').className.replace(/(\b\hover\b|$)/g, ' ')}}" value="" title="Очистить/Закрыть" aria-label="" class="logo close-submenu" tabindex="0">
+		<input type="submit" style="display:none">
+		<div class="autocomplete-suggests" style="display:none"><ul id="sidebar_search_input_suggest" class="clean" style="display:none"></ul></div>
+	</form>
+</div>
+<script type="text/javascript">
+	deferred.push(function(){
+		App.Search.chatbotJs = 'https://portalchat.1c.ai/chatbot/widget/widget.js';
+		App.Search.chatbotCss = 'https://portalchat.1c.ai/chatbot/widget/style.css';
+		setTimeout(
+			function(){
+				App.Search.init(false, 'sidebar_search_form', 'sidebar_search_input', true);
+				var autocomplete = '/search/autocomplete.json?site=ru&query={query}';
+				if(!SSP.Browser.hasKeyboard)
+					autocomplete = autocomplete.replace('?', '?noSwitch&');
+				SSP.Form.initAutocomplete('sidebar_search_input', autocomplete);
+			},
+			0
+		);
+	});
+</script></div>						<div id="w_sidebar_menu" class="w nofreezelayout">
+<div id="sidebar_main_menu" class="section strong">
+<a class="logo i1c further" target="_top" href="/section/i1c" data-autoclick-delay="1000" id="menu_element_i1c"><span>Инструкции по учету в программах 1С</span></a><a class="logo dev further" target="_top" href="/section/dev" data-autoclick-delay="1000" id="menu_element_dev"><span>Инструкции по разработке на 1С</span></a><a class="logo law further" target="_top" href="/section/law" data-autoclick-delay="1000" id="menu_element_law"><span>Консультации по законодательству</span></a><a class="logo books further" target="_top" href="/section/books" data-autoclick-delay="1000" id="menu_element_books"><span>Книги и периодика</span></a><a class="logo info further" target="_top" href="/section/info" data-autoclick-delay="1000" id="menu_element_info"><span>Справочная информация</span></a><a class="logo garant further" target="_top" href="/section/garant" data-autoclick-delay="1000" id="menu_element_garant"><span>База нормативных документов</span></a></div>
+<hr>
+<div id="sidebar_extra_menu" class="section">
+<a class="logo news" target="_top" href="/news"><span>Новости</span></a><a class="logo lector" target="_top" href="/lector"><span>1С:Лекторий</span></a><a class="logo action further" target="_top" href="/section/action" data-autoclick-delay="1000" id="menu_element_action"><span>Акции и конкурсы</span></a><a class="logo edu" target="_top" href="/db/sprinfo"><span>Курсы и экзамены 1С</span></a><a class="logo review" target="_top" href="/feedback"><span>Отзывы об ИТС</span></a><a class="logo aibot" target="_blank" href="https://portalchat.1c.ai" rel="noopener"><span>1С:Напарник ИТС</span></a><a class="logo bestpartner" target="_top" href="/partner/best"><span>Партнер года 2025</span></a></div>
+
+<div id="w_sidebar_section">
+	<div class="sidebar_shadow_left"></div>
+	<div id="sidebar_open_section" class="sidebar_shadow"></div>
+	<div id="sidebar_section_header" title=""></div>
+	<div id="sidebar_back_section" class="logo back-submenu"></div>
+	<div id="sidebar_close_section" class="logo close-submenu"></div>
+	<div class="sidebar-spacer l native_scroll">
+				<div id="sidebar_list">
+		</div>
+			</div>
+
+	<div id="w_sidebar_subsection">
+		<div class="sidebar_shadow"></div>
+		<div id="sidebar_subsection_header" title=""></div>
+		<div id="sidebar_back_subsection" class="logo back-submenu"></div>
+		<div id="sidebar_close_subsection" class="logo close-submenu"></div>
+		<div class="sidebar-spacer l native_scroll">
+						<div id="sidebar_sublist">
+			</div>
+					</div>
+	</div>
+
+</div>
+
+<script type="text/javascript">
+deferred.push(function()
+{
+	var deviceType = App.getCssDeviceType();
+	App.Sidebar.init('sidebar', 'w_sidebar_section', 'w_sidebar_subsection', 'database_menu_section', SSP.Browser.hasTouchScreen, undefined);
+	
+	});
+</script>
+
+</div>						<script type="text/javascript">
+							deferred.push(function(){SSP.DOM.listenAutoclick(SSP.DOM.byId('w_sidebar_menu'));});
+						</script>
+						<hr>
+						<div class="social_icons" id="sidebar_social_icons">
+										<a target="_top" href="javascript:" id="share_vk" class="share logo vk" title="Поделиться во Вконтакте">Вконтакте</a>
+									</div>
+						<hr id="top_menu_links_copy_hr">
+						<div id="top_menu_links_copy" class="section"></div>
+												<div class="sidebar-footer"></div>
+					</div>
+				</div>
+				<div id="sidebar_down_button" class="sidebar_updown_button disabled"></div>
+			</div>
+						<!--/noindex-->
+									<div id="cookie_consent_panel">
+				Мы используем файлы cookie.<br>
+				Продолжая находиться на сайте, вы соглашаетесь с этим<br>
+				на условиях, указанных по <a target="_top" href="/docs/policy/cookie">ссылке</a>.<br>
+				<div class="cookie_button_container">
+					<button id="cookie_consent" class="btn btn-default">Принимаю</button>
+				</div>
+			</div>
+			<script type="text/javascript">deferred.push(function(){App.CookieConsent.showPanel('cookie_consent_panel', 'cookie_consent', 'COOKIE_CONSENT');});</script>
+					</div>
+		<!--noindex-->
+		<script type="text/javascript">
+			(function(){
+				var links = document.getElementById('top_menu').getElementsByTagName('A');
+				var topMenuLinksCopy = document.getElementById('top_menu_links_copy');
+				for(var i = 0; i < links.length; i++){
+					var copy = document.createElement('A');
+					copy.href = links[i].href;
+					copy.target = links[i].target;
+					copy.rel = links[i].rel;
+					copy.className = links[i].parentNode.className.replace(/(^|\s)top_menu_item(\s|$)/, ' ');
+					var span = document.createElement('SPAN');
+					span.innerHTML = links[i].innerHTML;
+					copy.appendChild(span);
+					topMenuLinksCopy.appendChild(copy);
+				}
+			})();
+		</script>
+		<div id="w_popup" class="w box-shadow"><div id="popup_inner">
+	<div id="popup_controls">
+		<span id="popup_title"></span><a id="popup_close" href="javascript:"></a>
+	</div>
+	<div id="popup" tabindex="-1" class="l loading"></div>
+</div>
+<script type="text/javascript">
+	deferred.push(function(){
+		setTimeout(App.Popup.init, 0);
+	});
+</script></div>		<script type="text/javascript">
+			deferred.push(function(){
+				SSP.DOM.listen(SSP.DOM.byId('sidebar_social_icons'), 'click', App.Share.shareClick);
+			});
+		</script>
+		<script type="text/javascript">
+			deferred.push(function(){App.Stat.init('', '', '38953945', '', 'GA_PARAMS', 'USER_TYPE', {"net_cm":{"scope":"page","value":"broadband"},"net_rm":"navigate","net_aso":{"scope":"page","value":"Girey-net OOO"},"net_asn":{"scope":"page","value":"AS214975"},"user_segment":":UNAUTH:"}, false, false, false);});
+			</script>
+			<noscript>
+			<div><img src="https://mc.yandex.ru/watch/38953945" style="position:absolute; left:-9999px;" alt=""></div>
+		</noscript>
+				<noscript>
+					<div><img src="https://counter.yadro.ru/hit?r;uhttps%3A//its.1c.ru/db/v8327doc/bookmark/dev/TI000001824;h%u0413%u043B%u0430%u0432%u0430%2016.%20%u0420%u0430%u0431%u043E%u0442%u0430%20%u0441%20%u0440%u0430%u0437%u043B%u0438%u0447%u043D%u044B%u043C%u0438%20%u0444%u043E%u0440%u043C%u0430%u0442%u0430%u043C%u0438%20%u0434%u0430%u043D%u043D%u044B%u0445%20%3A%3A%201%u0421%3A%u041F%u0440%u0435%u0434%u043F%u0440%u0438%u044F%u0442%u0438%u0435%208.3.27.%20%u0414%u043E%u043A%u0443%u043C%u0435%u043D%u0442%u0430%u0446%u0438%u044F;0.24885610735456" style="position:absolute; left:-9999px;" alt=""></div>
+		</noscript>
+			<script type="text/javascript">
+			if('Notification' in window)
+				deferred.push(function(){
+					var initWebPush = function(){
+						SSP.DOM.requestIdleCallback(function(){
+							if(!document.cookie.match('WEBPUSH=0'))
+								SSP.DOM.requestIdleCallback(function(){
+									if('permissions' in navigator)
+										navigator.permissions.query({name: 'notifications'}).then(function(result){
+											result.state === 'granted' && SSP.DOM.requestIdleCallback(App.WebPush.init);
+										});
+									else if(Notification.permission === 'granted')
+										SSP.DOM.requestIdleCallback(App.WebPush.init);
+								});
+						});
+					};
+						initWebPush();
+				});
+		</script>
+		<noscript><style>
+			.noscript{display:inherit!important}
+			.script{display:none!important}
+			.w.loading > *,.l.loading > *{visibility:inherit}
+			.w.loading,.l.loading{cursor:inherit;background:inherit;background-position:inherit}
+			.l.loading{margin:inherit;padding:inherit}
+			#other_sites_link {display:none}
+			#contact {margin-top:12px}
+		</style></noscript>
+		<script type="text/javascript">
+			deferred.push(function(){App.Handler.initBodyCopy('Фирма «1С»')});
+		</script>
+		<script type="text/javascript">
+			(function(){
+				var resetScroll = function(){
+					var that = this;
+					that.scrollTop = 0;
+					setTimeout(function(){that.scrollTop = 0;}, 0);
+				};
+				var resetScrollers = [document.getElementById('main_container'), document.body, document.documentElement];
+				for(var i = 0; i < resetScrollers.length; i++)
+				{
+					resetScrollers[i].scrollTop = 0;
+					resetScrollers[i].addEventListener('scroll', resetScroll, false);
+				}
+				setTimeout(function(){
+					for(var i = 0; i < resetScrollers.length; i++)
+						resetScrollers[i].scrollTop = 0;
+				}, 0);
+			})();
+		</script>
+		<script type="text/javascript">
+			(function(){
+				if(!('serviceWorker' in navigator))
+					return;
+				
+				var initWebApp = function(){
+					try{navigator.serviceWorker.register('/sw.js').catch(function(){});}catch(e){}
+					
+					if(navigator.userAgentData && navigator.userAgentData.mobile
+					|| !navigator.userAgentData && (window.TouchEvent || !('standalone' in navigator)))
+						(function(){
+							var setManifest = function(){
+								var link = document.createElement('LINK');
+								link.rel = 'manifest';
+								link.href = '/manifest.json';
+								document.head.appendChild(link);
+							};
+							if('standalone' in navigator && window.styleDeferred && !styleDeferred.inactive)
+								styleDeferred.push(setManifest);
+							else
+								setManifest();
+						})();
+				};
+				
+				initWebApp();
+			})();
+		</script>
+		<script type="text/javascript">
+			(function(){
+				var testLink = document.createElement('LINK');
+				var probablySupportsPrefetch = !testLink.relList || !testLink.relList.supports || testLink.relList.supports('prefetch');
+				var prefetchUrl = function(url){
+					if(!probablySupportsPrefetch && window.fetch)
+						fetch(url);
+					else{
+						var link = document.createElement('LINK');
+						link.rel = 'prefetch';
+						link.href = url;
+						document.head.appendChild(link);
+					}
+				};
+				deferred.unshift(function(){
+					var urls = ["\/common\/page\/css\/1789134243\/main__new.css_?_=1789134243","\/common\/page\/js\/1789134243\/main__new.js_?_=1789134243","\/common\/page\/css\/1789134243\/user__new.css_?_=1789134243","\/common\/page\/css\/1789134243\/document__new.css_?_=1789134243","\/font\/futura\/FuturaDemiC.woff2","\/font\/roboto\/Roboto-Light.woff2","\/font\/roboto\/Roboto-Bold.woff2","\/font\/roboto\/Roboto-Italic.woff2","\/font\/roboto\/Roboto-Black.woff2","\/font\/futura\/FuturaLightC.woff2"];
+					for(var i = 0; i < urls.length; i++)
+						prefetchUrl(urls[i]);
+				});
+				if(!window.styleDeferred){
+					var urls = ["\/font\/roboto\/Roboto-Light.woff2","\/font\/roboto\/Roboto-Bold.woff2"];
+					for(var i = 0; i < urls.length; i++)
+						prefetchUrl(urls[i]);
+				}
+			})();
+		</script>
+		<script type="text/javascript">
+			deferred.push(function(){
+				var nc = navigator.connection, dp = document.prerendering;
+				if(SSP.Browser.Android
+				|| SSP.Browser.IOS
+				|| (nc && nc.effectiveType ? nc.effectiveType !== '4g' : SSP.DOM.hasClass(document.body, 'cellular')))
+					SSP.DOM.listen(document, 'visibilitychange', function(event){
+						if(document.visibilityState === 'hidden')
+							return;
+						if(dp){
+							dp = false;
+							return;
+						}
+						SSP.Bus.request('/ping');
+					});
+			});
+		</script>
+		<script id="end_of_body"></script>
+		<!--/noindex-->
+	</body>
+</html>

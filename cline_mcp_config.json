@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "1c-knowledge-base": {
+      "command": "python",
+      "args": [
+        "C:\\1C_LLM\\ckb\\server.py"
+      ],
+      "env": {},
+      "timeout": 60,
+      "disabled": false
+    }
+  }
+}
