@@ -11,6 +11,7 @@ from database import init_database
 from search import (search_docs, search_fragments, get_doc,
                     get_fragment_by_name, list_categories, get_import_log)
 from importers import import_markdown_files, import_html_files
+from loader import load_and_import, load_folder, add_knowledge_snippet, fix_knowledge_snippet, detect_category, detect_tags
 
 mcp = FastMCP("1c-knowledge-base")
 
@@ -154,6 +155,92 @@ def get_import_log_tool(limit: int = 20, status: str = None):
     except Exception as e:
         return f"Ошибка при получении журнала импорта: {str(e)}"
 
+
+
+
+
+# ============================================================
+# Новые MCP-инструменты для loader.py
+# ============================================================
+
+@mcp.tool()
+def load_from_url_tool(url: str):
+    """Загрузить документ по URL и импортировать в базу данных. Автоматически определяет формат (HTML/MD) и категорию."""
+    try:
+        result = load_and_import(url)
+        if result.success:
+            msg = f"Успешно загружено: {result.docs_imported} документов, {result.snippets_extracted} полезных фрагментов"
+        else:
+            msg = f"Ошибка загрузки. Ошибок: {result.errors}"
+            for err in result.error_messages:
+                msg += "\n  - " + err
+        return msg
+    except Exception as e:
+        return f"Ошибка при загрузке по URL '{url}': {str(e)}"
+
+
+@mcp.tool()
+def load_from_folder_tool(folder_path: str):
+    """Загрузить все поддерживаемые файлы (.html, .md, .docx, .txt, .pdf) из папки и импортировать в базу данных."""
+    try:
+        result = load_folder(folder_path)
+        if result.success:
+            msg = f"Импорт из '{folder_path}': {result.docs_imported} документов, {result.snippets_extracted} полезных фрагментов"
+        else:
+            msg = f"Ошибка импорта. Ошибок: {result.errors}"
+            for err in result.error_messages:
+                msg += "\n  - " + err
+        return msg
+    except Exception as e:
+        return f"Ошибка при импорте папки '{folder_path}': {str(e)}"
+
+
+@mcp.tool()
+def add_snippet_tool(question: str, answer: str, source_url: str = None, tags: str = None, confidence: float = 0.5):
+    """Добавить полезную пару вопрос-ответ в базу знаний (обратная связь)."""
+    try:
+        tag_list = [t.strip() for t in tags.split(',')] if tags else None
+        result = add_knowledge_snippet(question=question, answer=answer, source_url=source_url, tags=tag_list, confidence=confidence)
+        if result['success']:
+            return f"Запись добавлена! ID: {result['snippet_id']}"
+        else:
+            return f"Ошибка добавления: {result['error']}"
+    except Exception as e:
+        return f"Ошибка при добавлении записи: {str(e)}"
+
+
+@mcp.tool()
+def fix_snippet_tool(snippet_id: int, new_question: str = None, new_answer: str = None, reason: str = "Исправление"):
+    """Исправить существующую запись в базе знаний."""
+    try:
+        result = fix_knowledge_snippet(snippet_id=snippet_id, new_question=new_question, new_answer=new_answer, reason=reason)
+        if result['success']:
+            return f"Запись #{snippet_id} исправлена."
+        else:
+            return f"Ошибка исправления: {result['error']}"
+    except Exception as e:
+        return f"Ошибка при исправлении записи: {str(e)}"
+
+
+@mcp.tool()
+def detect_category_tool(text: str):
+    """Определить категорию документа по текстовому содержимому (language/platform/its/methodology)."""
+    try:
+        category = detect_category(text)
+        return f"Определённая категория: {category}"
+    except Exception as e:
+        return f"Ошибка определения категории: {str(e)}"
+
+
+@mcp.tool()
+def detect_tags_tool(text: str):
+    """Определить теги контента по текстовому содержимому (code/howto/syntax/error/solution/api/command)."""
+    try:
+        tags = detect_tags(text)
+        tag_str = ', '.join(tags) if tags else '(пусто)'
+        return f"Определённые теги: {tag_str}"
+    except Exception as e:
+        return f"Ошибка определения тегов: {str(e)}"
 
 def main():
     """Инициализация базы данных и запуск MCP-сервера."""

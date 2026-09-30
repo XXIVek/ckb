@@ -19,3 +19,35 @@ CREATE TABLE IF NOT EXISTS import_log (id SERIAL PRIMARY KEY, source_type VARCHA
 
 CREATE TABLE IF NOT EXISTS search_cache (id SERIAL PRIMARY KEY, query_hash CHAR(64) UNIQUE NOT NULL, result_ids INTEGER[], category_filter VARCHAR(50), created_at TIMESTAMP DEFAULT NOW(), expires_at TIMESTAMP);
 CREATE INDEX IF NOT EXISTS idx_search_cache_hash ON search_cache(query_hash);
+-- Таблица для сохранённых полезных пар вопрос-ответ (обратная связь)
+CREATE TABLE IF NOT EXISTS knowledge_snippets (
+    id SERIAL PRIMARY KEY,
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    source_url VARCHAR(2000),
+    local_path VARCHAR(2000),
+    tags TEXT[],
+    category VARCHAR(50) REFERENCES doc_categories(code),
+    confidence FLOAT DEFAULT 0.0,
+    is_verified BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_snippets_question_fts ON knowledge_snippets USING GIN(to_tsvector('russian', question));
+CREATE INDEX IF NOT EXISTS idx_snippets_answer_fts ON knowledge_snippets USING GIN(to_tsvector('russian', answer));
+CREATE INDEX IF NOT EXISTS idx_snippets_tags ON knowledge_snippets USING GIN(tags);
+CREATE INDEX IF NOT EXISTS idx_snippets_category ON knowledge_snippets(category);
+
+-- Таблица для отслеживания добавленных/исправленных записей (audit log)
+CREATE TABLE IF NOT EXISTS snippet_audit_log (
+    id SERIAL PRIMARY KEY,
+    snippet_id INTEGER REFERENCES knowledge_snippets(id),
+    action VARCHAR(20) NOT NULL,
+    old_question TEXT,
+    new_question TEXT,
+    old_answer TEXT,
+    new_answer TEXT,
+    reason TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+);
