@@ -1,4 +1,4 @@
-"""Парсеры для импорта документации из Markdown и HTML файлов."""
+"""Importers for Markdown and HTML documentation."""
 
 import os
 from pathlib import Path
@@ -9,26 +9,30 @@ from bs4 import BeautifulSoup
 
 import database
 
+try:
+    from loader import detect_tags
+except ImportError:
+    def detect_tags(text):
+        return []
 
-def _get_category_id(category_code: str) -> int:
-    """Получает ID категории по коду."""
+
+def _get_category_id(category_code):
     conn = database.get_connection()
     try:
         cur = conn.cursor()
         cur.execute("SELECT id FROM doc_categories WHERE code = %s", (category_code,))
         result = cur.fetchone()
         if not result:
-            raise ValueError(f"Категория '{category_code}' не найдена")
+            raise ValueError(f"Category '{category_code}' not found")
         return result[0]
     finally:
         database.release_connection(conn)
 
 
-def import_markdown_files(folder_path: str) -> Dict[str, int]:
-    """Импортирует все .md файлы из папки в базу данных."""
+def import_markdown_files(folder_path):
     folder = Path(folder_path)
     if not folder.exists():
-        raise FileNotFoundError(f"Папка не найдена: {folder_path}")
+        raise FileNotFoundError(f"Folder not found: {folder_path}")
     
     md_files = list(folder.rglob('*.md')) + list(folder.rglob('*.markdown'))
     stats = {'docs_imported': 0, 'errors': 0}
@@ -67,46 +71,35 @@ def import_markdown_files(folder_path: str) -> Dict[str, int]:
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    "INSERT INTO docs (category_id, title, content, source_url, local_path, tags) VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (local_path) DO UPDATE SET content = EXCLUDED.content, updated_at = NOW()",
+                    "INSERT INTO docs (category_id, title, content, source_url, local_path, tags) VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (local_path) DO UPDATE SET content = EXCLUDED.content, updated_at = NOW(), tags = EXCLUDED.tags",
                     (cat_id, title, raw_content, str(md_file), str(md_file.resolve()), tags)
                 )
                 conn.commit()
                 stats['docs_imported'] += 1
-                print(f"  Импорт: {md_file.name} -> '{title}' ({category_code})")
+                print(f"  Import: {md_file.name} -> '{title}' ({category_code})")
             finally:
                 database.release_connection(conn)
         except Exception as e:
             stats['errors'] += 1
-            print(f"  Ошибка импорта {md_file.name}: {e}")
+            print(f"  Error import {md_file.name}: {e}")
     
     return stats
 
-    return stats
 
-
-def import_html_files(folder_path: str, category_code: str = None) -> Dict[str, int]:
-    """Импортирует все .html/.htm файлы из папки в базу данных.
-    
-    Args:
-        folder_path: Путь к папке с HTML файлами.
-        category_code: Код категории (language/its/platform/methodology). 
-                       Если None, определяется из имени родительской папки.
-    """
+def import_html_files(folder_path, category_code=None):
     folder = Path(folder_path)
     if not folder.exists():
-        raise FileNotFoundError(f"Папка не найдена: {folder_path}")
+        raise FileNotFoundError(f"Folder not found: {folder_path}")
     
     html_files = list(folder.rglob('*.html')) + list(folder.rglob('*.htm'))
     stats = {'docs_imported': 0, 'errors': 0}
     
-    # Если категория не указана, определяем из имени папки
     if category_code is None:
         parent_name = folder.parent.name.lower()
         if parent_name in ('language', 'platform', 'its', 'methodology'):
             category_code = parent_name
         else:
-            # Пробуем найти по структуре пути
-            category_code = 'language'  # default
+            category_code = 'language'
     
     for html_file in html_files:
         try:
@@ -129,34 +122,34 @@ def import_html_files(folder_path: str, category_code: str = None) -> Dict[str, 
                 script.decompose()
             
             text_parts = []
-            for tag in soup.find_all(['p', 'h2', 'h3', 'h4', 'li', 'pre', 'blockquote']):
-                text = tag.get_text().strip()
+            for tag_elem in soup.find_all(['p', 'h2', 'h3', 'h4', 'li', 'pre', 'blockquote']):
+                text = tag_elem.get_text().strip()
                 if text:
                     text_parts.append(text)
             
             content = '\n\n'.join(text_parts)
+            tags = detect_tags(content)
             cat_id = _get_category_id(file_category)
             conn = database.get_connection()
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    "INSERT INTO docs (category_id, title, content, source_url, local_path) VALUES (%s, %s, %s, %s, %s) ON CONFLICT (local_path) DO UPDATE SET content = EXCLUDED.content, updated_at = NOW()",
-                    (cat_id, title, content, str(html_file), str(html_file.resolve()))
+                    "INSERT INTO docs (category_id, title, content, source_url, local_path, tags) VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (local_path) DO UPDATE SET content = EXCLUDED.content, updated_at = NOW(), tags = EXCLUDED.tags",
+                    (cat_id, title, content, str(html_file), str(html_file.resolve()), tags)
                 )
                 conn.commit()
                 stats['docs_imported'] += 1
-                print(f"  Импорт: {html_file.name} -> '{title}' ({category_code})")
+                print(f"  Import: {html_file.name} -> '{title}' ({category_code})")
             finally:
                 database.release_connection(conn)
         except Exception as e:
             stats['errors'] += 1
-            print(f"  Ошибка импорта {html_file.name}: {e}")
+            print(f"  Error import {html_file.name}: {e}")
     
     return stats
 
 
 def add_fragment(category_code, fragment_type, name, content, signature=None, related_doc_id=None):
-    """Добавить фрагмент (метод, тип, свойство)."""
     cat_id = _get_category_id(category_code)
     conn = database.get_connection()
     try:

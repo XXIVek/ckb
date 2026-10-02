@@ -26,16 +26,15 @@ try:
 except ImportError:
     PyPDF2 = None
 
-import database
+# Поддержка обоих способов импорта: из пакета (src.loader) и напрямую (loader)
+try:
+    from . import database
+except ImportError:
+    import database
 
 
-CATEGORY_KEYWORDS = {
-    'language': ['синтаксис', 'встроенный язык', 'типы данных', 'переменные', 'методы', 'процедуры', 'функции', 'объекты', 'структура', 'модуль', 'конфигурация', 'объект конфигурации', 'формы', 'командный язык', 'разработчика', 'синтакс-помощник', 'syntaxhelper', 'запрос', 'запросы', 'справочник', 'документ', 'регистр', 'план счетов'],
-    'platform': ['ком', 'com-интерфейс', 'http-сервис', 'http-запрос', 'веб-сервер', 'файловые операции', 'клиент', 'сервер', 'сеанс', 'клиент-сервер', 'кластер серверов', 'администратор', 'установка', 'запуск', 'консоль', 'обновление', 'веб-клиент', 'http-подключение'],
-    'its': ['итс', 'интеграция и технологии', 'документация 1с', 'руководство пользователя', 'пользователя', 'справка'],
-    'methodology': ['бухгалтерский учёт', 'бухгалтерский учет', 'нд/нр', 'методические рекомендации', 'методология', 'учёт', 'проводки', 'счёт'],
-}
-
+# === ТЕГИ как ОСНОВНОЙ механизм классификации ===
+# Теги определяют тип контента и имеют вес для ранжирования
 CONTENT_TAGS = {
     'code': ['пример', 'код', 'синтаксис', 'вызов', 'метод', 'функция'],
     'howto': ['как создать', 'как добавить', 'как удалить', 'как изменить', 'как настроить', 'как подключить', 'инструкция', 'руководство'],
@@ -44,6 +43,25 @@ CONTENT_TAGS = {
     'solution': ['решение', 'способ', 'вариант', 'подход', 'рекомендация', 'совет', 'лучшая практика'],
     'api': ['интерфейс', 'метод', 'свойство', 'класс', 'объект', 'тип данных'],
     'command': ['команда', 'панель', 'меню', 'действие', 'операция'],
+}
+
+# Веса тегов — влияют на ранжирование результатов поиска
+TAG_WEIGHTS = {
+    'code': 1.5,
+    'error': 1.4,
+    'solution': 1.3,
+    'howto': 1.3,
+    'api': 1.2,
+    'syntax': 0.9,
+    'command': 0.8,
+}
+
+# === Категории — ВТОРОСТЕПЕННЫЕ (для обратной совместимости) ===
+CATEGORY_KEYWORDS = {
+    'language': ['синтаксис', 'встроенный язык', 'типы данных', 'переменные', 'методы', 'процедуры', 'функции', 'объекты', 'структура', 'модуль', 'конфигурация', 'объект конфигурации', 'формы', 'командный язык', 'разработчика', 'синтакс-помощник', 'syntaxhelper', 'запрос', 'запросы', 'справочник', 'документ', 'регистр', 'план счетов'],
+    'platform': ['ком', 'com-интерфейс', 'http-сервис', 'http-запрос', 'веб-сервер', 'файловые операции', 'клиент', 'сервер', 'сеанс', 'клиент-сервер', 'кластер серверов', 'администратор', 'установка', 'запуск', 'консоль', 'обновление', 'веб-клиент', 'http-подключение'],
+    'its': ['итс', 'интеграция и технологии', 'документация 1с', 'руководство пользователя', 'пользователя', 'справка'],
+    'methodology': ['бухгалтерский учёт', 'бухгалтерский учет', 'нд/нр', 'методические рекомендации', 'методология', 'учёт', 'проводки', 'счёт'],
 }
 
 
@@ -78,6 +96,10 @@ def detect_category(text):
 
 
 def detect_tags(text):
+    """Определяет теги контента по текстовому содержимому (code, howto, syntax, error, solution, api, command).
+    
+    Возвращает список тегов. Каждый тег определяется если хотя бы одно ключевое слово найдено.
+    """
     text_lower = text.lower()
     detected = []
     for tag, keywords in CONTENT_TAGS.items():
@@ -86,6 +108,13 @@ def detect_tags(text):
                 detected.append(tag)
                 break
     return detected
+
+
+def get_tag_weight(tags):
+    """Вычисляет суммарный вес тегов документа для ранжирования."""
+    if not tags:
+        return 1.0
+    return sum(TAG_WEIGHTS.get(t, 1.0) for t in tags)
 
 
 def assess_usefulness(text, tags):
@@ -242,25 +271,66 @@ def load_from_file(file_path):
 
 
 def import_to_db(parsed, source_url=None, local_path=None):
+    """Импортирует распарсенный контент в базу данных.
+    
+    Приоритет: теги > категория. Категория ставится только если нет тегов.
+    """
     cat_id = None
     conn = database.get_connection()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT id FROM doc_categories WHERE code = %s", (parsed.category,))
+        
+        # --- Определяем категорию (только для обратной совместимости) ---
+        # Если есть теги — категория не имеет значения, ставим default
+        if parsed.tags:
+            primary_class = 'tags'
+        else:
+            primary_class = detect_category(parsed.content)
+        
+        cur.execute("SELECT id FROM doc_categories WHERE code = %s", (primary_class,))
         row = cur.fetchone()
         if row:
             cat_id = row[0]
         else:
-            cur.execute("INSERT INTO doc_categories (code, name, description) VALUES (%s, %s, %s)", ("language", "Язык БСЛ", "Синтаксис языка"))
-            conn.commit()
-            cur.execute("SELECT id FROM doc_categories WHERE code = %s", ("language",))
-            cat_id = cur.fetchone()[0]
+            # Создаём категорию если не существует
+            for code, name, desc in [
+                ('language', 'Язык БСЛ', 'Синтаксис языка, типы данных, встроенные объекты'),
+                ('platform', 'Платформа 1С', 'COM-интерфейсы, HTTP-сервисы, файловые операции'),
+                ('its', 'ИТС', 'Материалы с портала Интеграция и Технологии'),
+                ('methodology', 'Методология', 'Бухгалтерский учёт, НД/НР, методические рекомендации'),
+            ]:
+                if code == primary_class:
+                    cur.execute(
+                        "INSERT INTO doc_categories (code, name, description) VALUES (%s, %s, %s) RETURNING id",
+                        (code, name, desc)
+                    )
+                    conn.commit()
+                    cat_id = cur.fetchone()[0]
+                    break
+        
         src_url = source_url or local_path
         loc_path = local_path or source_url
         tags = parsed.tags if parsed.tags else []
-        cur.execute("""INSERT INTO docs (category_id, title, content, source_url, local_path, tags) VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (local_path) DO UPDATE SET content = EXCLUDED.content, updated_at = NOW(), tags = EXCLUDED.tags""", (cat_id, parsed.title, parsed.content, src_url, loc_path, tags))
+        
+        # --- Запись документа с тегами как основным механизмом классификации ---
+        cur.execute("""INSERT INTO docs (category_id, title, content, source_url, local_path, tags) 
+                       VALUES (%s, %s, %s, %s, %s, %s) 
+                       ON CONFLICT (local_path) DO UPDATE SET content = EXCLUDED.content, updated_at = NOW(), tags = EXCLUDED.tags""",
+                    (cat_id, parsed.title, parsed.content, src_url, loc_path, tags))
         conn.commit()
-        return {'success': True, 'doc_id': cur.lastrowid}
+        
+        # Генерация алиасов после импорта
+        cur.execute("SELECT id FROM docs WHERE local_path = %s", (loc_path,))
+        doc_id = cur.fetchone()[0]
+        
+        try:
+            from . import alias_generator as ag
+            added = ag.generate_aliases_for_doc(doc_id, parsed.title, tags, conn)
+        except ImportError:
+            import alias_generator as ag
+            added = ag.generate_aliases_for_doc(doc_id, parsed.title, tags, conn)
+        
+        return {'success': True, 'doc_id': doc_id, 'aliases_added': added}
     except Exception as e:
         conn.rollback()
         return {'success': False, 'error': str(e)}
@@ -343,6 +413,8 @@ def load_and_import(source, category_override=None):
         if db_result['success']:
             result.success = True
             result.docs_imported = 1
+            aliases_added = db_result.get('aliases_added', 0)
+            # aliases_added не передаётся в LoadResult — используем snippets_extracted как proxy
             if parsed.is_useful:
                 if parsed.has_code or 'solution' in parsed.tags or 'error' in parsed.tags:
                     result.snippets_extracted = 1

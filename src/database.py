@@ -89,7 +89,7 @@ def init_database():
     Вызывать при первом запуске или обновлении схемы.
     """
     # Подключаемся к default database 'postgres' для создания БД
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = psycopg2.connect(host='localhost', port=5432, dbname='postgres', user='postgres', password='Sta090860')
     conn.autocommit = True
     cur = conn.cursor()
 
@@ -126,11 +126,31 @@ def init_database():
                     print(f"Предупреждение при выполнении SQL: {e}")
         conn.commit()
         
-        # Проверяем, заполнены ли категории
+        # --- Инициализация тегов (основной механизм классификации) ---
+        cur.execute("SELECT COUNT(*) FROM doc_tags")
+        tag_count = cur.fetchone()[0]
+        if tag_count == 0:
+            STANDARD_TAGS = [
+                ('code', 'Примеры кода', 'Содержит примеры кода, фрагменты программ', 1.5),
+                ('howto', 'Инструкции', 'Пошаговые инструкции "как сделать"', 1.3),
+                ('syntax', 'Синтаксис', 'Описание синтаксиса, параметров, аргументов', 0.9),
+                ('error', 'Ошибки', 'Описания ошибок и способы их устранения', 1.4),
+                ('solution', 'Решения', 'Варианты решения проблем, рекомендации', 1.3),
+                ('api', 'API платформы', 'Описание интерфейсов, методов, свойств объектов', 1.2),
+                ('command', 'Команды интерфейса', 'Описание команд, меню, панелей действий', 0.8),
+            ]
+            for code, name, desc, weight in STANDARD_TAGS:
+                cur.execute(
+                    "INSERT INTO doc_tags (code, name, description, weight) VALUES (%s, %s, %s, %s)",
+                    (code, name, desc, weight)
+                )
+            conn.commit()
+            print("Теги инициализированы.")
+        
+        # --- Инициализация категорий (оставляем для обратной совместимости) ---
         cur.execute("SELECT COUNT(*) FROM doc_categories")
-        count = cur.fetchone()[0]
-        if count == 0:
-            # Вставляем начальные данные (повторно)
+        cat_count = cur.fetchone()[0]
+        if cat_count == 0:
             for code, name, desc in [
                 ('language', 'Язык БСЛ', 'Синтаксис языка, типы данных, встроенные объекты'),
                 ('platform', 'Платформа 1С', 'COM-интерфейсы, HTTP-сервисы, файловые операции'),
@@ -142,7 +162,7 @@ def init_database():
                     (code, name, desc)
                 )
             conn.commit()
-            print("Категории инициализированы.")
+            print("Категории инициализированы (для обратной совместимости).")
         
         print("База данных успешно инициализирована!")
         cur.close()
