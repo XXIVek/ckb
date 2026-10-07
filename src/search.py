@@ -118,7 +118,11 @@ def list_categories():
     conn = database.get_connection()
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("SELECT dc.*, (SELECT COUNT(*) FROM docs d WHERE d.category_id = dc.id) AS doc_count, (SELECT COUNT(*) FROM doc_fragments df WHERE df.category_id = dc.id) AS fragment_count FROM doc_categories dc ORDER BY dc.code")
+        # groups вместо docs (docs удалена)
+        cur.execute("""SELECT dc.code, dc.name, dc.description,
+                        (SELECT COUNT(*) FROM groups g WHERE %s = ANY(g.tags)) AS doc_count,
+                        (SELECT COUNT(*) FROM knowledge_snippets ks) AS fragment_count
+                   FROM doc_categories dc ORDER BY dc.code""", ('language',))
         results = cur.fetchall()
         cur.close()
         return [dict(r) for r in results]

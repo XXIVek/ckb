@@ -1,5 +1,5 @@
--- 1C Knowledge Base Schema (local_doc) v2
--- Основная структура: группы -> элементы, сниппеты, алиасы
+-- 1C Knowledge Base Schema (local_doc) v3 — объединённая схема алиасов
+-- Основная структура: группы -> сниппеты, алиасы в alias_targets
 
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
@@ -35,39 +35,25 @@ CREATE TABLE IF NOT EXISTS groups (
     name VARCHAR(1000) NOT NULL,
     description TEXT,
     tags TEXT[],
+    pagetitle VARCHAR(1000),
+    title VARCHAR(1000),
+    versionInfo VARCHAR(200),
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_groups_name_fts ON groups USING GIN(to_tsvector('russian', name));
+CREATE INDEX IF NOT EXISTS idx_groups_pagetitle_fts ON groups USING GIN(to_tsvector('russian', pagetitle));
 CREATE INDEX IF NOT EXISTS idx_groups_tags ON groups USING GIN(tags);
 CREATE INDEX IF NOT EXISTS idx_groups_parent ON groups(parent_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_groups_name_parent ON groups (name, parent_id) WHERE parent_id IS NULL;
 
 -- ============================================
--- ЭЛЕМЕНТЫ — элементы справки, подчинённые группам
--- ============================================
-CREATE TABLE IF NOT EXISTS elements (
-    id SERIAL PRIMARY KEY,
-    group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-    name VARCHAR(1000) NOT NULL,
-    content TEXT,
-    tags TEXT[],
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_elements_name_fts ON elements USING GIN(to_tsvector('russian', name));
-CREATE INDEX IF NOT EXISTS idx_elements_content_fts ON elements USING GIN(to_tsvector('russian', content));
-CREATE INDEX IF NOT EXISTS idx_elements_tags ON elements USING GIN(tags);
-CREATE INDEX IF NOT EXISTS idx_elements_group ON elements(group_id);
-CREATE INDEX IF NOT EXISTS idx_elements_name_trgm ON elements USING gist (name gist_trgm_ops);
-
--- ============================================
--- СНИППЕТЫ — примеры кода, привязанные к элементам
+-- СНИППЕТЫ — примеры кода, привязанные к группам
 -- ============================================
 CREATE TABLE IF NOT EXISTS knowledge_snippets (
     id SERIAL PRIMARY KEY,
-    element_id INTEGER REFERENCES elements(id) ON DELETE CASCADE,
+    groups_id INTEGER REFERENCES groups(id) ON DELETE CASCADE,
     question TEXT NOT NULL,
     answer TEXT NOT NULL,
     source_url VARCHAR(2000),
@@ -81,7 +67,7 @@ CREATE TABLE IF NOT EXISTS knowledge_snippets (
 CREATE INDEX IF NOT EXISTS idx_snippets_question_fts ON knowledge_snippets USING GIN(to_tsvector('russian', question));
 CREATE INDEX IF NOT EXISTS idx_snippets_answer_fts ON knowledge_snippets USING GIN(to_tsvector('russian', answer));
 CREATE INDEX IF NOT EXISTS idx_snippets_tags ON knowledge_snippets USING GIN(tags);
-CREATE INDEX IF NOT EXISTS idx_snippets_element ON knowledge_snippets(element_id);
+CREATE INDEX IF NOT EXISTS idx_snippets_groups ON knowledge_snippets(groups_id);
 
 -- ============================================
 -- АУДИТ СНИППЕТОВ — история изменений
@@ -99,20 +85,31 @@ CREATE TABLE IF NOT EXISTS snippet_audit_log (
 );
 
 -- ============================================
--- АЛИАСЫ — поиск по синонимам для групп, элементов и сниппетов
+-- АЛИАСЫ — объединённая таблица поиска по синонимам
+-- target_type: 'group' или 'snippet'
+-- groups_id / snippets_id: заполняется только один в зависимости от target_type
+-- Partial unique индексы решают проблему NULL
 -- ============================================
-CREATE TABLE IF NOT EXISTS search_aliases (
+CREATE TABLE IF NOT EXISTS alias_targets (
     id SERIAL PRIMARY KEY,
     alias_name VARCHAR(500) NOT NULL,
-    target_type VARCHAR(50) NOT NULL CHECK (target_type IN ('group', 'element', 'snippet')),
-    target_id INTEGER NOT NULL,
+    target_type VARCHAR(20) NOT NULL CHECK (target_type IN ('group', 'snippet')),
+    groups_id INTEGER REFERENCES groups(id) ON DELETE CASCADE,
+    snippets_id INTEGER REFERENCES knowledge_snippets(id) ON DELETE CASCADE,
+    tags TEXT[],
     weight DOUBLE PRECISION DEFAULT 1.0,
-    active BOOLEAN DEFAULT true,
-    description TEXT,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_aliases_name_fts ON search_aliases USING GIN (to_tsvector('russian', alias_name));
-CREATE INDEX IF NOT EXISTS idx_aliases_active ON search_aliases (active);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_alias_target ON search_aliases (alias_name, target_type);
+-- Partial unique индексы (NULL не участвует в уникальности)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_alias_group ON alias_targets (alias_name, groups_id) WHERE groups_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_alias_snippet ON alias_targets (alias_name, snippets_id) WHERE snippets_id IS NOT NULL;
+
+-- Индексы для быстрого поиска по ID
+CREATE INDEX IF NOT EXISTS idx_alias_groups ON alias_targets(groups_id);
+CREATE INDEX IF NOT EXISTS idx_alias_snippets ON alias_targets(snippets_id);
+
+-- Полнотекстовый индекс для быстрого поиска по алиасам
+CREATE INDEX IF NOT EXISTS idx_alias_fts ON alias_targets USING GIN(to_tsvector('russian', alias_name));
+

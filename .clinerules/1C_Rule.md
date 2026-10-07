@@ -1,116 +1,208 @@
 # Инструкции для AI ассистента — MCP 1C Knowledge Base
 
 ## Роль
-MCP-сервер для хранения и поиска документации по платформе 1С:Предприятие.
+MCP-сервер для хранения и поиска документации по платформе 1С:Предприятие (BSL + конфигурации).
 
-## База данных
-- **Host:** localhost:5432
-- **Database:** local_doc
-- **User:** postgres
-- **Password:** Sta090860
+---
 
-## psql (локальный клиент PostgreSQL)
-- **Путь:** `C:\Postgres\bin\psql.exe`
-- **Команда:** `C:\Postgres\bin\psql.exe -U postgres -d local_doc`
-- **Пароль для psql:** Sta090860
+## 🗄️ АКТУАЛЬНОЕ СОСТОЯНИЕ БАЗЫ ДАННЫХ
 
-## Текущее состояние БД (после сессии 01.10.2026)
-| Таблица | Строк | Примечание |
+### local_doc (PostgreSQL localhost:5432)
+| Таблица | Строк | Назначение |
 |---------|-------|------------|
-| docs | **446** | Главы 20, 5, 7, 28 загружены + ~390 подразделов |
-| doc_fragments | **165** | Методы из Глав 5, 7 |
-| search_aliases | **1 258+** | Алиасы для поиска |
-| knowledge_snippets | **31** | Примеры кода |
-| doc_categories | **4** | language/platform/its/methodology |
+| **groups** | **0** | Каждый HTML-файл = одна группа (pagetitle, title, versionInfo, description=body HTML) |
+| **knowledge_snippets** | **0** | Вопрос-ответ с примером кода, привязка к groups_id |
+| **alias_targets** | **0** | Связи алиасов с группами/сниппетами |
+| **doc_categories** | **4** | language / platform / its / methodology |
+| **doc_tags** | **-** | Теги классификации |
 
-## Загруженные главы
-| Глава | Размер | Страниц | Документов | Фрагментов | Алиасов | Статус |
-|-------|--------|---------|------------|------------|---------|--------|
-| 20 (Полнотекстовый поиск) | 0.25 МБ | 9 | 11 | 1 | — | ✅ загружена |
-| 5 (Объекты конфигурации) | 6.42 МБ | 224 | 109 | 25 | 615 | ✅ загружена |
-| 7 (Формы) | 6.60 МБ | 200 | 120 | 52 | 637 | ✅ загружена |
-| 28 (Мобильные устройства) | 4.11 МБ | 159 | 80 | 0 | 384 | ✅ загружена |
+### Configurations (PostgreSQL localhost:5432)
+| Таблица | Назначение |
+|---------|-----------|
+| **configuration** | Справочник загруженных баз/расширений |
+| **configuration_objects** | Объекты конфигурации (справочники, документы, регистры) |
+| **bsl_modules** | Код BSL-модулей |
+| **enum_values** | Значения перечислений |
+| **cross_references** | Связи документации с объектами конфигурации |
 
-## Не загруженные файлы
-- **PDF:** ~50 файлов в `docs/pdf/` (Главы 1-4, 6, 8-19, 21-27, 29-39 + Приложения)
-- **HTML:** 128 файлов в `docs/html/its/` — использовать MCP `import_html_files()`
+### ❌ НЕ СУЩЕСТВУЮТ (удалены 06.10.2026)
+- `elements`, `docs`, `doc_fragments` — **НЕ ИСПОЛЬЗОВАТЬ**
+- `search_aliases` — удалена, используется `alias_targets`
 
-## Категоризация документов
-- **language (213 док):** Встроенный язык, объекты конфигурации, справочники, регистры, константы
-- **platform (20 док):** Формы, интерфейсы, веб-клиент, компоновка данных
-- **its / methodology:** Автоматическое распределение при загрузке новых глав
+Правильный запуск psql.exe
+$env:PGPASSWORD='Sta090860'; C:\Postgres\bin\psql.exe
 
-## PDF Parser — ключевые изменения
-- **pypdf** для извлечения текста (в 2x быстрее pdfplumber)
-- **Чанкинг по 80 страниц** для больших файлов (>5 МБ)
-- **Batch-вставка** через executemany в loader
-- **Text-based code extraction** — отказ от pdfplumber.extract_tables() (слишком медленный >30 сек)
+## 📁 СТРУКТУРА ПРОЕКТА (C:\1C_LLM\ckb\)
 
-## Команды для работы
-
-### Загрузка PDF (большой файл >5 МБ):
+```text
+├── server.py                      ← MCP 1c-knowledge-base (10 tools)
+├── server_configurations.py       ← MCP 1c-configurations-base (11 tools)
+├── validate_project.py            ← Скрипт валидации
+├── LOAD_RULES.md                  ← Правила загрузки документации
+├── SEARCH_RULES.md                ← Правила поиска информации
+├── LOAD_RULES_Config.md           ← Правила загрузки конфигураций
+├── src/
+│   ├── config_tools.py            ← 5 функций для Configurations DB
+│   ├── config_extra.py            ← 6 функций для Configurations DB
+│   ├── database.py                ← Подключение к PostgreSQL (local_doc)
+│   ├── mcp_tools_api.py           ← API функции для knowledge-base
+│   ├── mcp_tools_batch.py         ← Batch-вставка групп/алиасов/сниппетов
+│   ├── mcp_tools_loader.py        ← Загрузка документов (PDF/HTML/MD)
+│   ├── loader_core.py             ← Вспомогательные функции загрузки
+│   ├── loader_extractors.py       ← Извлечение данных из файлов
+│   ├── loader_import.py           ← Импорт файлов
+│   ├── loader.py                  ← Вспомогательные функции загрузки
+│   ├── search.py                  ← Поиск по local_doc (groups + snippets)
+│   ├── alias_generator.py         ← Генерация алиасов
+│   ├── aliases.py                 ← Работа с алиасами
+│   ├── importers.py               ← Импортеры
+│   ├── load_bsl_v2.py             ← Парсер BSL HTML (batch 500/пачка)
+│   ├── mcp_tools_core.py          ← Core MCP инструменты
+│   ├── mcp_tools_loader_backup.py ← Резервная копия загрузчика
+│   ├── pdf_loader.py              ← Загрузка PDF
+│   ├── pdf_parser.py              ← Парсер PDF
+│   ├── pdf_parser_core.py         ← Core PDF парсер
+│   ├── pdf_parser_enhanced.py     ← Улучшенный PDF парсер
+│   └── pdf_parser_new.py          ← Новый PDF парсер
+├── tools/                         ← Вспомогательные инструменты
+├── docs/                          ← Документация
+└── .clinerules/
+    └── 1C_Rule.md                 ← ЭТОТ ФАЙЛ (правила для AI)
 ```
-# 1. Скопировать в локальную директорию
-Copy-Item "C:\path\to\large.pdf" "C:\1C_LLM\ckb\chapterX.pdf" -Force
 
-# 2. Распарсить
-cd C:\1C_LLM\ckb; python parse_chapterX.py
+**Всего Python-файлов в src/:** 23  
+**Важно:** Исходники документации (`C:\1C_LLM\LoadDoc\`) хранятся вне проекта.
 
-# 3. Загрузить в БД
-cd C:\1C_LLM\ckb; python load_chapterX.py
-```
+---
 
-### Проверка состояния:
-```
-python check_content.py
-```
+## 🏗 АРХИТЕКТУРА: ДВА НЕЗАВИСИМЫХ MCP-СЕРВЕРА
 
-### Поиск через MCP:
-- `search_docs(query, category, limit)` — поиск по документации
-- `get_doc(doc_id)` — получить документ по ID
-- `list_categories()` — список категорий
+### 1. 1c-knowledge-base (server.py)
+**База данных:** `local_doc` | **Инструменты:** 11 tools (+ load_single_html_tool)
 
-## MCP-инструменты
+| Инструмент | Назначение |
+|-----------|-----------|
+| `load_single_html_tool(filepath, category?)` | **Загрузить одиночный HTML-файл** |
+| `load_doc_tool(path, category)` | Загрузка документов из директории (.html, .pdf, .md) |
+| `load_bsl_tool(path)` | Загрузка формализованной структуры BSL (objects/ + tables/) |
+| `add_snippet_tool(question, answer, ...)` | Добавить вопрос-ответ с кодом |
+| `detect_tags_tool(text)` | Определить теги контента |
+| `search_docs_tool(query, category?, limit?)` | Комбинированный поиск по группам и сниппетам |
+| `get_doc_tool(doc_id)` | Полная группа по ID |
+| `get_db_state_tool()` | Состояние БД local_doc |
+| `list_categories_tool()` | Список категорий документации |
+| `get_load_rules_tool()` | Содержимое LOAD_RULES.md |
+| `get_search_rules_tool()` | Содержимое SEARCH_RULES.md |
 
-### search_docs(query, category, limit)
-Поиск по всей документации. Возвращает список документов с фрагментами.
-- query — поисковый запрос (обязательно)
-- category — фильтр по категории (опционально): language, platform, its, methodology
-- limit — ограничение количества результатов (по умолчанию 20)
+### 2. 1c-configurations-base (server_configurations.py)
+**База данных:** `configurations` | **Инструменты:** 11 tools
 
-### get_doc(doc_id)
-Получить полный текст документа по ID. Возвращает title, content, metadata.
+| Инструмент | Назначение |
+|-----------|-----------|
+| `register_configuration_tool(source_path, dump_file?)` | Зарегистрировать новую конфигурацию из папки выгрузки |
+| `batch_index_from_dump_tool(config_id, type_filter?)` | Пакетная индексация объектов из ConfigDumpInfo.xml |
+| `list_configurations_tool(status?)` | Список всех загруженных 1C-конфигураций |
+| `get_configuration_tool(config_id)` | Детальная информация о конфигурации |
+| `search_config_objects_tool(query, config_id?)` | Поиск объектов по имени ИЛИ описанию |
+| `get_object_structure_tool(config_id, object_name)` | Получить структуру объекта |
+| `list_config_objects_tool(config_id, object_type?)` | Список объектов конфигурации по типу |
+| `search_bsl_code_tool(query, config_id?)` | Поиск по коду BSL-модулей |
+| `get_enum_values_tool(config_id, enum_name?)` | Получить все значения перечисления |
+| `register_cross_reference_tool(...)` | Связать элемент документации с объектом конфигурации |
+| `get_cross_references_tool(local_doc_element_id)` | Получить все связи элемента документации |
 
-### list_categories()
-Список всех категорий документации.
+---
 
-### get_fragment_by_name(fragment_type, name)
-Найти фрагмент (метод, тип данных, свойство) по имени.
-- fragment_type: method, type, property, constant, event, command
-- name — имя фрагмента
+## 🔑 ВСПОМОГАТЕЛЬНЫЕ МОДУЛИ (src/)
 
-### search_fragments(query, fragment_type, limit)
-Поиск фрагментов по тексту содержимого.
+### config_tools.py (5 функций)
+| Функция | Назначение |
+|---------|-----------|
+| `list_configurations(status?)` | Список конфигураций |
+| `get_configuration(config_id)` | Детали конфигурации |
+| `search_config_objects(query, config_id?)` | Поиск объектов |
+| `get_object_structure(config_id, object_name)` | Структура объекта |
+| `list_config_objects(config_id, object_type?)` | Список объектов по типу |
 
-### import_markdown_files(folder_path)
-Импортировать все .md файлы из папки в базу данных.
+### config_extra.py (6 функций)
+| Функция | Назначение |
+|---------|-----------|
+| `search_bsl_code(query, config_id?)` | Поиск BSL-кода |
+| `get_enum_values(config_id, enum_name?)` | Значения перечислений |
+| `register_configuration(source_path, dump_file?)` | Регистрация конфигурации |
+| `batch_index_from_dump(config_id, type_filter?)` | Пакетная индексация |
+| `register_cross_reference(...)` | Создание связей cross-reference |
+| `get_cross_references(local_doc_element_id)` | Получение связей |
 
-### import_html_files(folder_path)
-Импортировать все .html/.htm файлы из папки в базу данных.
+### mcp_tools_api.py (4 функции)
+| Функция | Назначение |
+|---------|-----------|
+| `add_snippet()` | Добавление сниппета |
+| `get_db_state()` | Состояние БД |
+| `get_group(group_id)` | Получение группы |
+| `search_docs(query, category?, limit?)` | Комбинированный поиск |
 
-### get_import_log(limit, status)
-Журнал выполненных импортов.
-- limit — количество записей (по умолчанию 20)
-- status — фильтр по статусу (success, partial, error)
+### mcp_tools_loader.py (2 функции)
+| Функция | Назначение |
+|---------|-----------|
+| `load_files(path, category)` | Загрузка файлов |
+| `load_bsl_docs(path)` | Загрузка BSL-документации |
 
-## Категории документации
-- **language** — Язык БСЛ (синтаксис, типы данных, встроенные объекты)
-- **platform** — Платформа 1С (COM, HTTP, файловые операции)
-- **its** — Материалы с портала ИТС
-- **methodology** — Методология (бухгалтерский учёт, НД/НР)
+### loader.py (1 функция)
+| Функция | Назначение |
+|---------|-----------|
+| `detect_tags(text)` | Определение тегов контента |
 
-## Важные замечания
-- Все поисковые запросы работают на русском языке
-- Полнотекстовый индекс настроен для русского языка (tsvector 'russian')
-- Фрагменты — это мелкая гранулярность: методы, типы, свойства объектов платформы
-- Документы — это статьи и инструкции (крупная гранулярность)
+---
+
+## ⚠️ КРИТИЧЕСКИЕ ОГРАНИЧЕНИЯ
+
+1. **search.py НЕ ИСПОЛЬЗОВАТЬ** — таблицы `docs` и `doc_fragments` не существуют
+2. **Таблица elements полностью удалена** — из кода, документации, SQL-запросов
+3. **add_snippet использует groups_id** — параметр element_id убран
+4. **Все MCP-инструменты работают через server.py / server_configurations.py** — не напрямую через mcp_tools.py
+5. **Таблица search_aliases удалена** — используется alias_targets
+6. **config_tools.py и config_extra.py — два отдельных модуля**, не объединяй их
+
+---
+
+## 🔍 ЧАСТЫЕ ОШИБКИ И КАК ИЗБЕЖАТЬ
+
+| Ошибка | Как избежать |
+|--------|-------------|
+| Использование таблиц docs/doc_fragments | Использовать groups и knowledge_snippets |
+| Поиск только по name | search_groups_fulltext ищет по: name \|\| pagetitle \|\| title \|\| description |
+| Игнорирование category | Всегда указывать category для ускорения поиска |
+| Не проверка versionInfo | Всегда проверять versionInfo для совместимости |
+| Попытка загрузить пустые файлы | Не загружать служебные файлы (__categories__, каталоги) |
+| Использование search_aliases | Использовать alias_targets вместо search_aliases |
+
+---
+
+## 📥 ЗАГРУЗКА ОДИНОЧНОГО HTML-ФАЙЛА
+
+**Подробные правила:** см. `LOAD_RULES.md` раздел "АЛГОРИТМ ДЕЙСТВИЙ AI ПРИ ЗАГРУЗКЕ"
+
+### Кратко:
+1. **Определить категорию по пути** (НЕ спрашивать если очевидно!)
+2. Вызвать `load_single_html_tool(filepath, category)`
+3. Если есть код → создать сниппет через `add_snippet_tool()`
+
+### ✅ Когда НЕ НУЖНО спрашивать:
+- Путь содержит `/html/BSL/` → `category="language,bsl"`
+- Пользователь сказал "загрузить BSL" → использовать `load_bsl_tool()`
+- Путь содержит `/html/platform/` → `category="platform"`
+
+### ❓ Когда НУЖНО спросить:
+- Путь неочевиден (нет BSL/platform/its в пути)
+
+---
+
+## 📝 ВАЖНЫЕ ЗАМЕЧАНИЯ
+
+- Все поисковые запросы работают на **русском языке**
+- Полнотекстовый индекс настроен для русского языка (`tsvector 'russian'`)
+- Фрагменты — мелкая гранулярность: методы, типы, свойства
+- Документация (группы) — крупная гранулярность: статьи, описания
+- Путь к файлам всегда задаётся в задании — он не зафиксирован
+- Для проверки состояния: `python validate_project.py`
