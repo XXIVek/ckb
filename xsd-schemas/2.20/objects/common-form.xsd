@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema 
+    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    xmlns:xr="http://v8.1c.ru/8.3/xcf/readable"
+    targetNamespace="http://v8.1c.ru/8.3/MDClasses"
+    elementFormDefault="qualified">
+
+    <!-- CommonForm — Общая форма -->
+    <xs:element name="CommonForm" type="xr:CommonFormType"/>
+
+    <xs:complexType name="CommonFormType">
+        <xs:sequence>
+            <xs:element name="InternalInfo" type="xr:InternalInfoType"/>
+            <xs:element name="Properties" type="xr:CommonFormPropertiesType"/>
+        </xs:sequence>
+        <xs:attribute name="uuid" type="xs:string" use="required"/>
+    </xs:complexType>
+
+    <!-- Properties общей формы -->
+    <xs:complexType name="CommonFormPropertiesType">
+        <xs:sequence>
+            <xs:element name="Name" type="xs:string"/>
+            <xs:element name="Synonym" type="xr:SynonymType" minOccurs="0"/>
+            <xs:element name="Comment" type="xs:string" minOccurs="0"/>
+            <!-- Тип формы -->
+            <xs:element name="FormType" type="xr:FormTypeEnumType" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+
+</xs:schema>

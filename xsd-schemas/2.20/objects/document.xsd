@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema 
+    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    xmlns:xr="http://v8.1c.ru/8.3/xcf/readable"
+    targetNamespace="http://v8.1c.ru/8.3/MDClasses"
+    elementFormDefault="qualified">
+
+    <!-- Document — Документ -->
+    <xs:element name="Document" type="xr:DocumentType"/>
+
+    <xs:complexType name="DocumentType">
+        <xs:sequence>
+            <xs:element name="InternalInfo" type="xr:InternalInfoType"/>
+            <xs:element name="Properties" type="xr:DocumentPropertiesType"/>
+            <xs:element name="ChildObjects" type="xr:DocumentChildObjectType" minOccurs="0"/>
+        </xs:sequence>
+        <xs:attribute name="uuid" type="xs:string" use="required"/>
+    </xs:complexType>
+
+    <!-- Properties документа -->
+    <xs:complexType name="DocumentPropertiesType">
+        <xs:sequence>
+            <xs:element name="Name" type="xs:string"/>
+            <xs:element name="Synonym" type="xr:SynonymType" minOccurs="0"/>
+            <xs:element name="Comment" type="xs:string" minOccurs="0"/>
+            <!-- Печать и движение -->
+            <xs:element name="MovementData" type="xr:MovementDataType" minOccurs="0"/>
+            <xs:element name="MovementMode" type="xr:MovementModeType" minOccurs="0"/>
+            <xs:element name="PostMode" type="xr:PostModeType" minOccurs="0"/>
+            <xs:element name="RecordMode" type="xr:RecordModeType" minOccurs="0"/>
+            <!-- Стандартные реквизиты -->
+            <xs:element name="StandardAttributes" type="xr:StandardAttributesType" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+
+</xs:schema>

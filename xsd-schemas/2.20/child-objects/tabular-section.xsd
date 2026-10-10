@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema 
+    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    xmlns:xr="http://v8.1c.ru/8.3/xcf/readable"
+    targetNamespace="http://v8.1c.ru/8.3/MDClasses"
+    elementFormDefault="qualified">
+
+    <!-- TabularSection — табличная часть -->
+    <xs:element name="TabularSection" type="xr:TabularSectionType"/>
+
+    <xs:complexType name="TabularSectionType">
+        <xs:sequence>
+            <!-- InternalInfo — содержит GeneratedType для строки и ТЧ -->
+            <xs:element name="InternalInfo" type="xr:TabularSectionInternalInfoType" minOccurs="0"/>
+            <!-- Properties — свойства табличной части -->
+            <xs:element name="Properties" type="xr:TabularSectionPropertiesType"/>
+            <!-- Дочерние объекты = колонки (Attribute) -->
+            <xs:element name="ChildObjects" type="xr:ObjectAttributeChildObjectType" minOccurs="0"/>
+        </xs:sequence>
+        <xs:attribute name="uuid" type="xs:string" use="optional"/>
+    </xs:complexType>
+
+    <!-- InternalInfo табличной части -->
+    <xs:complexType name="TabularSectionInternalInfoType">
+        <xs:sequence>
+            <!-- GeneratedType для строки ТЧ -->
+            <xs:element name="GeneratedType" type="xr:GeneratedTypeType" minOccurs="2"/>
+        </xs:sequence>
+    </xs:complexType>
+
+    <!-- Properties табличной части -->
+    <xs:complexType name="TabularSectionPropertiesType">
+        <xs:sequence>
+            <xs:element name="Name" type="xs:string"/>
+            <xs:element name="Synonym" type="xr:SynonymType" minOccurs="0"/>
+            <xs:element name="Comment" type="xs:string" minOccurs="0"/>
+            <xs:element name="ToolTip" type="xs:string" minOccurs="0"/>
+            <!-- Проверка заполнения -->
+            <xs:element name="FillChecking" type="xr:FillCheckingType" minOccurs="0"/>
+            <!-- Стандартные реквизиты (LineNumber, Predefined и т.д.) -->
+            <xs:element name="StandardAttributes" type="xr:StandardAttributesType" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+
+</xs:schema>

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema 
+    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    xmlns:xr="http://v8.1c.ru/8.3/xcf/readable"
+    targetNamespace="http://v8.1c.ru/8.3/MDClasses"
+    elementFormDefault="qualified">
+
+    <!-- Дочерние объекты Attribute — колонки табличной части -->
+    <xs:complexType name="ObjectAttributeChildObjectType">
+        <xs:choice maxOccurs="unbounded">
+            <xs:element name="Attribute" type="xr:ObjectAttributeType"/>
+        </xs:choice>
+    </xs:complexType>
+
+    <!-- Стандартные реквизиты -->
+    <xs:complexType name="StandardAttributesType">
+        <xs:sequence>
+            <xs:element name="xr:StandardAttribute" type="xr:StandardAttributeType" maxOccurs="unbounded"/>
+        </xs:sequence>
+    </xs:complexType>
+
+    <xs:complexType name="StandardAttributeType">
+        <xs:choice maxOccurs="unbounded">
+            <xs:element name="Name" type="xs:string"/>
+            <xs:element name="LinkByType" type="xr:LinkByTypeType" minOccurs="0"/>
+            <xs:element name="FillChecking" type="xr:FillCheckingType" minOccurs="0"/>
+            <xs:element name="MultiLine" type="xs:boolean" minOccurs="0"/>
+            <xs:element name="FillFromFillingValue" type="xs:boolean" minOccurs="0"/>
+            <xs:element name="CreateOnInput" type="xr:CreateOnInputType" minOccurs="0"/>
+            <xs:element name="TypeReductionMode" type="xr:TypeReductionModeType" minOccurs="0"/>
+            <xs:element name="MaxValue" type="xs:string" minOccurs="0"/>
+            <xs:element name="ToolTip" type="xs:string" minOccurs="0"/>
+            <xs:element name="ExtendedEdit" type="xs:boolean" minOccurs="0"/>
+            <xs:element name="Format" type="xs:string" minOccurs="0"/>
+            <xs:element name="ChoiceForm" type="xs:string" minOccurs="0"/>
+            <xs:element name="QuickChoice" type="xr:QuickChoiceType" minOccurs="0"/>
+            <xs:element name="ChoiceHistoryOnInput" type="xr:ChoiceHistoryOnInputType" minOccurs="0"/>
+            <xs:element name="EditFormat" type="xs:string" minOccurs="0"/>
+            <xs:element name="PasswordMode" type="xs:boolean" minOccurs="0"/>
+            <xs:element name="DataHistory" type="xr:DataHistoryType" minOccurs="0"/>
+            <xs:element name="MarkNegatives" type="xs:boolean" minOccurs="0"/>
+            <xs:element name="MinValue" type="xs:string" minOccurs="0"/>
+            <xs:element name="Synonym" type="xr:SynonymType" minOccurs="0"/>
+            <xs:element name="Comment" type="xs:string" minOccurs="0"/>
+            <xs:element name="FullTextSearch" type="xr:FullTextSearchType" minOccurs="0"/>
+            <xs:element name="ChoiceParameterLinks" type="xr:ChoiceParameterLinksType" minOccurs="0"/>
+            <xs:element name="FillValue" type="xs:string" minOccurs="0"/>
+            <xs:element name="Mask" type="xs:string" minOccurs="0"/>
+            <xs:element name="ChoiceParameters" type="xr:ChoiceParametersType" minOccurs="0"/>
+        </xs:choice>
+    </xs:complexType>
+
+</xs:schema>

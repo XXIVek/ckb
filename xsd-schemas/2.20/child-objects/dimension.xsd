@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema 
+    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    xmlns:xr="http://v8.1c.ru/8.3/xcf/readable"
+    targetNamespace="http://v8.1c.ru/8.3/MDClasses"
+    elementFormDefault="qualified">
+
+    <!-- Dimension — Измерение регистра -->
+    <xs:element name="Dimension" type="xr:DimensionType"/>
+
+    <xs:complexType name="DimensionType">
+        <xs:sequence>
+            <xs:element name="InternalInfo" type="xr:InternalInfoType" minOccurs="0"/>
+            <xs:element name="Properties" type="xr:DimensionPropertiesType"/>
+            <!-- Стандартные реквизиты -->
+            <xs:element name="StandardAttributes" type="xr:StandardAttributesType" minOccurs="0"/>
+        </xs:sequence>
+        <xs:attribute name="uuid" type="xs:string" use="optional"/>
+    </xs:complexType>
+
+    <!-- Properties измерения -->
+    <xs:complexType name="DimensionPropertiesType">
+        <xs:sequence>
+            <xs:element name="Name" type="xs:string"/>
+            <xs:element name="Synonym" type="xr:SynonymType" minOccurs="0"/>
+            <xs:element name="Comment" type="xs:string" minOccurs="0"/>
+            <!-- Тип измерения -->
+            <xs:element name="Type" type="xr:AttributeValueType" minOccurs="0"/>
+            <!-- Проверка заполнения -->
+            <xs:element name="FillChecking" type="xr:FillCheckingType" minOccurs="0"/>
+            <xs:element name="Usage" type="xr:DimensionUsageType" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+
+</xs:schema>

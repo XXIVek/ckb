@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema 
+    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    xmlns:xr="http://v8.1c.ru/8.3/xcf/readable"
+    targetNamespace="http://v8.1c.ru/8.3/MDClasses"
+    elementFormDefault="qualified">
+
+    <!-- Configuration — Конфигурация (корневой объект) -->
+    <xs:element name="Configuration" type="xr:ConfigurationType"/>
+
+    <xs:complexType name="ConfigurationType">
+        <xs:sequence>
+            <xs:element name="Properties" type="xr:ConfigurationPropertiesType"/>
+            <!-- ChildObjects не используется для Configuration, но оставлен для совместимости -->
+        </xs:sequence>
+        <xs:attribute name="uuid" type="xs:string" use="required"/>
+    </xs:complexType>
+
+    <!-- Properties конфигурации -->
+    <xs:complexType name="ConfigurationPropertiesType">
+        <xs:sequence>
+            <xs:element name="Name" type="xs:string"/>
+            <xs:element name="FullName" type="xs:string" minOccurs="0"/>
+            <xs:element name="Synonym" type="xr:SynonymType" minOccurs="0"/>
+            <xs:element name="Comment" type="xs:string" minOccurs="0"/>
+            <!-- Версия -->
+            <xs:element name="Version" type="xs:string" minOccurs="0"/>
+            <!-- Vendor -->
+            <xs:element name="Vendor" type="xr:SynonymType" minOccurs="0"/>
+            <!-- ConfigurationBase -->
+            <xs:element name="ConfigurationBase" type="xs:string" minOccurs="0"/>
+            <!-- DataHistory -->
+            <xs:element name="DataHistory" type="xr:DataHistoryModeType" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+
+</xs:schema>

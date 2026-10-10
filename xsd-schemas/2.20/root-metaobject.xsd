@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema 
+    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    xmlns:mdo="http://v8.1c.ru/8.3/MDClasses"
+    targetNamespace="http://v8.1c.ru/8.3/MDClasses"
+    elementFormDefault="qualified">
+
+    <!-- Корневой элемент MetaDataObject -->
+    <xs:element name="MetaDataObject" type="mdo:MetaDataObjectType">
+        <xs:annotation>
+            <xs:documentation>
+                Корневой элемент любого XML-файла выгрузки метаданных 1С.
+                Версия определяется атрибутом version (2.17...2.20).
+            </xs:documentation>
+        </xs:annotation>
+    </xs:element>
+
+    <xs:complexType name="MetaDataObjectType">
+        <xs:choice>
+            <!-- Корневые объекты конфигурации -->
+            <xs:element name="Configuration" type="mdo:ConfigurationType"/>
+            <xs:element name="ExternalReport" type="mdo:ExternalReportType"/>
+            <xs:element name="ExternalDataProcessor" type="mdo:ExternalDataProcessorType"/>
+            <!-- Объекты метаданных -->
+            <xs:element name="Catalog" type="mdo:CatalogType"/>
+            <xs:element name="Document" type="mdo:DocumentType"/>
+            <xs:element name="InformationRegister" type="mdo:InformationRegisterType"/>
+            <xs:element name="AccumulationRegister" type="mdo:AccumulationRegisterType"/>
+            <xs:element name="AccountingRegister" type="mdo:AccountingRegisterType"/>
+            <xs:element name="CalculationRegister" type="mdo:CalculationRegisterType"/>
+            <xs:element name="ChartOfAccounts" type="mdo:ChartOfAccountsType"/>
+            <xs:element name="ChartOfCharacteristicTypes" type="mdo:ChartOfCharacteristicTypesType"/>
+            <xs:element name="ChartOfCalculationTypes" type="mdo:ChartOfCalculationTypesType"/>
+            <!-- Прочие объекты -->
+            <xs:element name="Enum" type="mdo:EnumType"/>
+            <xs:element name="Constant" type="mdo:ConstantType"/>
+            <xs:element name="CommonModule" type="mdo:CommonModuleType"/>
+            <xs:element name="CommonTemplate" type="mdo:CommonTemplateType"/>
+            <xs:element name="CommonPicture" type="mdo:CommonPictureType"/>
+            <xs:element name="DocumentJournal" type="mdo:DocumentJournalType"/>
+            <xs:element name="ExchangePlan" type="mdo:ExchangePlanType"/>
+            <xs:element name="BusinessProcess" type="mdo:BusinessProcessType"/>
+            <xs:element name="Task" type="mdo:TaskType"/>
+            <xs:element name="Role" type="mdo:RoleType"/>
+            <xs:element name="SettingsStorage" type="mdo:SettingsStorageType"/>
+            <!-- Подсистемы и прочее -->
+            <xs:element name="Subsystem" type="mdo:SubsystemType"/>
+            <xs:element name="Language" type="mdo:LanguageType"/>
+            <xs:element name="CommonCommand" type="mdo:CommonCommandType"/>
+            <xs:element name="CommonForm" type="mdo:CommonFormType"/>
+            <xs:element name="FilterCriterion" type="mdo:FilterCriterionType"/>
+        </xs:choice>
+        <xs:attribute name="version" type="xs:string" use="optional" default="2.17"/>
+    </xs:complexType>
+
+    <!-- ========================================= -->
+    <!-- ВНЕШНИЙ ОТЧЕТ (ExternalReport)            -->
+    <!-- ========================================= -->
+    <xs:complexType name="ExternalReportType">
+        <xs:sequence>
+            <xs:element name="InternalInfo" type="mdo:InternalInfoType"/>
+            <xs:element name="Properties" type="mdo:ExternalReportPropertiesType"/>
+            <xs:element name="ChildObjects" type="mdo:ExternalReportChildObjectType" minOccurs="0"/>
+        </xs:sequence>
+        <xs:attribute name="uuid" type="xs:string" use="required"/>
+    </xs:complexType>
+
+    <xs:complexType name="ExternalReportPropertiesType">
+        <xs:sequence>
+            <xs:element name="Name" type="xs:string"/>
+            <xs:element name="Synonym" type="mdo:SynonymType" minOccurs="0"/>
+            <xs:element name="Comment" type="xs:string" minOccurs="0"/>
+            <xs:element name="DefaultForm" type="xs:string" minOccurs="0"/>
+            <xs:element name="AuxiliaryForm" type="xs:string" minOccurs="0"/>
+            <xs:element name="MainDataCompositionSchema" type="xs:string" minOccurs="0"/>
+            <xs:element name="DefaultSettingsForm" type="xs:string" minOccurs="0"/>
+            <xs:element name="AuxiliarySettingsForm" type="xs:string" minOccurs="0"/>
+            <xs:element name="DefaultVariantForm" type="xs:string" minOccurs="0"/>
+            <xs:element name="VariantsStorage" type="mdo:DataCompositionSchemaRefType" minOccurs="0"/>
+            <xs:element name="SettingsStorage" type="mdo:SettingsStorageRefType" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+
+    <xs:complexType name="ExternalReportChildObjectType">
+        <xs:choice maxOccurs="unbounded">
+            <xs:element name="Attribute" type="mdo:ObjectAttributeType"/>
+            <xs:element name="TabularSection" type="mdo:TabularSectionType"/>
+            <xs:element name="Form" type="xs:string"/>
+            <xs:element name="Template" type="xs:string"/>
+        </xs:choice>
+    </xs:complexType>
+
+</xs:schema>

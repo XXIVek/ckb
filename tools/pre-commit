@@ -1,0 +1,78 @@
+#!/bin/bash
+# =============================================================================
+# Git pre-commit hook: автоупаковка модулей обычных форм в Form.bin
+#
+# При коммите:
+# 1. Находит изменённые Module.bsl, лежащие рядом с Form.bin
+# 2. Упаковывает модуль обратно в Form.bin (через v8unpack)
+# 3. Добавляет обновлённый Form.bin в коммит
+#
+# Требования: pip install v8unpack
+# =============================================================================
+
+set -e
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+TOOLS_DIR="${REPO_ROOT}/.1c-tools"
+PACK_SCRIPT="${TOOLS_DIR}/pack_form_modules.py"
+PYTHON="${PYTHON:-python}"
+
+# Ищем изменённые Module.bsl в индексе
+CHANGED_BSL=$(git diff --cached --name-only --diff-filter=ACM | grep -i "/Module\.bsl$" || true)
+
+if [ -z "$CHANGED_BSL" ]; then
+    exit 0
+fi
+
+if [ ! -f "$PACK_SCRIPT" ]; then
+    echo "[pre-commit] ОШИБКА: Не найден ${PACK_SCRIPT}"
+    exit 1
+fi
+
+# Проверяем наличие v8unpack
+if ! "$PYTHON" -c "import v8unpack" 2>/dev/null; then
+    echo "[pre-commit] ОШИБКА: Требуется v8unpack (pip install v8unpack)"
+    exit 1
+fi
+
+echo "[pre-commit] Упаковка модулей обычных форм..."
+
+ERRORS=0
+PACKED=0
+
+for BSL_FILE in $CHANGED_BSL; do
+    BSL_DIR=$(dirname "$BSL_FILE")
+    BIN_FILE="${BSL_DIR}/Form.bin"
+    FULL_BIN_PATH="${REPO_ROOT}/${BIN_FILE}"
+    FULL_BSL_DIR="${REPO_ROOT}/${BSL_DIR}"
+
+    # Упаковываем только если рядом есть Form.bin (= обычная форма)
+    if [ -f "$FULL_BIN_PATH" ]; then
+        echo "[pre-commit]   ${BSL_FILE}"
+
+        # Вызываем pack для директории формы; статус сохраняем ДО фильтрации
+        # вывода (проверка PIPESTATUS после if затиралась телом ветки)
+        PACK_STATUS=0
+        PACK_OUTPUT=$("$PYTHON" "$PACK_SCRIPT" "$FULL_BSL_DIR" --no-backup 2>&1) || PACK_STATUS=$?
+        echo "$PACK_OUTPUT" | grep -v "^INFO:" || true
+
+        if [ $PACK_STATUS -ne 0 ]; then
+            echo "[pre-commit]   ✗ ОШИБКА упаковки"
+            ERRORS=1
+        else
+            # Добавляем обновлённый Form.bin в коммит
+            git add "$BIN_FILE"
+            echo "[pre-commit]   ✓ → ${BIN_FILE}"
+            PACKED=$((PACKED + 1))
+        fi
+    fi
+done
+
+if [ $ERRORS -ne 0 ]; then
+    echo "[pre-commit] Коммит отменён из-за ошибок упаковки."
+    exit 1
+fi
+
+if [ $PACKED -gt 0 ]; then
+    echo "[pre-commit] Упаковано форм: ${PACKED}"
+fi

@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema 
+    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    xmlns:xr="http://v8.1c.ru/8.3/xcf/readable"
+    targetNamespace="http://v8.1c.ru/8.3/MDClasses"
+    elementFormDefault="qualified">
+
+    <!-- Catalog — Справочник -->
+    <xs:element name="Catalog" type="xr:CatalogType"/>
+
+    <xs:complexType name="CatalogType">
+        <xs:sequence>
+            <xs:element name="InternalInfo" type="xr:InternalInfoType"/>
+            <xs:element name="Properties" type="xr:CatalogPropertiesType"/>
+            <xs:element name="ChildObjects" type="xr:CatalogChildObjectType" minOccurs="0"/>
+        </xs:sequence>
+        <xs:attribute name="uuid" type="xs:string" use="required"/>
+    </xs:complexType>
+
+    <!-- Properties справочника -->
+    <xs:complexType name="CatalogPropertiesType">
+        <xs:sequence>
+            <xs:element name="Name" type="xs:string"/>
+            <xs:element name="Synonym" type="xr:SynonymType" minOccurs="0"/>
+            <xs:element name="Comment" type="xs:string" minOccurs="0"/>
+            <xs:element name="TypedContent" type="xs:boolean" minOccurs="0"/>
+            <xs:element name="CatalogColumns" type="xr:CatalogColumnsType" minOccurs="0"/>
+            <xs:element name="FormChoice" type="xs:boolean" minOccurs="0"/>
+            <xs:element name="Determinant" type="xs:string" minOccurs="0"/>
+            <!-- Стандартные реквизиты -->
+            <xs:element name="StandardAttributes" type="xr:StandardAttributesType" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+
+    <!-- CatalogColumns — реквизиты справочника -->
+    <xs:complexType name="CatalogColumnsType">
+        <xs:choice maxOccurs="unbounded">
+            <xs:element name="CatalogColumn" type="xr:CatalogColumnType"/>
+        </xs:choice>
+    </xs:complexType>
+
+    <xs:complexType name="CatalogColumnType">
+        <xs:sequence>
+            <xs:element name="Name" type="xs:string"/>
+            <xs:element name="Type" type="xr:CatalogColumnValueType" minOccurs="0"/>
+            <xs:element name="Width" type="xs:int" minOccurs="0"/>
+            <xs:element name="Height" type="xs:int" minOccurs="0"/>
+        </xs:choice>
+    </xs:complexType>
+
+</xs:schema>

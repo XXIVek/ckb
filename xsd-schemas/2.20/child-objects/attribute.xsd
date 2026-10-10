@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema 
+    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    xmlns:xr="http://v8.1c.ru/8.3/xcf/readable"
+    xmlns:v8="http://v8.1c.ru/8.1/data/core"
+    targetNamespace="http://v8.1c.ru/8.3/MDClasses"
+    elementFormDefault="qualified">
+
+    <!-- Attribute — реквизит объекта (дочерний объект) -->
+    <xs:element name="Attribute" type="xr:ObjectAttributeType"/>
+
+    <xs:complexType name="ObjectAttributeType">
+        <xs:sequence>
+            <!-- InternalInfo для предопределённых элементов -->
+            <xs:element name="InternalInfo" type="xr:InternalInfoType" minOccurs="0"/>
+            <!-- Properties — основные свойства реквизита -->
+            <xs:element name="Properties" type="xr:ObjectAttributePropertiesType"/>
+            <!-- Стандартные реквизиты (для табличных частей) -->
+            <xs:element name="StandardAttributes" type="xr:StandardAttributesType" minOccurs="0"/>
+            <!-- Дочерние объекты (для TabularSection — колонки) -->
+            <xs:element name="ChildObjects" type="xr:ObjectAttributeChildObjectType" minOccurs="0"/>
+        </xs:sequence>
+        <xs:attribute name="uuid" type="xs:string" use="optional"/>
+    </xs:complexType>
+
+    <!-- Properties реквизита объекта / колонки ТЧ -->
+    <xs:complexType name="ObjectAttributePropertiesType">
+        <xs:sequence>
+            <xs:element name="Name" type="xs:string"/>
+            <xs:element name="Synonym" type="xr:SynonymType" minOccurs="0"/>
+            <xs:element name="Comment" type="xs:string" minOccurs="0"/>
+            <!-- Тип значения -->
+            <xs:element name="Type" type="xr:AttributeValueType" minOccurs="0"/>
+            <!-- Стандартные свойства числовых/строковых полей -->
+            <xs:element name="PasswordMode" type="xs:boolean" minOccurs="0"/>
+            <xs:element name="Format" type="xs:string" minOccurs="0"/>
+            <xs:element name="EditFormat" type="xs:string" minOccurs="0"/>
+            <xs:element name="ToolTip" type="xs:string" minOccurs="0"/>
+            <xs:element name="MarkNegatives" type="xs:boolean" minOccurs="0"/>
+            <xs:element name="Mask" type="xs:string" minOccurs="0"/>
+            <xs:element name="MultiLine" type="xs:boolean" minOccurs="0"/>
+            <xs:element name="ExtendedEdit" type="xs:boolean" minOccurs="0"/>
+            <!-- Значения Min/Max -->
+            <xs:element name="MinValue" type="xs:string" minOccurs="0"/>
+            <xs:element name="MaxValue" type="xs:string" minOccurs="0"/>
+            <!-- Заполнение из значения -->
+            <xs:element name="FillFromFillingValue" type="xs:boolean" minOccurs="0"/>
+            <xs:element name="FillValue" type="xs:string" minOccurs="0"/>
+            <!-- Проверка заполнения -->
+            <xs:element name="FillChecking" type="xr:FillCheckingType" minOccurs="0"/>
+            <!-- Параметры выбора (для ссылочных типов) -->
+            <xs:element name="ChoiceFoldersAndItems" type="xr:ChoiceFoldersAndItemsType" minOccurs="0"/>
+            <xs:element name="ChoiceParameterLinks" type="xr:ChoiceParameterLinksType" minOccurs="0"/>
+            <xs:element name="ChoiceParameters" type="xr:ChoiceParametersType" minOccurs="0"/>
+            <xs:element name="QuickChoice" type="xr:QuickChoiceType" minOccurs="0"/>
+            <xs:element name="CreateOnInput" type="xr:CreateOnInputType" minOccurs="0"/>
+            <!-- Форма выбора -->
+            <xs:element name="ChoiceForm" type="xs:string" minOccurs="0"/>
+            <!-- Ссылка по типу (для субконто) -->
+            <xs:element name="LinkByType" type="xr:LinkByTypeType" minOccurs="0"/>
+            <!-- История выбора -->
+            <xs:element name="ChoiceHistoryOnInput" type="xr:ChoiceHistoryOnInputType" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+
+    <!-- Тип значения реквизита -->
+    <xs:complexType name="AttributeValueType">
+        <xs:choice maxOccurs="unbounded">
+            <!-- Ссылочные типы -->
+            <xs:element name="Type" type="xs:string"/>
+            <!-- Квалификаторы числового типа -->
+            <xs:element name="NumberQualifiers" type="xr:NumberQualifiersType" minOccurs="0"/>
+            <!-- Квалификаторы датного типа -->
+            <xs:element name="DateQualifiers" type="xr:DateQualifiersType" minOccurs="0"/>
+        </xs:choice>
+    </xs:complexType>
+
+</xs:schema>

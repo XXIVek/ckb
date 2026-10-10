@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema 
+    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    xmlns:xr="http://v8.1c.ru/8.3/xcf/readable"
+    targetNamespace="http://v8.1c.ru/8.3/MDClasses"
+    elementFormDefault="qualified">
+
+    <!-- Language — Язык -->
+    <xs:element name="Language" type="xr:LanguageType"/>
+
+    <xs:complexType name="LanguageType">
+        <xs:sequence>
+            <xs:element name="InternalInfo" type="xr:InternalInfoType"/>
+            <xs:element name="Properties" type="xr:LanguagePropertiesType"/>
+        </xs:sequence>
+        <xs:attribute name="uuid" type="xs:string" use="required"/>
+    </xs:complexType>
+
+    <!-- Properties языка -->
+    <xs:complexType name="LanguagePropertiesType">
+        <xs:sequence>
+            <xs:element name="Name" type="xs:string"/>
+            <xs:element name="CodingLanguage" type="xs:string"/>
+            <xs:element name="Order" type="xr:LanguageOrderType" minOccurs="0"/>
+            <xs:element name="Default" type="xs:boolean" minOccurs="0"/>
+            <xs:element name="Format" type="xr:DateFormatType" minOccurs="0"/>
+            <xs:element name="FirstDayOfWeek" type="xr:FirstDayOfWeekType" minOccurs="0"/>
+            <xs:element name="FirstMonthOfTheYear" type="xr:FirstMonthType" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+
+</xs:schema>

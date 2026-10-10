@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema 
+    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    xmlns:xr="http://v8.1c.ru/8.3/xcf/readable"
+    targetNamespace="http://v8.1c.ru/8.3/MDClasses"
+    elementFormDefault="qualified">
+
+    <!-- InformationRegister — Регистр сведений -->
+    <xs:element name="InformationRegister" type="xr:InformationRegisterType"/>
+
+    <xs:complexType name="InformationRegisterType">
+        <xs:sequence>
+            <xs:element name="InternalInfo" type="xr:InternalInfoType"/>
+            <xs:element name="Properties" type="xr:InformationRegisterPropertiesType"/>
+            <xs:element name="ChildObjects" type="xr:InformationRegisterChildObjectType" minOccurs="0"/>
+        </xs:sequence>
+        <xs:attribute name="uuid" type="xs:string" use="required"/>
+    </xs:complexType>
+
+    <!-- Properties регистра сведений -->
+    <xs:complexType name="InformationRegisterPropertiesType">
+        <xs:sequence>
+            <xs:element name="Name" type="xs:string"/>
+            <xs:element name="Synonym" type="xr:SynonymType" minOccurs="0"/>
+            <xs:element name="Comment" type="xs:string" minOccurs="0"/>
+            <!-- Режим записи -->
+            <xs:element name="RecordMode" type="xr:RecordModeType" minOccurs="0"/>
+            <!-- Стандартные реквизиты -->
+            <xs:element name="StandardAttributes" type="xr:StandardAttributesType" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+
+    <!-- ChildObjects регистра сведений -->
+    <xs:complexType name="InformationRegisterChildObjectType">
+        <xs:choice maxOccurs="unbounded">
+            <!-- Измерения -->
+            <xs:element name="Dimension" type="xr:DimensionType"/>
+        </xs:choice>
+    </xs:complexType>
+
+</xs:schema>

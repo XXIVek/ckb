@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema 
+    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    xmlns:xr="http://v8.1c.ru/8.3/xcf/readable"
+    targetNamespace="http://v8.1c.ru/8.3/MDClasses"
+    elementFormDefault="qualified">
+
+    <!-- Форма (ссылка в ChildObjects) -->
+    <xs:element name="Form" type="xs:string"/>
+
+    <!-- Метаданные формы — отдельный XML файл Forms/&lt;Имя&gt;.xml -->
+    <xs:element name="FormMeta" type="xr:FormMetaType"/>
+
+    <xs:complexType name="FormMetaType">
+        <xs:sequence>
+            <xs:element name="Properties" type="xr:FormMetaPropertiesType"/>
+        </xs:sequence>
+        <xs:attribute name="uuid" type="xs:string" use="required"/>
+    </xs:complexType>
+
+    <xs:complexType name="FormMetaPropertiesType">
+        <xs:sequence>
+            <xs:element name="Name" type="xs:string"/>
+            <xs:element name="Synonym" type="xr:SynonymType" minOccurs="0"/>
+            <xs:element name="Comment" type="xs:string" minOccurs="0"/>
+            <!-- Тип формы -->
+            <xs:element name="FormType" type="xr:FormTypeEnumType" minOccurs="0"/>
+            <xs:element name="FormMode" type="xr:FormModeType" minOccurs="0"/>
+            <!-- Вспомогательные флаги -->
+            <xs:element name="Location" type="xs:string" minOccurs="0"/>
+            <xs:element name="ExtendedDesignView" type="xr:ExtendedDesignViewType" minOccurs="0"/>
+            <xs:element name="DecorationBehavior" type="xs:string" minOccurs="0"/>
+            <!-- Для внешних отчетов -->
+            <xs:element name="ReportFormType" type="xr:ReportFormTypeEnumType" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+
+</xs:schema>

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema 
+    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    xmlns:xr="http://v8.1c.ru/8.3/xcf/readable"
+    targetNamespace="http://v8.1c.ru/8.3/MDClasses"
+    elementFormDefault="qualified">
+
+    <!-- CalculationRegister — Регистр расчёта -->
+    <xs:element name="CalculationRegister" type="xr:CalculationRegisterType"/>
+
+    <xs:complexType name="CalculationRegisterType">
+        <xs:sequence>
+            <xs:element name="InternalInfo" type="xr:InternalInfoType"/>
+            <xs:element name="Properties" type="xr:CalculationRegisterPropertiesType"/>
+            <xs:element name="ChildObjects" type="xr:CalculationRegisterChildObjectType" minOccurs="0"/>
+        </xs:sequence>
+        <xs:attribute name="uuid" type="xs:string" use="required"/>
+    </xs:complexType>
+
+    <!-- Properties регистра расчёта -->
+    <xs:complexType name="CalculationRegisterPropertiesType">
+        <xs:sequence>
+            <xs:element name="Name" type="xs:string"/>
+            <xs:element name="Synonym" type="xr:SynonymType" minOccurs="0"/>
+            <xs:element name="Comment" type="xs:string" minOccurs="0"/>
+            <!-- План видов расчёта -->
+            <xs:element name="ChartOfCalculationTypes" type="xs:string" minOccurs="0"/>
+            <!-- Периодичность -->
+            <xs:element name="Periodicity" type="xr:PeriodicityType" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+
+</xs:schema>
