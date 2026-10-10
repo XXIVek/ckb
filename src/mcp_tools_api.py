@@ -4,28 +4,41 @@ import psycopg2
 from mcp_tools_core import _get_pool, extract_aliases
 
 
-def add_snippet(question, answer, source_url=None, tags='bsl,code', confidence=0.9, groups_id=None):
-    """Create a snippet with auto-created aliases from question."""
+def add_snippet(question, answer, source_url=None, tags='bsl,code', confidence=0.9, groups_id=None, aliases=None):
+    """Create a snippet (optionally linked to a group). Aliases generated from question or provided explicitly."""
     try:
         pool = _get_pool()
         conn = pool.getconn()
         cur = conn.cursor()
 
-        if not groups_id:
-            group_name = question[:100].strip()
-            sql_check = "SELECT id FROM groups WHERE name = %s AND (parent_id IS NULL AND NULL::text IS NULL OR parent_id = NULL) LIMIT 1"
-            cur.execute(sql_check, (group_name,))
-            row = cur.fetchone()
-            if row:
-                groups_id = row[0]
-            else:
-                tag_list = [t.strip() for t in tags.split(',') if t.strip()]
-                cur.execute(
-                    "INSERT INTO groups (parent_id, name, description, tags) VALUES (NULL, %s, %s, %s) RETURNING id",
-                    (group_name, answer[:9], tag_list))
-                groups_id = cur.fetchone()[0]
-                conn.commit()
+        # СНИППЕТ БЕЗ ГРУППЫ — создаём алиасы напрямую к сниппету
+        if groups_id is None:
+            tag_list = [t.strip() for t in tags.split(',') if t.strip()]
+            cur.execute(
+                "INSERT INTO knowledge_snippets (groups_id, question, answer, source_url, tags, confidence) VALUES (NULL, %s, %s, %s, %s, %s) RETURNING id",
+                (question, answer, source_url, tag_list, confidence))
+            snippet_id = cur.fetchone()[0]
+            conn.commit()
 
+            # Создаём алиасы: из question + из явно переданных aliases
+            all_aliases = list(set(extract_aliases(question, max_count=10)))
+            if aliases:
+                for a in aliases:
+                    all_aliases.append(a.lower().strip())
+                all_aliases = list(set(all_aliases))
+            
+            aliases_created = 0
+            for alias in all_aliases:
+                cur.execute(
+                    "INSERT INTO alias_targets (alias_name, target_type, groups_id, snippets_id, tags, weight) VALUES (%s, 'snippet', NULL, %s, %s, 1.0) ON CONFLICT (alias_name, snippets_id) WHERE snippets_id IS NOT NULL DO NOTHING",
+                    (alias, snippet_id, tag_list))
+                aliases_created += 1
+            conn.commit()
+
+            cur.close()
+            return {'success': True, 'snippet_id': snippet_id, 'aliases_created': aliases_created}
+
+        # СНИППЕТ С ГРУППОЙ — привязываем к существующей группе
         tag_list = [t.strip() for t in tags.split(',') if t.strip()]
         cur.execute(
             "INSERT INTO knowledge_snippets (groups_id, question, answer, source_url, tags, confidence) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
@@ -33,30 +46,20 @@ def add_snippet(question, answer, source_url=None, tags='bsl,code', confidence=0
         snippet_id = cur.fetchone()[0]
         conn.commit()
 
+        # Перекрёстная привязка: обновляем алиасы группы, чтобы указывали на этот сниппет
         aliases_created = 0
-        
-        if groups_id:
-            # СЦЕНАРИЙ 1: Сниппет из группы - обновляем существующие алиасы группы
+        cur.execute(
+            "SELECT id, alias_name FROM alias_targets WHERE groups_id = %s AND snippets_id IS NULL",
+            (groups_id,))
+        group_aliases = cur.fetchall()
+
+        for alias_id, alias_name in group_aliases:
             cur.execute(
-                "SELECT id, alias_name FROM alias_targets WHERE groups_id = %s AND snippets_id IS NULL",
-                (groups_id,))
-            group_aliases = cur.fetchall()
-            
-            for alias_id, alias_name in group_aliases:
-                cur.execute(
-                    "UPDATE alias_targets SET snippets_id = %s WHERE id = %s AND snippets_id IS NULL",
-                    (snippet_id, alias_id))
-                aliases_created += 1
-            conn.commit()
-        else:
-            # СЦЕНАРИЙ 2: Сниппет без группы - создаём новые алиасы
-            for alias in extract_aliases(question, max_count=10):
-                cur.execute(
-                    "INSERT INTO alias_targets (alias_name, target_type, groups_id, snippets_id, tags, weight) VALUES (%s, 'snippet', NULL, %s, %s, 1.0) ON CONFLICT (alias_name, snippets_id) WHERE snippets_id IS NOT NULL DO NOTHING",
-                    (alias, snippet_id, tag_list))
-                aliases_created += 1
-            conn.commit()
-        
+                "UPDATE alias_targets SET snippets_id = %s WHERE id = %s AND snippets_id IS NULL",
+                (snippet_id, alias_id))
+            aliases_created += 1
+        conn.commit()
+
         cur.close()
 
         return {'success': True, 'snippet_id': snippet_id, 'aliases_created': aliases_created}
@@ -64,6 +67,44 @@ def add_snippet(question, answer, source_url=None, tags='bsl,code', confidence=0
     except Exception as e:
         if 'conn' in locals(): conn.rollback()
         print(f'[ERROR add_snippet]: {str(e)}', flush=True)
+        return {'success': False, 'error': str(e)}
+    finally:
+        if 'conn' in locals(): pool.putconn(conn)
+
+
+def add_aliases(aliases, groups_id=None, snippets_id=None):
+    """Add aliases to an existing group or snippet. At least one of groups_id or snippets_id must be provided."""
+    try:
+        pool = _get_pool()
+        conn = pool.getconn()
+        cur = conn.cursor()
+
+        added = 0
+        
+        if groups_id is not None:
+            # Добавляем алиасы к группе
+            for alias in aliases:
+                cur.execute(
+                    "INSERT INTO alias_targets (alias_name, target_type, groups_id, snippets_id, tags, weight) VALUES (%s, 'group', %s, NULL, NULL, 1.0) ON CONFLICT (alias_name, groups_id) WHERE groups_id IS NOT NULL DO NOTHING",
+                    (alias, groups_id))
+                added += cur.rowcount
+            
+        elif snippets_id is not None:
+            # Добавляем алиасы к сниппету
+            for alias in aliases:
+                cur.execute(
+                    "INSERT INTO alias_targets (alias_name, target_type, groups_id, snippets_id, tags, weight) VALUES (%s, 'snippet', NULL, %s, NULL, 1.0) ON CONFLICT (alias_name, snippets_id) WHERE snippets_id IS NOT NULL DO NOTHING",
+                    (alias, snippets_id))
+                added += cur.rowcount
+        
+        conn.commit()
+        cur.close()
+        
+        return {'success': True, 'added': added}
+
+    except Exception as e:
+        if 'conn' in locals(): conn.rollback()
+        print(f'[ERROR add_aliases]: {str(e)}', flush=True)
         return {'success': False, 'error': str(e)}
     finally:
         if 'conn' in locals(): pool.putconn(conn)
@@ -78,13 +119,13 @@ def search_docs(query, category=None, limit=20):
         cur = conn.cursor()
         results = []
 
-        # Шаг 1: Поиск по алиасам (приоритет)
+        # Шаг 1: Поиск по алиасам (приоритет) — точное совпадение (case-insensitive)
         cur.execute("""
             SELECT DISTINCT at.groups_id, 'group' as type, g.name, g.description, g.pagetitle, 2.0 as rank
             FROM alias_targets at
             LEFT JOIN groups g ON at.groups_id = g.id
-            WHERE at.alias_name = %s AND at.groups_id IS NOT NULL
-        """, (query,))
+            WHERE LOWER(at.alias_name) = %s AND at.groups_id IS NOT NULL
+        """, (query.lower(),))
         for row in cur.fetchall():
             desc = row[3] if row[3] and isinstance(row[3], str) else ''
             results.append({
@@ -93,11 +134,15 @@ def search_docs(query, category=None, limit=20):
             })
 
         cur.execute("""
-            SELECT DISTINCT at.snippets_id, 'snippet' as type, ks.question, ks.answer, 2.0 as rank
+            SELECT DISTINCT at.snippets_id, 'snippet' as type, ks.question, ks.answer, 
+                CASE WHEN EXISTS (
+                    SELECT 1 FROM alias_targets at2 
+                    WHERE LOWER(at2.alias_name) = %s AND at2.snippets_id = at.snippets_id AND at2.groups_id IS NULL
+                ) THEN 3.0 ELSE 2.0 END as rank
             FROM alias_targets at
             LEFT JOIN knowledge_snippets ks ON at.snippets_id = ks.id
-            WHERE at.alias_name = %s AND at.snippets_id IS NOT NULL
-        """, (query,))
+            WHERE LOWER(at.alias_name) = %s AND at.snippets_id IS NOT NULL
+        """, (query.lower(), query.lower()))
         for row in cur.fetchall():
             desc = row[3] if row[3] and isinstance(row[3], str) else ''
             results.append({
@@ -107,24 +152,35 @@ def search_docs(query, category=None, limit=20):
 
         # Шаг 2: Если найдено по алиасам - подтягиваем связанные сниппеты и возвращаем (высокий приоритет)
         if results:
-            # Собираем уникальные groups_id из найденных групп
-            group_ids = list(set(int(r['id']) for r in results))
-            # Подтягиваем все сниппеты, привязанные к этим группам
-            cur.execute(
-                "SELECT id, question, answer FROM knowledge_snippets WHERE groups_id = ANY(%s) ORDER BY id",
-                (group_ids,))
-            seen_ids = set(int(r['id']) for r in results)
-            for row in cur.fetchall():
-                sid = int(row[0])
-                if sid in seen_ids:
-                    continue  # уже есть в результатах
-                seen_ids.add(sid)
-                desc = row[2] if row[2] and isinstance(row[2], str) else ''
-                results.append({
-                    'id': sid, 'title': row[1][:200], 'description': desc[:200] if desc else '',
-                    'rank': 2.0, 'type': 'snippet', 'source': 'alias'
-                })
+            # Собираем уникальные groups_id из найденных ГРУПП (НЕ snippets!)
+            group_ids = list(set(int(r['id']) for r in results if r['type'] == 'group'))
+            
+            # Подтягиваем все сниппеты, привязанные к этим группам (только для BSL-конфигураций)
+            extra_snippets = []
+            if group_ids:
+                cur.execute(
+                    "SELECT id, question, answer FROM knowledge_snippets WHERE groups_id = ANY(%s) ORDER BY id",
+                    (group_ids,))
+                seen_ids = set(int(r['id']) for r in results)
+                for row in cur.fetchall():
+                    sid = int(row[0])
+                    if sid in seen_ids:
+                        continue
+                    seen_ids.add(sid)
+                    desc = row[2] if row[2] and isinstance(row[2], str) else ''
+                    extra_snippets.append({
+                        'id': sid, 'title': row[1][:200], 'description': desc[:200] if desc else '',
+                        'rank': 2.0, 'type': 'snippet', 'source': 'alias'
+                    })
+            
+            # Добавляем подтянутые сниппеты в результаты
+            results.extend(extra_snippets)
+            
+            # Сортируем по приоритету и обрезаем ПОСЛЕ сортировки
+            results.sort(key=lambda x: x['rank'], reverse=True)
             cur.close()
+            pool.putconn(conn)
+            return results[:limit]
             pool.putconn(conn)
             return results[:limit]
 

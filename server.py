@@ -8,7 +8,7 @@ sys.path.insert(0, str(src_dir))
 
 from fastmcp import FastMCP
 from database import init_database
-from mcp_tools_api import add_snippet as _add_snippet, get_db_state as _get_db_state, get_group as _get_group
+from mcp_tools_api import add_snippet as _add_snippet, add_aliases as _add_aliases, get_db_state as _get_db_state, get_group as _get_group
 from mcp_tools_loader import load_files as _load_files, load_bsl_docs as _load_bsl_docs, parse_html_file as _parse_html_file, extract_code_example as _extract_code_example
 from loader import detect_tags as _detect_tags
 
@@ -42,10 +42,11 @@ def load_bsl_tool(path: str):
 
 
 @mcp.tool()
-def add_snippet_tool(question: str, answer: str, source_url: str = None, tags: str = "bsl,code", confidence: float = 0.9, groups_id: int = None):
-    """Добавить сниппет кода (вопрос-ответ)."""
+def add_snippet_tool(question: str, answer: str, source_url: str = None, tags: str = "bsl,code", confidence: float = 0.9, groups_id: int = None, aliases: str = None):
+    """Добавить сниппет кода (вопрос-ответ). aliases — строка через запятую, дополнительные алиасы к создаваемому сниппету."""
     try:
-        result = _add_snippet(question=question, answer=answer, source_url=source_url, tags=tags, confidence=confidence, groups_id=groups_id)
+        alias_list = [a.strip() for a in aliases.split(',') if a.strip()] if aliases else None
+        result = _add_snippet(question=question, answer=answer, source_url=source_url, tags=tags, confidence=confidence, groups_id=groups_id, aliases=alias_list)
         if result.get('success'):
             msg = f"Сниппет создан! ID: {result['snippet_id']}"
             if result.get('aliases_created'):
@@ -55,6 +56,27 @@ def add_snippet_tool(question: str, answer: str, source_url: str = None, tags: s
             return f"Ошибка создания сниппета: {result.get('error', 'неизвестная ошибка')}"
     except Exception as e:
         return f"Ошибка при добавлении сниппета: {str(e)}"
+
+
+
+@mcp.tool()
+def add_aliases_tool(aliases: str, groups_id: int = None, snippets_id: int = None):
+    """Добавить алиасы к существующей группе или сниппету. aliases — строка через запятую. Заполнить хотя бы один из groups_id или snippets_id."""
+    try:
+        alias_list = [a.strip().lower() for a in aliases.split(',') if a.strip()]
+        if not alias_list:
+            return "Ошибка: алиасы пустые"
+        if groups_id is None and snippets_id is None:
+            return "Ошибка: нужно указать хотя бы один из groups_id или snippets_id"
+        
+        result = _add_aliases(aliases=alias_list, groups_id=groups_id, snippets_id=snippets_id)
+        if result.get('success'):
+            added = result.get('added', 0)
+            return f"Алиасы добавлены! Добавлено: {added}"
+        else:
+            return f"Ошибка добавления алиасов: {result.get('error', 'неизвестная ошибка')}"
+    except Exception as e:
+        return f"Ошибка при добавлении алиасов: {str(e)}"
 
 
 @mcp.tool()
