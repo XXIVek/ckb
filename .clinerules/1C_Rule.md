@@ -1,208 +1,302 @@
-# Инструкции для AI ассистента — MCP 1C Knowledge Base
+# Инструкции для AI ассистента по программированию в 1С:Предприятие
+
+## Основные правила при работе с проектом размещены в каталоге C:\1C_LLM\ckb\.clinerules.
+
+### назначение правил:
+
+- 1C_Rule.md - общие правила для работы с проектом (инструкции по использованию MCP, запуску различных команд и скриптов), прочая общая информация.
 
 ## Роль
-MCP-сервер для хранения и поиска документации по платформе 1С:Предприятие (BSL + конфигурации).
+
+Я — AI ассистент по программированию в 1С:Предприятие.
+
+## ПРИНЦИП РАБОТЫ
+
+### 📚 Шаг 1: Поиск документации (MCP `1c-knowledge-base`)
+
+**Когда использовать:** При ответе на любые вопросы по языку BSL, платформе 1С, ИТС, методологии.
+
+| Сценарий | Инструмент | Описание |
+|----------|-----------|----------|
+| Общий поиск по документации | `search_docs_tool(query, category?, limit?)` | Комбинированный поиск по группам, сниппетам и алиасам |
+| Получить полную группу | `get_doc_tool(doc_id)` | Получить HTML-контент группы справки по ID |
+| Проверить состояние БД | `get_db_state_tool()` | Узнать количество групп, сниппетов, алиасов |
+| Список категорий | `list_categories_tool()` | Получить список доступных категорий документации |
+| Загрузить документацию | `load_doc_tool(path, category)` / `load_bsl_tool(path)` / `load_single_html_tool(filepath, category)` | Загрузка HTML/PDF/Markdown документов в БД |
+| Добавить сниппет кода | `add_snippet_tool(question, answer, ...)` | Добавить вопрос-ответ с примером кода |
+
+**Категории документации:**
+
+- `language,bsl` — язык BSL (источник: `/html/BSL/`)
+- `platform` — платформа 1С (источник: `/html/platform/`, PDF)
+- `its` — ИТС (информационно-технологическая поддержка)
+- `methodology` — методология программирования
+
+> **Важно:** ВСЕГДА начинай работу, связанную с 1С, с поиска в `1c-knowledge-base`. Только если нужной информации нет — переходи к анализу файлов вручную.
 
 ---
 
-## 🗄️ АКТУАЛЬНОЕ СОСТОЯНИЕ БАЗЫ ДАННЫХ
+### ⚙️ Шаг 2: Работа с конфигурациями 1С (MCP `1c-configurations-core`)
 
-### local_doc (PostgreSQL localhost:5432)
-| Таблица | Строк | Назначение |
-|---------|-------|------------|
-| **groups** | **0** | Каждый HTML-файл = одна группа (pagetitle, title, versionInfo, description=body HTML) |
-| **knowledge_snippets** | **0** | Вопрос-ответ с примером кода, привязка к groups_id |
-| **alias_targets** | **0** | Связи алиасов с группами/сниппетами |
-| **doc_categories** | **4** | language / platform / its / methodology |
-| **doc_tags** | **-** | Теги классификации |
+**Когда использовать:** При работе с объектами конкретных конфигураций (БГУ2, ТSD и др.), поиске по BSL-коду конфигурации, получении структуры объектов.
 
-### Configurations (PostgreSQL localhost:5432)
-| Таблица | Назначение |
-|---------|-----------|
-| **configuration** | Справочник загруженных баз/расширений |
-| **configuration_objects** | Объекты конфигурации (справочники, документы, регистры) |
-| **bsl_modules** | Код BSL-модулей |
-| **enum_values** | Значения перечислений |
-| **cross_references** | Связи документации с объектами конфигурации |
+| Сценарий | Инструмент | Описание |
+|----------|-----------|----------|
+| Список конфигураций | `list_configurations_tool(status?)` | Получить список всех загруженных конфигураций |
+| Информация о конфигурации | `get_configuration_tool(config_id)` | Детальная информация по ID |
+| Найти по имени/UUID | `find_config_by_name_uuid_tool(name_or_uuid)` | Поиск конфигурации |
+| Регистрация конфигурации | `register_external_report_tool(source_path)` | Зарегистрировать внешнюю обработку/отчет |
+| Поиск объектов | `search_config_objects_tool(query, config_id?)` | Поиск по имени/описанию объектов конфигурации |
+| Структура объекта | `get_object_structure_tool(config_id, object_name)` | Получить реквизиты, формы объекта |
+| Список объектов по типу | `list_config_objects_tool(config_id, object_type?)` | Catalog, Document, Register и др. |
+| Поиск по BSL-коду | `search_bsl_code_tool(query, config_id?)` | Полнотекстовый поиск в модулях |
+| Получить код модуля | `get_bsl_module_code_tool(config_id, module_name?)` | Полный код BSL-модулей |
+| Значения перечислений | `get_enum_values_tool(config_id, enum_name?)` | Получить все значения Enum |
+| Прочитать XML/JSON | `read_config_file_tool(config_id, file_path?)` | Файлы конфигурации |
+| Пакетная индексация | `batch_index_from_dump_tool(config_id, type_filter?)` | Загрузка из ConfigDumpInfo.xml |
+| Анализ перед загрузкой | `analyze_config_load_tool(source_path)` | Проверка структуры без загрузки |
 
-### ❌ НЕ СУЩЕСТВУЮТ (удалены 06.10.2026)
-- `elements`, `docs`, `doc_fragments` — **НЕ ИСПОЛЬЗОВАТЬ**
-- `search_aliases` — удалена, используется `alias_targets`
+**Типы объектов (object_type):**
 
-Правильный запуск psql.exe
-$env:PGPASSWORD='Sta090860'; C:\Postgres\bin\psql.exe
+- `configuration` — полная конфигурация 1С
+- `extension` — расширение конфигурации
+- `external_processor` — внешняя обработка
+- `external_report` — внешний отчет
 
-## 📁 СТРУКТУРА ПРОЕКТА (C:\1C_LLM\ckb\)
+---
+
+### 🔄 Шаг 3: Обогащение данных конфигураций (MCP `1c-configurations-enrichment`)
+
+| Сценарий | Инструмент | Описание |
+|----------|-----------|----------|
+| **Управление алиасами:** | | |
+| Добавить алиас | `add_config_alias_tool(config_id, alias_name, target_type, target_name, ...)` | Создать синоним для объекта |
+| Список алиасов | `list_config_aliases_tool(configuration_id?, target_type?)` | Получить алиасы с фильтрацией |
+| Разрешить алиас | `get_alias_target_tool(alias_name)` | Получить цель по имени алиаса |
+| Поиск по алиасу | `search_config_by_alias_tool(query)` | Полнотекстовый поиск целей |
+| Удалить алиас | `delete_config_alias_tool(alias_id)` | Soft-delete (active = false) |
+| **Управление сниппетами:** | | |
+| Добавить сниппет | `add_config_snippet_tool(config_id, question, answer, ...)` | Добавить вопрос-ответ к конфигурации |
+| Список сниппетов | `list_config_snippets_tool(config_id?)` | Получить сниппеты конфигурации |
+| Поиск по сниппетам | `search_config_snippets_tool(query, config_id?)` | Полнотекстовый поиск |
+| Статистика сниппетов | `get_config_snippet_stats_tool(config_id)` | Метрики по сниппетам |
+| Удалить сниппет | `delete_config_snippet_tool(snippet_id)` | Hard-delete с CASCADE |
+| **Связи и зависимости:** | | |
+| Связать документацию | `register_cross_reference_tool(...)` | Связать элемент документации с объектом |
+| Получить связи | `get_cross_references_tool(local_doc_element_id)` | Все связи элемента |
+| Зависимости сниппетов | `add_snippet_dependency_tool(snippet_id, ...)` | Привязка сниппета к объекту |
+| Обновить зависимости | `update_dependent_snippets_tool(config_id, ...)` | При переименовании объекта |
+| **Генерация:** | | |
+| Авто-алиасы | `generate_aliases_for_object_tool(config_id, target_type, target_name, ...)` | Создать алиасы из имени объекта |
+| Получить сниппеты объекта | `get_snippets_for_object_tool(config_id, target_type, target_name)` | Сниппеты по объекту |
+
+---
+
+### 📤 Шаг 4: Экспорт изменений конфигурации (MCP `1c-configurations-export`)
+
+**Когда использовать:** После изменения объектов в БД для выгрузки изменений обратно в файлы.
+
+| Сценарий | Инструмент | Описание |
+|----------|-----------|----------|
+| **Отслеживание изменений:** | | |
+| Отметить изменение | `mark_object_modified_tool(config_id, target_type, target_name, modified?)` | Флаг изменённого объекта |
+| Снять флаг | `clear_modified_flag_tool(config_id, target_type, target_name)` | После успешного экспорта |
+| Список изменённых | `get_modified_objects_tool(config_id)` | Все модифицированные объекты |
+| Подсчитать изменения | `count_modified_objects_tool(config_id)` | Количество по типам |
+| **Экспорт:** | | |
+| Экспортировать | `export_config_changes_tool(config_id, target_path?)` | Выгрузка в файлы (только изменённые!) |
+| Журнал экспорта | `get_export_log_tool(config_id?, limit?)` | История экспортов |
+
+**Стандартный цикл экспорта:**
 
 ```text
-├── server.py                      ← MCP 1c-knowledge-base (10 tools)
-├── server_configurations.py       ← MCP 1c-configurations-base (11 tools)
-├── validate_project.py            ← Скрипт валидации
-├── LOAD_RULES.md                  ← Правила загрузки документации
-├── SEARCH_RULES.md                ← Правила поиска информации
-├── LOAD_RULES_Config.md           ← Правила загрузки конфигураций
-├── src/
-│   ├── config_tools.py            ← 5 функций для Configurations DB
-│   ├── config_extra.py            ← 6 функций для Configurations DB
-│   ├── database.py                ← Подключение к PostgreSQL (local_doc)
-│   ├── mcp_tools_api.py           ← API функции для knowledge-base
-│   ├── mcp_tools_batch.py         ← Batch-вставка групп/алиасов/сниппетов
-│   ├── mcp_tools_loader.py        ← Загрузка документов (PDF/HTML/MD)
-│   ├── loader_core.py             ← Вспомогательные функции загрузки
-│   ├── loader_extractors.py       ← Извлечение данных из файлов
-│   ├── loader_import.py           ← Импорт файлов
-│   ├── loader.py                  ← Вспомогательные функции загрузки
-│   ├── search.py                  ← Поиск по local_doc (groups + snippets)
-│   ├── alias_generator.py         ← Генерация алиасов
-│   ├── aliases.py                 ← Работа с алиасами
-│   ├── importers.py               ← Импортеры
-│   ├── load_bsl_v2.py             ← Парсер BSL HTML (batch 500/пачка)
-│   ├── mcp_tools_core.py          ← Core MCP инструменты
-│   ├── mcp_tools_loader_backup.py ← Резервная копия загрузчика
-│   ├── pdf_loader.py              ← Загрузка PDF
-│   ├── pdf_parser.py              ← Парсер PDF
-│   ├── pdf_parser_core.py         ← Core PDF парсер
-│   ├── pdf_parser_enhanced.py     ← Улучшенный PDF парсер
-│   └── pdf_parser_new.py          ← Новый PDF парсер
-├── tools/                         ← Вспомогательные инструменты
-├── docs/                          ← Документация
-└── .clinerules/
-    └── 1C_Rule.md                 ← ЭТОТ ФАЙЛ (правила для AI)
+1. mark_object_modified_tool() — после каждого изменения объекта
+2. count_modified_objects_tool() — проверить объём изменений
+3. export_config_changes_tool() — выгрузить в файлы
+4. clear_modified_flag_tool() — снять флаги после успешного экспорта
 ```
 
-**Всего Python-файлов в src/:** 23  
-**Важно:** Исходники документации (`C:\1C_LLM\LoadDoc\`) хранятся вне проекта.
+---
+
+### 🎯 Алгоритм принятия решений
+
+```text
+Пользователь задаёт вопрос по 1С:
+│
+├─ Вопрос о языке BSL / платформе / ИТС?
+│  └─→ MCP `1c-knowledge-base`
+│     ├─ search_docs_tool("ключевые слова")
+│     └─ get_doc_tool(doc_id) — если нужна полная группа
+│
+├─ Вопрос об объекте конкретной конфигурации?
+│  └─→ MCP `1c-configurations-core`
+│     ├─ find_config_by_name_uuid_tool() — найти конфигурацию
+│     ├─ search_config_objects_tool("объект") — найти объект
+│     ├─ get_object_structure_tool() — получить структуру
+│     └─ search_bsl_code_tool("код") — поиск в BSL-модулях
+│
+├─ Нужно создать алиас / сниппет для конфигурации?
+│  └─→ MCP `1c-configurations-enrichment`
+│     ├─ add_config_alias_tool()
+│     └─ add_config_snippet_tool()
+│
+└─ Изменили объект в БД и нужно выгрузить?
+   └─→ MCP `1c-configurations-export`
+      ├─ mark_object_modified_tool()
+      ├─ export_config_changes_tool()
+      └─ clear_modified_flag_tool()
+```
 
 ---
 
-## 🏗 АРХИТЕКТУРА: ДВА НЕЗАВИСИМЫХ MCP-СЕРВЕРА
+### ⚠️ Критические правила работы с MCP
 
-### 1. 1c-knowledge-base (server.py)
-**База данных:** `local_doc` | **Инструменты:** 11 tools (+ load_single_html_tool)
-
-| Инструмент | Назначение |
-|-----------|-----------|
-| `load_single_html_tool(filepath, category?)` | **Загрузить одиночный HTML-файл** |
-| `load_doc_tool(path, category)` | Загрузка документов из директории (.html, .pdf, .md) |
-| `load_bsl_tool(path)` | Загрузка формализованной структуры BSL (objects/ + tables/) |
-| `add_snippet_tool(question, answer, ...)` | Добавить вопрос-ответ с кодом |
-| `detect_tags_tool(text)` | Определить теги контента |
-| `search_docs_tool(query, category?, limit?)` | Комбинированный поиск по группам и сниппетам |
-| `get_doc_tool(doc_id)` | Полная группа по ID |
-| `get_db_state_tool()` | Состояние БД local_doc |
-| `list_categories_tool()` | Список категорий документации |
-| `get_load_rules_tool()` | Содержимое LOAD_RULES.md |
-| `get_search_rules_tool()` | Содержимое SEARCH_RULES.md |
-
-### 2. 1c-configurations-base (server_configurations.py)
-**База данных:** `configurations` | **Инструменты:** 11 tools
-
-| Инструмент | Назначение |
-|-----------|-----------|
-| `register_configuration_tool(source_path, dump_file?)` | Зарегистрировать новую конфигурацию из папки выгрузки |
-| `batch_index_from_dump_tool(config_id, type_filter?)` | Пакетная индексация объектов из ConfigDumpInfo.xml |
-| `list_configurations_tool(status?)` | Список всех загруженных 1C-конфигураций |
-| `get_configuration_tool(config_id)` | Детальная информация о конфигурации |
-| `search_config_objects_tool(query, config_id?)` | Поиск объектов по имени ИЛИ описанию |
-| `get_object_structure_tool(config_id, object_name)` | Получить структуру объекта |
-| `list_config_objects_tool(config_id, object_type?)` | Список объектов конфигурации по типу |
-| `search_bsl_code_tool(query, config_id?)` | Поиск по коду BSL-модулей |
-| `get_enum_values_tool(config_id, enum_name?)` | Получить все значения перечисления |
-| `register_cross_reference_tool(...)` | Связать элемент документации с объектом конфигурации |
-| `get_cross_references_tool(local_doc_element_id)` | Получить все связи элемента документации |
+1. **ВСЕГДА начинай с `1c-knowledge-base`** — только если информации нет, переходи к файлам
+2. **Исходники вне проекта:** `C:\1C_LLM\LoadDoc\` — документация и конфигурации
+3. **Все MCP-инструменты работают через server.py / server_configurations.py** — не напрямую через mcp_tools.py
+4. **psql.exe запускается правильно:** `$env:PGPASSWORD='Sta090860'; C:\Postgres\bin\psql.exe` с флагами `-tA -P footer=off`  
+5. **Никогда не запрашивать подтверждение** на продолжение вывода — команды выполняются автоматически
+6. **Фильтровать вывод:** использовать LIMIT, WHERE в SQL или [:10], head в Python
 
 ---
 
-## 🔑 ВСПОМОГАТЕЛЬНЫЕ МОДУЛИ (src/)
+## РАБОТА С ТЕРМИНАЛОМ
 
-### config_tools.py (5 функций)
-| Функция | Назначение |
-|---------|-----------|
-| `list_configurations(status?)` | Список конфигураций |
-| `get_configuration(config_id)` | Детали конфигурации |
-| `search_config_objects(query, config_id?)` | Поиск объектов |
-| `get_object_structure(config_id, object_name)` | Структура объекта |
-| `list_config_objects(config_id, object_type?)` | Список объектов по типу |
+Правильный запуск psql.exe:
 
-### config_extra.py (6 функций)
-| Функция | Назначение |
-|---------|-----------|
-| `search_bsl_code(query, config_id?)` | Поиск BSL-кода |
-| `get_enum_values(config_id, enum_name?)` | Значения перечислений |
-| `register_configuration(source_path, dump_file?)` | Регистрация конфигурации |
-| `batch_index_from_dump(config_id, type_filter?)` | Пакетная индексация |
-| `register_cross_reference(...)` | Создание связей cross-reference |
-| `get_cross_references(local_doc_element_id)` | Получение связей |
+```powershell
+$env:PGPASSWORD='Sta090860'; C:\Postgres\bin\psql.exe -tA -P footer=off
+```
 
-### mcp_tools_api.py (4 функции)
-| Функция | Назначение |
-|---------|-----------|
-| `add_snippet()` | Добавление сниппета |
-| `get_db_state()` | Состояние БД |
-| `get_group(group_id)` | Получение группы |
-| `search_docs(query, category?, limit?)` | Комбинированный поиск |
+с использованием флага `-tA` для тихого режима и footer=off для отключения постраничного вывода.
 
-### mcp_tools_loader.py (2 функции)
-| Функция | Назначение |
-|---------|-----------|
-| `load_files(path, category)` | Загрузка файлов |
-| `load_bsl_docs(path)` | Загрузка BSL-документации |
+Критические правила:
 
-### loader.py (1 функция)
-| Функция | Назначение |
-|---------|-----------|
-| `detect_tags(text)` | Определение тегов контента |
+- Никогда не запрашивать подтверждение пользователя на продолжение вывода — команды с длинным выводом (psql, python) выполняются автоматически
+- Не использовать `run_commands` с командами, выводящими много строк без фильтрации — использовать LIMIT, WHERE, выборочные поля
+- Если результат большой: фильтровать на стороне SQL (`WHERE`, `LIMIT`) или Python (`[:10]`, `head`)
 
 ---
 
-## ⚠️ КРИТИЧЕСКИЕ ОГРАНИЧЕНИЯ
+## ВАЖНЫЕ ПРАВИЛА
 
-1. **search.py НЕ ИСПОЛЬЗОВАТЬ** — таблицы `docs` и `doc_fragments` не существуют
-2. **Таблица elements полностью удалена** — из кода, документации, SQL-запросов
-3. **add_snippet использует groups_id** — параметр element_id убран
-4. **Все MCP-инструменты работают через server.py / server_configurations.py** — не напрямую через mcp_tools.py
-5. **Таблица search_aliases удалена** — используется alias_targets
-6. **config_tools.py и config_extra.py — два отдельных модуля**, не объединяй их
+- Исходники документации (`C:\1C_LLM\LoadDoc\`) хранятся **вне проекта**
+- Все MCP-инструменты работают через server.py / server_configurations.py — не напрямую через mcp_tools.py
 
 ---
 
-## 🔍 ЧАСТЫЕ ОШИБКИ И КАК ИЗБЕЖАТЬ
+## ⚠️ ПРАВИЛА РЕДАКТИРОВАНИЯ КОДА MCP-СЕРВЕРОВ
 
-| Ошибка | Как избежать |
-|--------|-------------|
-| Использование таблиц docs/doc_fragments | Использовать groups и knowledge_snippets |
-| Поиск только по name | search_groups_fulltext ищет по: name \|\| pagetitle \|\| title \|\| description |
-| Игнорирование category | Всегда указывать category для ускорения поиска |
-| Не проверка versionInfo | Всегда проверять versionInfo для совместимости |
-| Попытка загрузить пустые файлы | Не загружать служебные файлы (__categories__, каталоги) |
-| Использование search_aliases | Использовать alias_targets вместо search_aliases |
+> **ВАЖНО:** Ниже приведены правила, которые необходимо соблюдать при внесении изменений в код MCP-серверов. Эти правила предназначены для предотвращения ошибок и обеспечения согласованности кодовой базы.
 
----
+### 1. Редактирование кода MCP `1c-knowledge-base` (server.py)
 
-## 📥 ЗАГРУЗКА ОДИНОЧНОГО HTML-ФАЙЛА
+**Перед началом редактирования файлов MCP `1c-knowledge-base`:**
 
-**Подробные правила:** см. `LOAD_RULES.md` раздел "АЛГОРИТМ ДЕЙСТВИЙ AI ПРИ ЗАГРУЗКЕ"
+✅ **ОБЯЗАТЕЛЬНО** ознакомьтесь с файлом правил:
 
-### Кратко:
-1. **Определить категорию по пути** (НЕ спрашивать если очевидно!)
-2. Вызвать `load_single_html_tool(filepath, category)`
-3. Если есть код → создать сниппет через `add_snippet_tool()`
+```text
+C:\1C_LLM\ckb\.clinerules\1c-knowledge-base_Rule.md
+```
 
-### ✅ Когда НЕ НУЖНО спрашивать:
-- Путь содержит `/html/BSL/` → `category="language,bsl"`
-- Пользователь сказал "загрузить BSL" → использовать `load_bsl_tool()`
-- Путь содержит `/html/platform/` → `category="platform"`
+**Что нужно знать из файла правил:**
 
-### ❓ Когда НУЖНО спросить:
-- Путь неочевиден (нет BSL/platform/its в пути)
+- Структура базы данных `local_doc` (groups, knowledge_snippets, alias_targets)
+- Алгоритм поиска и приоритеты ранжирования
+- Категории документации и сценарии загрузки
+- Критические правила работы с groups_id и алиасами
+
+**После ознакомления:**
+
+1. Убедитесь, что понимаете архитектуру сервера
+2. Проверьте актуальность описанных таблиц и полей
+3. Только после этого приступайте к редактированию кода
 
 ---
 
-## 📝 ВАЖНЫЕ ЗАМЕЧАНИЯ
+### 2. Редактирование кода MCP `1c-configurations-core` (server_configurations.py)
 
-- Все поисковые запросы работают на **русском языке**
-- Полнотекстовый индекс настроен для русского языка (`tsvector 'russian'`)
-- Фрагменты — мелкая гранулярность: методы, типы, свойства
-- Документация (группы) — крупная гранулярность: статьи, описания
-- Путь к файлам всегда задаётся в задании — он не зафиксирован
-- Для проверки состояния: `python validate_project.py`
+**Перед началом редактирования файлов MCP `1c-configurations-core`:**
+
+✅ **ОБЯЗАТЕЛЬНО** ознакомьтесь с файлом правил:
+
+```text
+C:\1C_LLM\ckb\.clinerules\1c-configurations-core_Rule.md
+```
+
+**Что нужно знать из файла правил:**
+
+- Структура базы данных `Configurations` (configuration, configuration_objects, bsl_modules)
+- Типы объектов и стратегии их загрузки
+- Алгоритм работы с конфигурациями
+- Критические правила работы с UUID и внешними обработками
+
+**После ознакомления:**
+
+1. Убедитесь, что понимаете механизм индексации объектов
+2. Проверьте соответствие описанных таблиц реальному состоянию БД
+3. Только после этого приступайте к редактированию кода
+
+---
+
+### 3. Редактирование кода MCP `1c-configurations-enrichment` (server_configurations.py)
+
+**Перед началом редактирования файлов MCP `1c-configurations-enrichment`:**
+
+✅ **ОБЯЗАТЕЛЬНО** ознакомьтесь с файлом правил:
+
+```text
+C:\1C_LLM\ckb\.clinerules\1c-configurations-enrichment_Rule.md
+```
+
+**Что нужно знать из файла правил:**
+
+- Структура обогащения (config_aliases, config_snippets, dependencies)
+- Управление алиасами и сниппетами конфигураций
+- Механизм связей между документацией и объектами
+- Критические правила удаления алиасов и сниппетов
+
+**После ознакомления:**
+
+1. Убедитесь, что понимаете механизм генерации алиасов
+2. Проверьте соответствие описанных таблиц реальному состоянию БД
+3. Только после этого приступайте к редактированию кода
+
+---
+
+### 4. Редактирование кода MCP `1c-configurations-export` (server_configurations.py)
+
+**Перед началом редактирования файлов MCP `1c-configurations-export`:**
+
+✅ **ОБЯЗАТЕЛЬНО** ознакомьтесь с файлом правил:
+
+```text
+C:\1C_LLM\ckb\.clinerules\1c-configurations-export_Rule.md
+```
+
+**Что нужно знать из файла правил:**
+
+- Структура отслеживания изменений (modified_objects, export_log)
+- Стандартный цикл экспорта и управления флагами
+- Механизм реверс-инжиниринга конфигураций
+- Критические правила работы с флагами изменённых объектов
+
+**После ознакомления:**
+
+1. Убедитесь, что понимаете механизм отслеживания изменений
+2. Проверьте соответствие описанных таблиц реальному состоянию БД
+3. Только после этого приступайте к редактированию кода
+
+---
+
+### 🎯 Общие правила для всех MCP-серверов
+
+При редактировании кода ЛЮБОГО MCP-сервера:
+
+1. **ВСЕГДА начинай с чтения соответствующего файла правил** в `.clinerules/`
+2. **Проверяй актуальность** описанных таблиц и полей через `get_db_state_tool()` или аналогичные инструменты
+3. **Не удаляй существующие правила** из файлов без согласования
+4. **Обновляй файлы правил** при внесении изменений в код MCP-серверов
+5. **Синхронизируй информацию** между файлами правил и реальным кодом
+
+> ⚠️ **Нарушение этих правил может привести к рассинхронизации документации и кода, что затруднит дальнейшую поддержку проекта!**
