@@ -49,7 +49,7 @@ from config_snippets_manager import (
     search_config_snippets as _search_config_snippets,
     get_config_snippet_stats as _get_config_snippet_stats,
 )
-from external_report_loader import register_external_report
+from external_report_loader import register_external_report, delete_external_object, read_external_meta
 mcp = FastMCP("1c-configurations-core")
 
 
@@ -238,12 +238,18 @@ def delete_config_tool(config_id: int, force: bool = False):
 
 
 @mcp.tool()
-def register_external_report_tool(source_path: str):
-    """Зарегистрировать внешний отчет/обработку из каталога в БД ckb_1c_configurations."""
+def register_external_report_tool(source_path: str, replace: bool = False):
+    """Зарегистрировать внешний отчет/обработку из каталога в БД ckb_1c_configurations.
+
+    Если объект с таким UUID уже загружен, загрузка НЕ выполняется — возвращается
+    информация о существующей записи. Для перезагрузки (удалить старую запись и
+    загрузить заново) подтвердите операцию параметром replace=True.
+    """
     try:
-        result = register_external_report(source_path)
+        result = register_external_report(source_path, replace=replace)
         if result.get('success'):
             lines = [f"✅ Объект зарегистрирован!", f"ID: {result['id']}", f"Название: {result.get('name', '')}"]
+            lines.append(f"UUID: {result.get('uuid', '')}")
             lines.append(f"Тип: {result.get('object_type', 'unknown')}")
             lines.append(f"Реквизиты: {result.get('attributes_count', 0)}")
             lines.append(f"Табличные части: {result.get('tabular_sections_count', 0)}")
@@ -252,10 +258,69 @@ def register_external_report_tool(source_path: str):
             bsl_count = result.get('bsl_modules_indexed', 0)
             if bsl_count > 0:
                 lines.append(f"BSL-модулей: {bsl_count}")
+            replaced = result.get('replaced')
+            if replaced:
+                lines.append(
+                    f"♻️ Перезагружено: удалена предыдущая запись ID={replaced.get('old_id')} "
+                    f"(BSL-модулей удалено: {replaced.get('bsl_modules_deleted', 0)})"
+                )
+            for warning in result.get('warnings') or []:
+                lines.append(f"⚠️ {warning}")
+            return '\n'.join(lines)
+        if result.get('already_exists'):
+            existing = result.get('existing') or {}
+            lines = ["⚠️ Внешний объект уже загружен в БД — загрузка НЕ выполнена."]
+            lines.append(f"  ID существующей записи: {existing.get('id')}")
+            lines.append(f"  Название: {existing.get('name', '')}")
+            lines.append(f"  UUID: {existing.get('uuid', '')}")
+            lines.append(f"  Тип: {existing.get('object_type', '')}")
+            lines.append(f"  Дата загрузки: {existing.get('created_at', '')}")
+            lines.append(f"  Связанные данные: BSL-модулей {existing.get('bsl_modules_count', 0)}, "
+                         f"реквизитов {existing.get('attributes_count', 0)}, "
+                         f"табличных частей {existing.get('tabular_sections_count', 0)}, "
+                         f"форм {existing.get('forms_count', 0)}, "
+                         f"макетов {existing.get('templates_count', 0)}")
+            lines.append("")
+            lines.append(f"ℹ️ {result.get('error', '')}")
+            lines.append(f"Для перезагрузки подтвердите операцию: register_external_report_tool(source_path=..., replace=True) — "
+                         f"запись ID={existing.get('id')} и её BSL-модули будут удалены, затем объект загрузится заново.")
+            lines.append("Либо удалите запись отдельно: delete_external_report_tool(source_path=...) или delete_external_report_tool(report_id=...).")
             return '\n'.join(lines)
         return f"❌ Ошибка: {result.get('error', 'неизвестная ошибка')}"
     except Exception as e:
         return f"Ошибка при регистрации: {str(e)}"
+
+
+@mcp.tool()
+def delete_external_report_tool(source_path: str = None, uuid: str = None, report_id: int = None, object_type: str = None):
+    """Удалить внешний отчет/обработку из БД вместе со связанными BSL-модулями.
+
+    Дочерние таблицы (attributes/forms/templates/tabular_sections) удаляются каскадно.
+    Достаточно одного из аргументов: source_path (каталог выгрузки), uuid или report_id.
+    object_type: external_report (по умолчанию) или external_processing.
+    """
+    try:
+        obj_type = object_type or "external_report"
+        if source_path and not uuid and report_id is None:
+            meta = read_external_meta(source_path)
+            if not meta.get('success'):
+                return f"❌ Ошибка: {meta.get('error', 'неизвестная ошибка')}"
+            uuid = meta.get('uuid')
+            if not object_type:
+                obj_type = meta.get('object_type', obj_type)
+        result = delete_external_object(obj_id=report_id, uuid_val=uuid, obj_type=obj_type)
+        if not result.get('success'):
+            return f"❌ Ошибка: {result.get('error', 'неизвестная ошибка')}"
+        lines = ["✅ Объект удалён из БД.",
+                 f"Таблица: {result.get('table', '')}",
+                 f"ID: {result.get('id')}",
+                 f"Название: {result.get('name', '')}",
+                 f"BSL-модулей удалено: {result.get('bsl_modules_deleted', 0)}"]
+        if result.get('children_cascaded'):
+            lines.append("Дочерние данные (реквизиты/ТЧ/формы/макеты) удалены каскадно.")
+        return '\n'.join(lines)
+    except Exception as e:
+        return f"Ошибка при удалении: {str(e)}"
 
 
 
