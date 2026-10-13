@@ -6,6 +6,20 @@ import subprocess
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from external_db import transaction
+from external_meta_parser import parse_external_meta
+from external_subdir_parser import parse_external_subdirs
+from external_table_writer import (
+    AttributesRowWriter,
+    BslModuleRowWriter,
+    ExternalProcessingRowWriter,
+    ExternalReportRowWriter,
+    FormExtRowWriter,
+    FormsRowWriter,
+    TabularSectionsRowWriter,
+    TemplatesRowWriter,
+)
+
 
 def _run_psql(query, db="ckb_1c_configurations"):
     """Execute SQL query on ckb_1c_configurations database."""
@@ -248,6 +262,45 @@ def _external_meta_info(obj_type):
     return _EXTERNAL_TABLES.get(obj_type, _EXTERNAL_TABLES["external_report"])
 
 
+def detect_external_object_type(xml_path):
+    """Тип внешнего объекта по XML-файлу: '' если не распознан.
+
+    В выгрузке 1С корневой элемент - MetaDataObject, а ExternalReport /
+    ExternalDataProcessor является его потомком верхнего уровня, поэтому проверяется
+    и имя корневого тега, и имена элементов верхнего уровня.
+    """
+    try:
+        root = ET.parse(str(xml_path)).getroot()
+    except Exception:
+        return ""
+    names = {str(root.tag).split("}")[-1]}
+    names.update(str(child.tag).split("}")[-1] for child in root)
+    if "ExternalReport" in names:
+        return "external_report"
+    if "ExternalDataProcessor" in names:
+        return "external_processing"
+    return ""
+
+
+def _find_root_object_xml(source_path):
+    """V1: найти XML внешнего отчёта/обработки среди файлов КОРНЕВОГО каталога (R1).
+
+    Возвращает (путь, тип) либо (None, None). Признак - элемент ExternalReport /
+    ExternalDataProcessor в XML, а не вхождение подстроки: файл конфигурации тоже
+    может содержать слово ExternalReport в описаниях.
+    """
+    try:
+        xml_files = sorted([p for p in Path(source_path).glob("*.xml") if p.is_file()],
+                           key=lambda p: p.name.lower())
+    except OSError:
+        return None, None
+    for xml_file in xml_files:
+        obj_type = detect_external_object_type(xml_file)
+        if obj_type:
+            return str(xml_file), obj_type
+    return None, None
+
+
 def find_external_object(uuid_val, obj_type="external_report"):
     """Найти ранее загруженный внешний отчёт/обработку по UUID.
 
@@ -277,6 +330,7 @@ def find_external_object(uuid_val, obj_type="external_report"):
             ("attributes", "attributes_count"),
             ("tabular_sections", "tabular_sections_count"),
             ("forms", "forms_count"),
+            ("form_ext", "form_ext_count"),
             ("templates", "templates_count"),
         ):
             columns.append(f"(SELECT COUNT(*) FROM {child_table} c WHERE c.parent_uuid = t.uuid)")
@@ -292,7 +346,8 @@ def find_external_object(uuid_val, obj_type="external_report"):
         return None
 
     values = rows[0]
-    int_keys = {"id", "bsl_modules_count", "attributes_count", "tabular_sections_count", "forms_count", "templates_count"}
+    int_keys = {"id", "bsl_modules_count", "attributes_count", "tabular_sections_count",
+                "forms_count", "form_ext_count", "templates_count"}
     found = {}
     for key, value in zip(keys, values):
         if key in int_keys:
@@ -307,11 +362,16 @@ def find_external_object(uuid_val, obj_type="external_report"):
 
 
 def delete_external_object(obj_id=None, uuid_val=None, obj_type="external_report"):
-    """Удалить внешний отчёт/обработку вместе со связанными BSL-модулями.
+    """Удалить внешний отчёт/обработку вместе со всеми связанными данными (V13).
 
-    Дочерние таблицы (attributes/forms/templates/tabular_sections) удаляются
-    каскадно по FK parent_uuid -> external_report(uuid) ON DELETE CASCADE,
-    а bsl_modules чистится явно: FK на bsl_modules.report_id отсутствует.
+    Очистка явная, а не только каскадом:
+      * bsl_modules - явный DELETE по report_id/processing_id И по parent_uuid
+        (FK на bsl_modules.report_id в схеме отсутствует, каскада нет);
+      * form_ext, forms, templates - явный DELETE по parent_uuid. Для forms/
+        form_ext/templates FK parent_uuid -> external_report(uuid) ON DELETE CASCADE
+        есть, но явный порядок (сначала form_ext, затем forms) делает счётчики
+        удалённых строк прозрачными и не зависит от наличия каскада;
+      * attributes, tabular_sections - остаются на каскаде по FK parent_uuid.
     """
     info = _external_meta_info(obj_type)
     table = info["table"]
@@ -328,21 +388,47 @@ def delete_external_object(obj_id=None, uuid_val=None, obj_type="external_report
     except (TypeError, ValueError):
         return {"success": False, "error": f"Некорректный ID объекта: {obj_id}"}
 
-    rows = _psql_fields(f"SELECT t.id, REPLACE(COALESCE(t.name, ''), '|', ' ') FROM {table} t WHERE t.id = {obj_id} LIMIT 1")
+    rows = _psql_fields(f"SELECT t.id, REPLACE(COALESCE(t.name, ''), '|', ' '), COALESCE(t.uuid::text, '') FROM {table} t WHERE t.id = {obj_id} LIMIT 1")
     if isinstance(rows, dict) and "error" in rows:
         return {"success": False, "error": rows["error"]}
     if not rows:
         return {"success": False, "error": f"Объект с ID {obj_id} в таблице {table} не найден"}
     obj_name = rows[0][1] if len(rows[0]) > 1 else ""
+    obj_uuid = rows[0][2] if len(rows[0]) > 2 else ""
+    # V13: модули могут быть привязаны и к ID объекта (report_id), и к его UUID
+    # (parent_uuid) - удаляем по обоим основаниям, сирот не остаётся.
+    by_parent = f" OR parent_uuid = '{obj_uuid}'::uuid" if obj_uuid else ""
 
     bsl_deleted = 0
-    count_res = _run_psql(f"SELECT COUNT(*) FROM bsl_modules WHERE {bsl_column} = {obj_id}")
+    count_res = _run_psql(f"SELECT COUNT(*) FROM bsl_modules WHERE {bsl_column} = {obj_id}{by_parent}")
     if isinstance(count_res, list) and count_res and isinstance(count_res[0].get("result"), int):
         bsl_deleted = count_res[0]["result"]
     if bsl_deleted:
-        del_res = _run_psql(f"DELETE FROM bsl_modules WHERE {bsl_column} = {obj_id}")
+        del_res = _run_psql(f"DELETE FROM bsl_modules WHERE {bsl_column} = {obj_id}{by_parent}")
         if isinstance(del_res, dict) and "error" in del_res:
             return {"success": False, "error": f"Не удалось удалить BSL-модули: {del_res['error']}"}
+
+    # V13: формы, их содержимое и макеты удаляем явно и в правильном порядке:
+    # form_ext -> forms (FK form_id -> forms(id)), затем templates.
+    children_deleted = {}
+    if info["has_children"] and obj_uuid:
+        for child_table in ("form_ext", "forms", "templates"):
+            counted = _run_psql(f"SELECT COUNT(*) FROM {child_table} WHERE parent_uuid = '{obj_uuid}'::uuid")
+            count = counted[0]["result"] if isinstance(counted, list) and counted else 0
+            if count:
+                gone = _run_psql(f"DELETE FROM {child_table} WHERE parent_uuid = '{obj_uuid}'::uuid")
+                if isinstance(gone, dict) and "error" in gone:
+                    return {"success": False,
+                            "error": f"Не удалось удалить связанные строки {child_table}: {gone['error']}"}
+            children_deleted[child_table] = count
+
+        # V13: реквизиты и табличные части удалит каскад по FK parent_uuid, но их количество
+        # оператору показываем так же честно - считаем до удаления родителя.
+        for child_table in ("attributes", "tabular_sections"):
+            counted = _run_psql(
+                f"SELECT COUNT(*) FROM {child_table} WHERE parent_uuid = '{obj_uuid}'::uuid")
+            children_deleted[child_table] = (
+                counted[0]["result"] if isinstance(counted, list) and counted else 0)
 
     del_res = _run_psql(f"DELETE FROM {table} WHERE id = {obj_id}")
     if isinstance(del_res, dict) and "error" in del_res:
@@ -361,31 +447,21 @@ def delete_external_object(obj_id=None, uuid_val=None, obj_type="external_report
         "object_type": obj_type,
         "table": table,
         "bsl_modules_deleted": bsl_deleted,
+        "children_deleted": children_deleted,
         "children_cascaded": info["has_children"],
     }
 
 
 def read_external_meta(source_path):
-    """Прочитать UUID, имя и тип внешнего отчёта/обработки из каталога выгрузки."""
-    if not os.path.isdir(source_path):
-        return {"success": False, "error": f"Folder not found: {source_path}"}
+    """Прочитать UUID, имя и тип внешнего отчёта/обработки из каталога выгрузки (только корень, R1)."""
+    if not os.path.isdir(str(source_path)):
+        return {"success": False, "error": f"Каталог не найден: {source_path}"}
 
-    ext_xml = None
-    obj_type = "external_processing"
-    for xml_file in Path(source_path).rglob("*.xml"):
-        try:
-            with open(xml_file, "r", encoding="utf-8-sig") as f:
-                content = f.read()
-            if "<ExternalDataProcessor " in content or "<ExternalReport " in content:
-                ext_xml = str(xml_file)
-                if "<ExternalReport " in content:
-                    obj_type = "external_report"
-                break
-        except Exception:
-            pass
-
+    ext_xml, obj_type = _find_root_object_xml(source_path)
     if not ext_xml:
-        return {"success": False, "error": "External report/processing XML not found"}
+        return {"success": False,
+                "error": "Внешний отчёт или обработка не найдены: в корне каталога нет XML "
+                         "с элементом ExternalReport или ExternalDataProcessor"}
 
     ns = {"md": "http://v8.1c.ru/8.3/MDClasses"}
     root = ET.parse(ext_xml).getroot()
@@ -413,63 +489,73 @@ def read_external_meta(source_path):
     return {"success": True, "uuid": uuid_val, "name": name, "object_type": obj_type, "xml_path": ext_xml}
 
 
-def register_external_report(source_path, replace=False):
-    """Register external report/processing from directory into ckb_1c_configurations."""
-    if not os.path.isdir(source_path):
-        return {"success": False, "error": f"Folder not found: {source_path}"}
-    
-    ext_xml = None
-    obj_type = "external_processing"
-    
-    for xml_file in Path(source_path).rglob("*.xml"):
-        try:
-            with open(xml_file, "r", encoding="utf-8-sig") as f:
-                content = f.read()
-            if "<ExternalDataProcessor " in content or "<ExternalReport " in content:
-                ext_xml = str(xml_file)
-                if "<ExternalReport " in content:
-                    obj_type = "external_report"
-                break
-        except Exception:
-            pass
-    
-    if not ext_xml:
-        return {"success": False, "error": "External report/processing XML not found"}
-    
-    tree = ET.parse(ext_xml)
-    root = tree.getroot()
-    ns = {'md': 'http://v8.1c.ru/8.3/MDClasses'}
-    
-    report_uuid = root.get('uuid')
-    if obj_type == "external_report":
-        report_tag = root.find('.//md:ExternalReport', ns)
-    else:
-        report_tag = root.find('.//md:ExternalDataProcessor', ns)
-    
-    if report_tag is None:
-        return {"success": False, "error": f"Could not find {obj_type} element in XML"}
-    
-    if not report_uuid:
-        report_uuid = report_tag.get('uuid', root.get('uuid'))
-    
-    properties = report_tag.find('.//md:Properties', ns)
-    props = {}
-    if properties is not None:
-        for prop in properties:
-            props[_local(prop.tag)] = _prop_text(prop)
-    
-    name = props.get('Name', Path(ext_xml).stem)
-    synonym = props.get('Synonym', '')
-    comment = props.get('Comment', '')
+def register_external_report(source_path, replace=None, force=None, xml_path=None, obj_type=None):
+    """Загрузить внешний отчёт/обработку из каталога выгрузки в ckb_1c_configurations.
 
-    # Проверка дубликата: объект с таким UUID уже мог быть загружен ранее.
-    # Перезагрузка выполняется только по явному подтверждению оператора (replace=True),
-    # иначе оператор получает информацию о уже загруженном объекте и ничего не меняется.
+    Блок-схема варианта 3: docs/config-scenarios/FLOWCHART_1c-configurations-core.md (узлы V1..V11).
+    force=True - перезаписать запись с тем же UUID без подтверждения оператора (R4, R5);
+    параметр replace сохранён как устаревший псевдоним force.
+    xml_path/obj_type передаёт точка входа (src/config_load_router.py); при вызове напрямую
+    они определяются по XML в КОРНЕ каталога (R1).
+    Разбор и запись: src/external_meta_parser.py (JSON-контракты) и
+    src/external_table_writer.py (классы-писатели), одна транзакция на загрузку.
+    Дочерние данные: реквизиты и колонки табличных частей - таблица attributes,
+    табличные части - tabular_sections (связь column_uuids), формы - forms + form_ext
+    (содержимое Forms/<Имя>/Ext/Form.xml и модуль формы), макеты - templates
+    (содержимое Templates/<Имя>/Ext/Template.xml), модули объекта и менеджера -
+    bsl_modules (модуль формы хранится в form_ext.ext, а не в bsl_modules).
+    Пустой или некорректный uuid любого элемента, включая форму и макет, - ошибка
+    загрузки (R3), откат. Отсутствующие Forms//Templates//Ext/, двоичная форма или
+    двоичный макет - не ошибка, а предупреждение в карточке результата.
+    """
+    if not os.path.isdir(str(source_path)):
+        return {"success": False,
+                "error": f"Каталог не найден: {source_path}",
+                "hint": "Проверьте путь: нужен каталог выгрузки, существующий на диске."}
+
+    force = bool(force) or bool(replace)
+
+    if not xml_path:
+        xml_path, detected_type = _find_root_object_xml(source_path)
+        obj_type = obj_type or detected_type
+    elif not obj_type:
+        obj_type = detect_external_object_type(xml_path)
+
+    if not xml_path or not obj_type:
+        return {"success": False,
+                "error": "Внешний отчёт или внешняя обработка не найдены: в корне каталога нет XML "
+                         "с элементом ExternalReport или ExternalDataProcessor",
+                "hint": "Каталог не подходит для загрузчика внешних объектов (R1, R6)."}
+
+    ext_xml = str(xml_path)
+
+    # V7/V8/V12: разбор корневого XML в JSON-контракты таблиц external_report,
+    # attributes и tabular_sections. Пустой или некорректный uuid корневого элемента
+    # либо любого дочернего элемента - явная ошибка загрузки (R3): в БД ничего не пишется.
+    parsed = parse_external_meta(ext_xml, obj_type)
+    if not parsed.get("success"):
+        return parsed
+
+    report_uuid = parsed["uuid"]
+    report_row = parsed["report"]
+    attribute_rows = parsed["attributes"]
+    tabular_section_rows = parsed["tabular_sections"]
+    child_counts = parsed.get("counts") or {}
+
+    
+    # Имя для карточки и подписи BSL-модулей: из Properties/Name, иначе - имя файла выгрузки.
+    name = report_row.get("name") or Path(ext_xml).stem
+    report_row["name"] = name
+
+
+    # V5/V6 (R4, R5): дубликат ищем по UUID. Без force оператор получает карточку уже
+    # загруженного объекта, в БД ничего не меняется. Тот же UUID при другой версии - тот же
+    # случай: сравнение версий не выполняется, колонки version в таблице нет.
     warnings = []
     replaced = None
     existing = find_external_object(report_uuid, obj_type)
     if existing:
-        if not replace:
+        if not force:
             return {
                 "success": False,
                 "already_exists": True,
@@ -482,307 +568,102 @@ def register_external_report(source_path, replace=False):
             }
         removed = delete_external_object(obj_id=existing["id"], obj_type=obj_type)
         if not removed.get("success"):
-            return {"success": False, "error": f"Не удалось удалить ранее загруженный объект: {removed.get('error')}"}
+            return {"success": False,
+                    "error": f"Не удалось удалить ранее загруженный объект: {removed.get('error')}"}
         replaced = {
             "old_id": existing["id"],
             "old_name": existing.get("name", ""),
             "bsl_modules_deleted": removed.get("bsl_modules_deleted", 0),
         }
-    
-    attributes, tabular_sections, forms, templates = _parse_child_objects(root, ns)
-    
-    # Helper functions for SQL escaping
-    def sql_escape(s):
-        return (s or '').replace("'", "''")
-    
-    def sql_val(s):
-        if not s:
-            return "NULL"
-        return "'" + sql_escape(s) + "'"
-    
-    # Insert into external_report or external_processing
-    if obj_type == "external_report":
-        mds = sql_val(props.get("MainDataCompositionSchema", "").split(".")[-1] if props.get("MainDataCompositionSchema") else None)
-        df = sql_val(props.get("DefaultForm", "").split(".")[-1] if props.get("DefaultForm") else None)
-        af = sql_val(props.get("AuxiliaryForm", "").split(".")[-1] if props.get("AuxiliaryForm") else None)
-        dsf = sql_val(props.get("DefaultSettingsForm", "").split(".")[-1] if props.get("DefaultSettingsForm") else None)
-        asf = sql_val(props.get("AuxiliarySettingsForm", "").split(".")[-1] if props.get("AuxiliarySettingsForm") else None)
-        dvf = sql_val(props.get("DefaultVariantForm", "").split(".")[-1] if props.get("DefaultVariantForm") else None)
-        vs = sql_val(props.get("VariantsStorage", "").split(".")[-1] if props.get("VariantsStorage") else None)
-        ss = sql_val(props.get("SettingsStorage", "").split(".")[-1] if props.get("SettingsStorage") else None)
-        
-        # Извлекаем данные из InternalInfo для соответствия схеме БД
-        internal_info = root.find('.//md:InternalInfo', ns)
-        contained_classid = ''
-        contained_objectid = ''
-        gen_type_name = ''
-        gen_type_category = ''
-        gen_type_typeid = ''
-        gen_type_valueid = ''
-        
-        if internal_info is not None:
-            # Элементы InternalInfo выгружаются с префиксом xr:, поэтому поиск
-            # идёт по локальным именам тегов, а не через пространство имён 'md'.
-            contained = _find_local(internal_info, 'ContainedObject')
-            if contained is not None:
-                contained_classid = _prop_text(_find_local(contained, 'ClassId'))
-                contained_objectid = _prop_text(_find_local(contained, 'ObjectId'))
-            
-            gen_type = _find_local(internal_info, 'GeneratedType')
-            if gen_type is not None:
-                gen_type_name = gen_type.get('name', '') or ''
-                gen_type_category = gen_type.get('category', '') or ''
-                gen_type_typeid = _prop_text(_find_local(gen_type, 'TypeId'))
-                gen_type_valueid = _prop_text(_find_local(gen_type, 'ValueId'))
-        
-        # synonym сохраняется как jsonb: заполненный перевод либо пустой объект '{}'
-        # (значения передаются через psql в UTF-8, апострофы удваиваются sql_escape)
-        if synonym:
-            synonym_val = "jsonb_build_object('ru', '" + sql_escape(synonym) + "')"
-        else:
-            synonym_val = "'{}'::jsonb"
-        
-        # Формируем UUID-значения (пустые → NULL)
-        def uuid_val(v):
-            return f"'{v}'::uuid" if v else 'NULL'
-        
-        sql = (f"INSERT INTO external_report (name, synonym, comment, uuid, "
-               f"containedobject_classid, containedobject_objectid, "
-               f"generatedtype_name, generatedtype_category, generatedtype_typeid, generatedtype_valueid, "
-               f"main_data_composition_schema, default_form, auxiliary_form, "
-               f"default_settings_form, auxiliary_settings_form, default_variant_form, "
-               f"variants_storage, settings_storage) VALUES ("
-               f"'{sql_escape(name)}', ({synonym_val})::jsonb, '{sql_escape(comment)}', "
-               f"{uuid_val(report_uuid)}, "
-               f"{uuid_val(contained_classid)}, "
-               f"{uuid_val(contained_objectid)}, "
-               f"'{sql_escape(gen_type_name)}', '{sql_escape(gen_type_category)}', "
-               f"{uuid_val(gen_type_typeid)}, "
-               f"{uuid_val(gen_type_valueid)}, "
-               f"{mds}, {df}, {af}, {dsf}, {asf}, {dvf}, {vs}, {ss}) RETURNING id")
-        result = _run_psql(sql)
-    else:
-        sql = (f"INSERT INTO external_processing (name, synonym, comment, version, uuid, class_id) "
-               f"VALUES ('{sql_escape(name)}', '{sql_escape(synonym)}', '{sql_escape(comment)}', "
-               f"'1.0.0.0', '{report_uuid}'::uuid, 'e41aff26-25cf-4bb6-b6c1-3f478a75f374') RETURNING id")
-        result = _run_psql(sql)
-    
-    if isinstance(result, dict) and "error" in result:
-        return {"success": False, "error": result["error"]}
-    
-    object_id = 0
-    if isinstance(result, list) and len(result) > 0:
-        if "result" in result[0]:
-            object_id = result[0]["result"]
-        elif isinstance(result[0], dict):
-            for k, v in result[0].items():
-                if isinstance(v, int):
-                    object_id = v
-                    break
-    
-    # Fallback: если INSERT не вернул ID (пустой ChildObjects, особенности psql)
-    if object_id == 0 or object_id is None:
-        try:
-            fallback_sql = f"SELECT id FROM external_report WHERE uuid = '{report_uuid}'::uuid"
-            fb_result = _run_psql(fallback_sql)
-            if fb_result and isinstance(fb_result, list) and len(fb_result) > 0:
-                for k, v in fb_result[0].items():
-                    if isinstance(v, int):
-                        object_id = v
-                        break
-        except Exception:
-            pass
-    
-    # Второй fallback: если запись не найдена по UUID — берём MAX(id)
-    if object_id == 0 or object_id is None:
-        try:
-            max_sql = "SELECT MAX(id) FROM external_report"
-            max_result = _run_psql(max_sql)
-            if max_result and isinstance(max_result, list) and len(max_result) > 0:
-                for v in max_result[0].values():
-                    if v is not None and isinstance(v, int):
-                        object_id = v
-                        break
-        except Exception:
-            pass
-    
-    if object_id == 0 or object_id is None:
-        return {"success": False, "error": f"Failed to get object ID from INSERT result: {result}"}
-    
-    # Insert attributes
-    for attr in attributes:
-        sql = (f"INSERT INTO report_attributes (report_id, uuid, name, synonym, type, password_mode, fill_checking) "
-               f"VALUES ({object_id}, '{attr.get('uuid')}', "
-               f"'{sql_escape(attr.get('Name', ''))}', '{sql_escape(attr.get('Synonym') or '')}', "
-               f"'{sql_escape(attr.get('Type') or '')}', "
-               f"{'false' if attr.get('PasswordMode') == 'true' else 'true'}, "
-               f"'{sql_escape(attr.get('FillChecking', 'DontCheck'))}')")
-        res = _run_psql(sql)
-        if isinstance(res, dict) and "error" in res:
-            warnings.append(f"Реквизит '{attr.get('Name', '')}' не вставлен: {res['error']}")
-    
-    # Insert tabular sections and columns
-    tsection_ids = {}
-    for ts in tabular_sections:
-        sql = (f"INSERT INTO report_tabular_sections (report_id, uuid, name, synonym) "
-               f"VALUES ({object_id}, '{ts.get('uuid')}', "
-               f"'{sql_escape(ts.get('Name', ''))}', '{sql_escape(ts.get('Synonym') or '')}') RETURNING id")
-        ts_result = _run_psql(sql)
-        if isinstance(ts_result, dict) and "error" in ts_result:
-            warnings.append(f"Табличная часть '{ts.get('Name', '')}' не вставлена: {ts_result['error']}")
-        tsection_id = 0
-        if isinstance(ts_result, list) and len(ts_result) > 0:
-            tsection_id = ts_result[0].get("result", 0)
-        tsection_ids[ts.get('Name', '')] = tsection_id
-        
-        for col in ts.get('columns', []):
-            sql = (f"INSERT INTO tabular_section_attributes (tsection_id, uuid, name, synonym, type) "
-                   f"VALUES ({tsection_id}, '{col.get('uuid')}', "
-                   f"'{sql_escape(col.get('Name', ''))}', '{sql_escape(col.get('Synonym') or '')}', "
-                   f"'{sql_escape(col.get('Type') or '')}')")
-            col_res = _run_psql(sql)
-            if isinstance(col_res, dict) and "error" in col_res:
-                warnings.append(f"Колонка ТЧ '{col.get('Name', '')}' не вставлена: {col_res['error']}")
-    
-    # Insert forms
+
+    # V13: содержимое подкаталогов каталога объекта (Forms/, Templates/, Ext/). Каталог
+    # объекта - папка с тем же именем, что и корневой XML (V10). Разбор выполняется ДО
+    # открытия транзакции: пустой или некорректный uuid формы/макета - ошибка по R3,
+    # в БД не идёт ни одной вставки. Отсутствующие каталоги и двоичные формы/макеты -
+    # предупреждения, они загрузку не прерывают.
     base_path = Path(ext_xml).parent / Path(ext_xml).stem
-    for form_info in forms:
-        form_name = form_info['name']
-        form_xml_path = base_path / "Forms" / f"{form_name}.xml"
-        
-        if not form_xml_path.exists():
-            continue
-        
-        form_tree = ET.parse(str(form_xml_path))
-        form_root = form_tree.getroot()
-        form_uuid = form_root.get('{http://v8.1c.ru/8.3/MDClasses}uuid') or form_root.attrib.get('uuid', '')
-        form_props = form_root.find('.//md:Properties', ns)
-        
-        fname = ''
-        fsynonym = ''
-        ftype = 'Managed'
-        
-        if form_props is not None:
-            for prop in form_props:
-                p_name = _local(prop.tag)
-                p_text = _prop_text(prop)
-                if p_name == 'Name':
-                    fname = p_text
-                elif p_name == 'Synonym':
-                    fsynonym = p_text
-                elif p_name == 'FormType':
-                    ftype = p_text or 'Managed'
-        
-        module_path = base_path / form_name / "Ext" / "Form" / "Module.bsl"
-        module_code = ''
-        if module_path.exists():
-            with open(module_path, 'r', encoding='utf-8-sig') as f:
-                module_code = f.read()[:5000]
-        
-        sql = (f"INSERT INTO report_forms (report_id, uuid, name, synonym, form_type, xml_file_path, module_code) "
-               f"VALUES ({object_id}, '{form_uuid}', '{sql_escape(fname)}', "
-               f"'{sql_escape(fsynonym)}', '{ftype}', '{str(form_xml_path).replace(chr(92), chr(47))}', "
-               f"'{sql_escape(module_code)}')")
-        form_res = _run_psql(sql)
-        if isinstance(form_res, dict) and "error" in form_res:
-            warnings.append(f"Форма '{fname}' не вставлена: {form_res['error']}")
+    subdirs = parse_external_subdirs(
+        base_path, report_uuid, parent_type=obj_type, object_name=name,
+        refs=parsed.get("refs") or {}, source_path=source_path,
+    )
+    if not subdirs.get("success"):
+        return subdirs
+    warnings.extend(subdirs.get("warnings") or [])
+    form_rows = subdirs["forms"]
+    form_ext_rows = subdirs["form_ext"]
+    template_rows = subdirs["templates"]
+    bsl_rows = subdirs["bsl_modules"]
+
     
-    # Insert templates
-    for template_info in templates:
-        template_name = template_info['name']
-        template_xml_path = base_path / "Templates" / f"{template_name}.xml"
-        
-        if not template_xml_path.exists():
-            continue
-        
-        template_tree = ET.parse(str(template_xml_path))
-        template_root = template_tree.getroot()
-        template_uuid = template_root.get('{http://v8.1c.ru/8.3/MDClasses}uuid') or template_root.attrib.get('uuid', '')
-        template_props = template_root.find('.//md:Properties', ns)
-        
-        tname = ''
-        tsynonym = ''
-        ttype = 'MXL'
-        
-        if template_props is not None:
-            for prop in template_props:
-                p_name = _local(prop.tag)
-                p_text = _prop_text(prop)
-                if p_name == 'Name':
-                    tname = p_text
-                elif p_name == 'Synonym':
-                    tsynonym = p_text
-                elif p_name == 'TemplateType':
-                    ttype = p_text or 'MXL'
-        
-        content_path = base_path / template_name / "Ext" / "Template.xml"
-        content_path_str = str(content_path).replace(chr(92), chr(47)) if content_path.exists() else None
-        
-        xml_path_str = str(template_xml_path).replace(chr(92), chr(47))
-        
-        if content_path_str:
-            sql = (f"INSERT INTO report_templates (report_id, uuid, name, synonym, template_type, xml_file_path, content_path) "
-                   f"VALUES ({object_id}, '{template_uuid}', '{sql_escape(tname)}', "
-                   f"'{sql_escape(tsynonym)}', '{ttype}', '{xml_path_str}', '{sql_escape(content_path_str)}')")
-        else:
-            sql = (f"INSERT INTO report_templates (report_id, uuid, name, synonym, template_type, xml_file_path) "
-                   f"VALUES ({object_id}, '{template_uuid}', '{sql_escape(tname)}', "
-                   f"'{sql_escape(tsynonym)}', '{ttype}', '{xml_path_str}')")
-        tpl_res = _run_psql(sql)
-        if isinstance(tpl_res, dict) and "error" in tpl_res:
-            warnings.append(f"Макет '{tname}' не вставлен: {tpl_res['error']}")
+    # V9/V12/V13: основная запись и ВСЕ дочерние данные пишутся ОДНОЙ транзакцией.
+    # Не загрузилось - откат: в БД не остаётся ни основной записи, ни дочерних данных.
+    table_writer = ExternalReportRowWriter if obj_type == "external_report" else ExternalProcessingRowWriter
+    parent_id_column = "report_id" if obj_type == "external_report" else "processing_id"
+    try:
+        with transaction() as cursor:
+            object_id = table_writer.insert(cursor, report_row)
+            written_attributes = AttributesRowWriter.insert_many(cursor, attribute_rows)
+            written_sections = TabularSectionsRowWriter.insert_many(cursor, tabular_section_rows)
+            # V13: формы - сначала реестр (forms.id), затем содержимое (form_ext.form_id).
+            # Связь строки form_ext с формой строится по uuid формы, а не по индексу списка.
+            form_ids = FormsRowWriter.insert_ids(cursor, form_rows)
+            form_ids_by_uuid = {
+                row.get("uuid"): row_id for row, row_id in zip(form_rows, form_ids) if row_id
+            }
+            for row in form_ext_rows:
+                row["form_id"] = form_ids_by_uuid.get(row.get("form_uuid"))
+            written_form_ext = FormExtRowWriter.insert_many(cursor, form_ext_rows)
+            written_templates = TemplatesRowWriter.insert_many(cursor, template_rows)
+            # V13: модули объекта и менеджера привязываются и к ID объекта (report_id),
+            # и к его UUID (parent_uuid): обе колонки нужны для поиска и для очистки.
+            for row in bsl_rows:
+                row[parent_id_column] = object_id
+            written_bsl = BslModuleRowWriter.insert_many(cursor, bsl_rows)
+            written_forms = len([row_id for row_id in form_ids if row_id])
+    except Exception as exc:
+        return {"success": False,
+                "error": f"Не удалось сохранить данные объекта в БД: {str(exc).strip()}",
+                "hint": "Загрузка прекращена, транзакция откатана: проверьте состав выгрузки "
+                        "(реквизиты, табличные части, формы, макеты и модули сохраняются "
+                        "вместе с основным объектом)."}
+
+    if not object_id:
+        return {"success": False,
+                "error": f"Не получен ID записи после вставки в {table_writer.TABLE} (UUID {report_uuid})",
+                "hint": "Объект в БД не записан: вставка не выполнена или не возвращён идентификатор."}
     
-    # Index BSL modules
-    ext_folders = []
-    ext_folder = base_path / "Ext"
-    if ext_folder.is_dir():
-        ext_folders.append(ext_folder)
-    
-    for form_ext in base_path.rglob("Ext"):
-        if form_ext.is_dir():
-            parent = form_ext.parent.name
-            grandparent = form_ext.parent.parent.name
-            if parent == "Forms":
-                ext_folders.append(form_ext)
-            elif grandparent and grandparent.lower() in ("forms", "template", "шаблон"):
-                ext_folders.append(form_ext)
-    
-    bsl_seen = set()
-    bsl_count = 0
-    for ef in ext_folders:
-        for bsl_file in ef.rglob("*.bsl"):
-            if str(bsl_file) in bsl_seen:
-                continue
-            bsl_seen.add(str(bsl_file))
-            rel_path = str(bsl_file.relative_to(Path(source_path))).replace(chr(92), chr(47))
-            
-            with open(bsl_file, 'r', encoding='utf-8-sig') as bf:
-                code_content = bf.read()[:50000]
-            
-            obj_module_type = 'ObjectModule'
-            if '/Form/' in str(bsl_file) or 'Form' in str(bsl_file.parent):
-                obj_module_type = 'FormModule'
-            
-            sql = (f"INSERT INTO bsl_modules (configuration_id, module_name, file_path, code, object_type, object_name, report_id) "
-                   f"VALUES (NULL, '{bsl_file.name}', '{rel_path}', '{sql_escape(code_content)}', "
-                   f"'{obj_module_type}', '{sql_escape(name)}', {object_id})")
-            bsl_res = _run_psql(sql)
-            if isinstance(bsl_res, dict) and "error" in bsl_res:
-                warnings.append(f"BSL-модуль '{rel_path}' не проиндексирован: {bsl_res['error']}")
-                continue
-            bsl_count += 1
+    # V13: индексация BSL через _run_psql удалена: модули объекта и менеджера
+    # пишет тот же транзакционный писатель, что и остальные таблицы, а модуль формы
+    # хранится в form_ext.ext. Разбор Forms/, Templates/, Ext/ - выше, каталог объекта
+    # (base_path) совпадает с именем корневого XML (V10).
+
     
     return {
         "success": True,
         "id": object_id,
         "name": name,
         "object_type": obj_type,
+        "table": _external_meta_info(obj_type)["table"],
+        "variant_title": "внешний отчёт" if obj_type == "external_report" else "внешняя обработка",
         "uuid": report_uuid,
-        "attributes_count": len(attributes),
-        "tabular_sections_count": len(tabular_sections),
-        "forms_count": len(forms),
-        "templates_count": len(templates),
-        "bsl_modules_indexed": bsl_count,
+        # Устаревший ключ сохранён для совместимости проверок: то же число, что
+        # в bsl_modules_written (модули объекта и менеджера; модуль формы - в form_ext.ext).
+        "bsl_modules_indexed": written_bsl,
+        "attributes_written": written_attributes,
+        "tabular_sections_written": written_sections,
+        "forms_written": written_forms,
+        "form_ext_written": written_form_ext,
+        "templates_written": written_templates,
+        "bsl_modules_written": written_bsl,
+        "child_refs": child_counts,
+        # Найдено на диске (до записи в БД): нужно карточке, чтобы объяснить,
+        # почему часть данных не сохранилась (нет каталога, двоичная форма, ошибка разбора).
+        "child_found": {
+            "forms": len(form_rows),
+            "form_ext": len(form_ext_rows),
+            "templates": len(template_rows),
+            "bsl_modules": len(bsl_rows),
+        },
         "replaced": replaced,
         "warnings": warnings,
     }

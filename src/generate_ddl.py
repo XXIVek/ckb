@@ -1,15 +1,35 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Генерация SQL DDL скрипта для внешних отчетов/обработок."""
+"""Генерация SQL DDL скрипта для внешних отчетов/обработок.
+
+Источник истины по схеме внешнего отчёта: этот файл -> src/ddl_external_report.sql.
+Порядок чистой установки ckb_1c_configurations (полный):
+    1. CREATE DATABASE ckb_1c_configurations;
+    2. psql -f create_1c_configurations_db.sql  -- configurations, config_extensions,
+                                                -- external_processing, external_report,
+                                                -- bsl_modules (+ legacy report_* таблицы)
+    3. psql -f src/ddl_external_report.sql      -- attributes, tabular_sections, forms,
+                                                -- templates, form_ext + витрины анализа
+Шаг 3 применим и после шага 2: external_report создаётся через IF NOT EXISTS.
+Витрины v_form_elements / v_form_events входят в DDL намеренно: на них опираются
+check_external_report_fill.sql / check_external_report_search.sql /
+check_external_report_inventory.sql, без них проверка на чистой БД падает. Для уже
+созданных БД есть аддитивная миграция migrate_v14_form_analysis_views.sql (тот же SQL,
+CREATE OR REPLACE). Сверку обеспечивает _cmp_ddl.py — он сравнивает и колонки, и
+определения витрин.
+"""
 
 sql_content = r"""-- ============================================================
 -- Скрипт перестройки схемы для внешних отчетов/обработок 1С
--- Дата: 10.10.2026
+-- Дата: 10.10.2026, обновлено 13.10.2026 (узел V14/V15: IF NOT EXISTS + витрины раздела 7)
 -- База: ckb_1c_configurations
+-- Источник истины: src/generate_ddl.py — правки вносить в него, этот файл перегенерируется.
+-- external_report и его индекс создаются через IF NOT EXISTS, чтобы скрипт применялся
+-- после create_1c_configurations_db.sql (тот создаёт external_report с теми же колонками).
 -- ============================================================
 
 -- 1. external_report — внешний отчет / внешняя обработка
-CREATE TABLE external_report (
+CREATE TABLE IF NOT EXISTS external_report (
     id SERIAL PRIMARY KEY,
     uuid UUID UNIQUE NOT NULL,
     containedobject_classid UUID DEFAULT 'e41aff26-25cf-4bb6-b6c1-3f478a75f374',
@@ -32,7 +52,7 @@ CREATE TABLE external_report (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX idx_external_report_uuid ON external_report(uuid);
+CREATE INDEX IF NOT EXISTS idx_external_report_uuid ON external_report(uuid);
 
 -- 2. attributes — реквизиты объекта (универсальная)
 CREATE TABLE attributes (
@@ -87,10 +107,10 @@ CREATE TABLE tabular_sections (
 CREATE INDEX idx_tabular_sections_parent_uuid ON tabular_sections(parent_uuid);
 CREATE INDEX idx_tabular_sections_name ON tabular_sections(name);
 
--- 4. forms — формы
+-- 4. forms — формы (V13: метка типа родителя, uuid уникален в пределах родителя)
 CREATE TABLE forms (
     id SERIAL PRIMARY KEY,
-    uuid UUID UNIQUE NOT NULL,
+    uuid UUID NOT NULL,
     parent_uuid UUID NOT NULL REFERENCES external_report(uuid) ON DELETE CASCADE,
     name TEXT NOT NULL,
     synonym JSONB,
@@ -98,24 +118,135 @@ CREATE TABLE forms (
     form_type TEXT DEFAULT 'Unmanaged',
     include_help_in_contents BOOLEAN DEFAULT FALSE,
     use_purposes JSONB,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    parent_type TEXT NOT NULL DEFAULT 'external_report',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT forms_parent_uuid_uuid_key UNIQUE (parent_uuid, uuid)
 );
 CREATE INDEX idx_forms_parent_uuid ON forms(parent_uuid);
 CREATE INDEX idx_forms_name ON forms(name);
+CREATE INDEX idx_forms_uuid ON forms(uuid);
+CREATE INDEX idx_forms_parent_type ON forms(parent_type);
 
--- 5. templates — макеты
+-- 5. templates — макеты (V13: содержимое Templates/<Имя>/Ext/Template.xml|.bin)
 CREATE TABLE templates (
     id SERIAL PRIMARY KEY,
-    uuid UUID UNIQUE NOT NULL,
+    uuid UUID NOT NULL,
     parent_uuid UUID NOT NULL REFERENCES external_report(uuid) ON DELETE CASCADE,
     name TEXT NOT NULL,
     synonym JSONB,
     comment TEXT,
     template_type TEXT DEFAULT 'TabularDocument',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    parent_type TEXT NOT NULL DEFAULT 'external_report',
+    ext TEXT,
+    ext_bin BYTEA,
+    ext_format TEXT,
+    ext_size INTEGER,
+    ext_path TEXT,
+    ext_root_tag TEXT,
+    ext_truncated BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT templates_parent_uuid_uuid_key UNIQUE (parent_uuid, uuid)
 );
 CREATE INDEX idx_templates_parent_uuid ON templates(parent_uuid);
 CREATE INDEX idx_templates_name ON templates(name);
+CREATE INDEX idx_templates_uuid ON templates(uuid);
+CREATE INDEX idx_templates_parent_type ON templates(parent_type);
+
+-- 6. form_ext — содержимое формы (V13): одна строка на форму.
+--    ext - текст модуля формы (Forms/<Имя>/Ext/Form/Module.bsl),
+--    ext_bin - содержимое бинарной формы (Forms/<Имя>/Ext/Form.bin),
+--    скалярные свойства Form.xml и его вложенные перечни (events/attributes/
+--    commands/items/auto_command_bar) - jsonb.
+CREATE TABLE form_ext (
+    id SERIAL PRIMARY KEY,
+    form_id INTEGER NOT NULL REFERENCES forms(id) ON DELETE CASCADE,
+    form_uuid UUID NOT NULL,
+    parent_uuid UUID NOT NULL,
+    parent_type TEXT NOT NULL DEFAULT 'external_report',
+    name TEXT,
+    command_bar_location TEXT,
+    report_result TEXT,
+    details_data TEXT,
+    report_form_type TEXT,
+    auto_show_state TEXT,
+    custom_settings_folder TEXT,
+    report_result_view_mode TEXT,
+    view_mode_application_on_set_report_result TEXT,
+    auto_command_bar JSONB,
+    events JSONB,
+    attributes JSONB,
+    commands JSONB,
+    items JSONB,
+    ext TEXT,
+    ext_size INTEGER,
+    ext_truncated BOOLEAN NOT NULL DEFAULT FALSE,
+    ext_bin BYTEA,
+    ext_format TEXT,
+    ext_path TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX uq_form_ext_form_id ON form_ext(form_id);
+CREATE INDEX idx_form_ext_form_uuid ON form_ext(form_uuid);
+CREATE INDEX idx_form_ext_parent_uuid ON form_ext(parent_uuid);
+CREATE INDEX idx_form_ext_name ON form_ext(name);
+
+-- 7. Витрины анализа содержимого форм: v_form_elements, v_form_events (узел V14/V15).
+--    Таблицы не меняются — используются уже существующие jsonb-колонки
+--    form_ext.items / form_ext.events. Единая точка SQL-анализа и для Managed
+--    (items разобраны из Form.xml, узел V13), и для Ordinary (items/events будут
+--    разложены из Form.bin узлом V15). Ключи-синонимы различаются, поэтому витрина
+--    нормализует их COALESCE-ом:
+--      kind        <- Managed: item.kind;        Ordinary(V15): item.type
+--      data_source <- Managed: item.datapath;    Ordinary(V15): item.data_source
+--      caption_ru  <- Managed: item.title.ru;    Ordinary(V15): item.captions.ru
+--      path/page   <- есть только у Ordinary(V15); у Managed иерархия в items не
+--                     сохраняется (парсер раскрывает ChildItems в плоский список).
+--    Тот же SQL повторяет аддитивная миграция migrate_v14_form_analysis_views.sql —
+--    она нужна для уже созданных БД; источником истины остаётся этот файл.
+CREATE OR REPLACE VIEW v_form_elements AS
+SELECT e.id                                   AS report_id,
+       e.name                                 AS report_name,
+       e.uuid                                 AS report_uuid,
+       f.name                                 AS form_name,
+       f.uuid                                 AS form_uuid,
+       f.form_type                            AS form_type,
+       fe.ext_format                          AS ext_format,
+       ord                                    AS ordinal,
+       el ->> 'id'                            AS element_id,
+       el ->> 'name'                          AS element_name,
+       COALESCE(el ->> 'kind', el ->> 'type') AS element_kind,
+       el ->> 'type'                          AS element_type,
+       el ->> 'path'                          AS element_path,
+       el ->> 'page'                          AS page_name,
+       COALESCE(el ->> 'datapath', el ->> 'data_source') AS data_source,
+       COALESCE(el -> 'title' ->> 'ru', el -> 'captions' ->> 'ru')  AS caption_ru,
+       COALESCE(el -> 'tooltip' ->> 'ru')     AS tooltip_ru,
+       el ->> 'command_name'                  AS command_name,
+       el                                     AS raw
+FROM form_ext fe
+JOIN forms f            ON f.id = fe.form_id
+JOIN external_report e  ON e.uuid = fe.parent_uuid
+CROSS JOIN LATERAL jsonb_array_elements(fe.items) WITH ORDINALITY AS item(el, ord)
+WHERE jsonb_typeof(fe.items) = 'array';
+
+CREATE OR REPLACE VIEW v_form_events AS
+SELECT e.id                        AS report_id,
+       e.name                      AS report_name,
+       e.uuid                      AS report_uuid,
+       f.name                      AS form_name,
+       f.uuid                      AS form_uuid,
+       f.form_type                 AS form_type,
+       fe.ext_format               AS ext_format,
+       ord                         AS ordinal,
+       ev ->> 'event'              AS event_name,
+       ev ->> 'handler'            AS handler_name,
+       COALESCE(ev -> 'representation' ->> 'ru') AS event_caption_ru,
+       ev                          AS raw
+FROM form_ext fe
+JOIN forms f            ON f.id = fe.form_id
+JOIN external_report e  ON e.uuid = fe.parent_uuid
+CROSS JOIN LATERAL jsonb_array_elements(fe.events) WITH ORDINALITY AS ev_row(ev, ord)
+WHERE jsonb_typeof(fe.events) = 'array';
 
 SELECT 'Схема успешно создана!' AS status;
 """

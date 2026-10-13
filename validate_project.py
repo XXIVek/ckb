@@ -73,32 +73,56 @@ except Exception as e:
     print(f"  ❌ MCP tools failed: {e}")
     sys.exit(1)
 
-# 6. Check database connections
+# 6. Check database connections (реальные БД сервера: local_doc и ckb_1c_configurations)
 print("\n[6/6] Checking database connections...")
 try:
     from mcp_tools_api import get_db_state
     state = get_db_state()
     print(f"  ✅ local_doc DB connected: groups={state.get('groups', 0)}, snippets={state.get('snippets', 0)}, aliases={state.get('aliases', 0)}")
-    
-    from config_tools import list_configurations
-    result = list_configurations()
-    if "Найдено" in result:
-        print(f"  ✅ configurations DB connected")
 except Exception as e:
-    print(f"  ❌ Database connection failed: {e}")
+    print(f"  ❌ local_doc DB connection failed: {e}")
     sys.exit(1)
+
+try:
+    sys.path.insert(0, str(Path(__file__).parent / "src"))
+    from external_db import connect as config_connect
+    with config_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT (SELECT count(*) FROM external_report), "
+                "(SELECT count(*) FROM forms), (SELECT count(*) FROM bsl_modules)"
+            )
+            reports, forms, modules = cur.fetchone()
+    print(f"  ✅ ckb_1c_configurations DB connected: external_report={reports}, "
+          f"forms={forms}, bsl_modules={modules}")
+except Exception as e:
+    print(f"  ❌ ckb_1c_configurations DB connection failed: {e}")
+    sys.exit(1)
+
+# Известный дефект (п. 8 правил .clinerules/1c-configurations-core_Rule.md): модули
+# src/config_tools.py, src/config_extra.py, src/config_aliases.py,
+# src/config_snippets_manager.py, src/external_processor_loader.py подключаются к базе
+# 'configurations', которой на сервере нет. Проверка не считается ошибкой сборки -
+# эти модули вне контракта загрузки и будут заменены (docs/CONFIGURATIONS_ENRICHMENT_PLAN.md).
+try:
+    from config_tools import list_configurations
+    if "Найдено" in list_configurations():
+        print("  ✅ legacy 'configurations' DB reachable")
+    else:
+        print("  ⚠️ legacy 'configurations' DB: нет данных (база отсутствует на сервере - дефект п. 8)")
+except Exception as e:
+    print(f"  ⚠️ legacy 'configurations' DB unreachable (ожидаемо, дефект п. 8 правил): {e}")
 
 # Summary
 print("\n" + "=" * 70)
 print("VALIDATION SUMMARY")
 print("=" * 70)
-print("✅ server.py (1c-knowledge-base): 10 tools registered")
-print("✅ server_configurations.py (1c-configurations-base): 11 tools registered")
-print("✅ config_tools.py: 5 functions")
-print("✅ config_extra.py: 6 functions")
-print("✅ mcp_tools_api.py + mcp_tools_loader.py + loader.py: 7 functions")
-print("✅ local_doc DB: connected (0 groups, 0 snippets, 0 aliases)")
-print("✅ configurations DB: connected (0 configurations)")
+print("✅ server.py (1c-knowledge-base): imports OK")
+print("✅ server_configurations.py (legacy): imports OK")
+print("✅ config_tools.py / config_extra.py: imports OK (БД 'configurations' вне контракта)")
+print("✅ mcp_tools_api.py + mcp_tools_loader.py + loader.py: imports OK")
+print("✅ local_doc DB: connected")
+print("✅ ckb_1c_configurations DB: connected (загрузчик внешних объектов)")
 print("\n📁 Project structure:")
 project_root = Path(__file__).parent
 for item in sorted(project_root.iterdir()):

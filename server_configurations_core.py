@@ -1,5 +1,21 @@
 #!/usr/bin/env python3
-"""CORE server."""
+# -*- coding: utf-8 -*-
+"""MCP-сервер 1c-configurations-core.
+
+КОНТРАКТ ЗАГРУЗКИ (норматив: docs/config-scenarios/FLOWCHART_1c-configurations-core.md):
+  1. get_load_config_rules_tool()                    - правила загрузки (шаг 0);
+  2. load_1c_catalog_tool(source_path, force=False)  - единая точка входа загрузки;
+  3. delete_external_report_tool(...)                - удаление внешнего объекта.
+Прочие инструменты помечены "ВНЕ КОНТРАКТА": они сохранены на время перехода и будут
+удалены или перенесены; в сценарии загрузки на них ссылаться нельзя.
+
+Логика загрузки живёт в src/: src/config_load_router.py (узлы T1..T6, маршрутизация, формат
+четырёх исходов) и src/external_report_loader.py (вариант 3 "внешний отчёт"). Здесь только
+тонкие обёртки: разбор аргументов - вызов функции из src/ - форматирование ответа.
+
+⚠️ Файл ведётся ВРУЧНУЮ. НЕ перегенерировать generate_servers.py: генератор берёт тела
+инструментов из устаревшего server_configurations.py и потеряет инструменты контракта.
+"""
 import sys
 from pathlib import Path
 src_dir = Path(__file__).parent / 'src'
@@ -20,7 +36,6 @@ from config_tools import (
     read_config_file as _read_config_file,
 )
 from config_extra import (
-    analyze_config_load as _analyze_config_load,
     delete_config as _delete_config,
     search_bsl_code as _search_bsl_code,
     get_enum_values as _get_enum_values,
@@ -49,7 +64,8 @@ from config_snippets_manager import (
     search_config_snippets as _search_config_snippets,
     get_config_snippet_stats as _get_config_snippet_stats,
 )
-from external_report_loader import register_external_report, delete_external_object, read_external_meta
+from external_report_loader import delete_external_object, read_external_meta
+from config_load_router import load_catalog, detect_load_variant, format_load_result
 mcp = FastMCP("1c-configurations-core")
 
 
@@ -59,10 +75,11 @@ mcp = FastMCP("1c-configurations-core")
 
 @mcp.tool()
 def get_load_config_rules_tool():
-    """Содержимое LOAD_RULES_Config.md — правила загрузки конфигураций 1С.
+    """Содержимое LOAD_RULES_Config.md — компактные правила загрузки каталогов 1С.
     
-    Содержит критические правила по загрузке конфигураций, расширений,
-    внешних обработок, определения object_type и метрики качества.
+    Шаг 0 перед любой загрузкой. Описывает контракт (три инструмента), правило R1 определения
+    варианта по файлам корневого каталога, четыре исхода load_1c_catalog_tool, поведение при
+    дубликате UUID и пустом UUID, и ссылку на норматив с блок-схемами (FLOWCHART_...md).
     """
     try:
         with open(Path(__file__).parent / 'LOAD_RULES_Config.md', 'r', encoding='utf-8') as f:
@@ -70,6 +87,37 @@ def get_load_config_rules_tool():
     except Exception as e:
         return f"Ошибка чтения файла LOAD_RULES_Config.md: {str(e)}"
 
+
+# =====================================================
+# КОНТРАКТ ЗАГРУЗКИ: единая точка входа (R1, R2, R7, R8)
+# =====================================================
+
+@mcp.tool()
+def load_1c_catalog_tool(source_path: str, force: bool = False):
+    """Загрузить каталог выгрузки 1С: тип каталога определяется автоматически.
+
+    Единственная точка входа загрузки. Отдельного анализа не требуется: сервер сам смотрит
+    файлы корневого каталога (наличие Configuration.xml, наличие в XML корневого каталога
+    элемента ExternalReport / ExternalDataProcessor) и выбирает загрузчик. Исходов ровно четыре:
+      ✅ загружено - объект новый;
+      ♻️ перезагружено - была запись с тем же UUID, она удалена, объект загружен заново;
+      ⚠️ уже загружено - нужен ответ оператора: повторить вызов с force=True;
+      ❌ не могу загрузить - нет каталога / каталог не подходит / пустой UUID /
+         сценарий не реализован / не получен ID записи.
+    Реализован вариант "внешний отчёт"; конфигурация, расширение и внешняя обработка сейчас
+    возвращают ❌ "сценарий не реализован".
+    """
+    try:
+        return format_load_result(load_catalog(source_path, force=bool(force)))
+    except Exception as e:
+        return f"❌ Не могу загрузить: внутренняя ошибка точки входа: {str(e)}"
+
+
+# =====================================================
+# ⚠️ ВНЕ КОНТРАКТА ЗАГРУЗКИ
+# Инструменты ниже не участвуют в загрузке каталога: они будут удалены или перенесены.
+# Список и причины - docs/config-scenarios/FLOWCHART_1c-configurations-core.md (раздел 8).
+# =====================================================
 
 # =====================================================
 # УПРАВЛЕНИЕ КОНФИГУРАЦИЯМИ (CRUD)
@@ -184,22 +232,29 @@ def update_configuration_status_tool(config_id: int, status: str, source_path: s
 
 @mcp.tool()
 def analyze_config_load_tool(source_path: str):
-    """Анализ конфигурации в каталоге + сравнение с БД (без загрузки!)."""
-    try:
-        result = _analyze_config_load(source_path=source_path)
-        if not result.get('success'):
-            return f"❌ Ошибка анализа: {result.get('error')}"
-        catalog_info = result.get('catalog_info', {})
-        db_comparison = result.get('db_comparison', {})
-        lines = ["📊 Анализ конфигурации:", f"  Путь: {source_path}", f"  Тип объекта: {catalog_info.get('object_type', '?')}", f"  Название: {catalog_info.get('name', 'N/A')}", f"  Версия: {catalog_info.get('version', 'N/A')}"]
-        if db_comparison:
-            lines.append(f"\n  В БД: {'✅ найдена' if db_comparison.get('found') else '❌ не найдена'}")
-            if db_comparison.get('config_id'):
-                lines.append(f"  ID в БД: {db_comparison['config_id']}")
-        return '\n'.join(lines)
-    except Exception as e:
-        return f"Ошибка при анализе: {str(e)}"
+    """⚠️ ВНЕ КОНТРАКТА. Диагностика определения варианта загрузки (в БД ничего не пишет).
 
+    Для загрузки этот инструмент вызывать не нужно: load_1c_catalog_tool делает анализ сам.
+    Тип определяется по файлам корневого каталога (правило R1), а не по содержимому подкаталогов.
+    """
+    try:
+        detection = detect_load_variant(source_path)
+        if not detection.get("success"):
+            return f"❌ {detection.get('error', 'каталог не определён')}\n   {detection.get('hint', '')}"
+        lines = [
+            "📊 Вариант загрузки определён (запись в БД не выполняется):",
+            f"  Каталог: {source_path}",
+            f"  Тип объекта: {detection['title']} ({detection['variant']})",
+            f"  Целевая таблица: {detection['table']}",
+            f"  Распознанный XML: {detection['xml_path']}",
+        ]
+        if detection.get("extension_purpose"):
+            lines.append(f"  ConfigurationExtensionPurpose: {detection['extension_purpose']}")
+        lines.append("")
+        lines.append("  Загружать нужно так: load_1c_catalog_tool(source_path=..., force=False)")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"❌ Ошибка анализа: {str(e)}"
 
 
 @mcp.tool()
@@ -239,63 +294,24 @@ def delete_config_tool(config_id: int, force: bool = False):
 
 @mcp.tool()
 def register_external_report_tool(source_path: str, replace: bool = False):
-    """Зарегистрировать внешний отчет/обработку из каталога в БД ckb_1c_configurations.
+    """⚠️ УСТАРЕЛ: используйте load_1c_catalog_tool(source_path=..., force=...).
 
-    Если объект с таким UUID уже загружен, загрузка НЕ выполняется — возвращается
-    информация о существующей записи. Для перезагрузки (удалить старую запись и
-    загрузить заново) подтвердите операцию параметром replace=True.
+    Сохранён как совместимый псевдоним единой точки входа и будет удалён.
+    replace=True соответствует force=True.
     """
+    notice = "⚠️ Инструмент устарел. Правильный вызов: load_1c_catalog_tool(source_path=..., force=...)\n\n"
     try:
-        result = register_external_report(source_path, replace=replace)
-        if result.get('success'):
-            lines = [f"✅ Объект зарегистрирован!", f"ID: {result['id']}", f"Название: {result.get('name', '')}"]
-            lines.append(f"UUID: {result.get('uuid', '')}")
-            lines.append(f"Тип: {result.get('object_type', 'unknown')}")
-            lines.append(f"Реквизиты: {result.get('attributes_count', 0)}")
-            lines.append(f"Табличные части: {result.get('tabular_sections_count', 0)}")
-            lines.append(f"Формы: {result.get('forms_count', 0)}")
-            lines.append(f"Макеты: {result.get('templates_count', 0)}")
-            bsl_count = result.get('bsl_modules_indexed', 0)
-            if bsl_count > 0:
-                lines.append(f"BSL-модулей: {bsl_count}")
-            replaced = result.get('replaced')
-            if replaced:
-                lines.append(
-                    f"♻️ Перезагружено: удалена предыдущая запись ID={replaced.get('old_id')} "
-                    f"(BSL-модулей удалено: {replaced.get('bsl_modules_deleted', 0)})"
-                )
-            for warning in result.get('warnings') or []:
-                lines.append(f"⚠️ {warning}")
-            return '\n'.join(lines)
-        if result.get('already_exists'):
-            existing = result.get('existing') or {}
-            lines = ["⚠️ Внешний объект уже загружен в БД — загрузка НЕ выполнена."]
-            lines.append(f"  ID существующей записи: {existing.get('id')}")
-            lines.append(f"  Название: {existing.get('name', '')}")
-            lines.append(f"  UUID: {existing.get('uuid', '')}")
-            lines.append(f"  Тип: {existing.get('object_type', '')}")
-            lines.append(f"  Дата загрузки: {existing.get('created_at', '')}")
-            lines.append(f"  Связанные данные: BSL-модулей {existing.get('bsl_modules_count', 0)}, "
-                         f"реквизитов {existing.get('attributes_count', 0)}, "
-                         f"табличных частей {existing.get('tabular_sections_count', 0)}, "
-                         f"форм {existing.get('forms_count', 0)}, "
-                         f"макетов {existing.get('templates_count', 0)}")
-            lines.append("")
-            lines.append(f"ℹ️ {result.get('error', '')}")
-            lines.append(f"Для перезагрузки подтвердите операцию: register_external_report_tool(source_path=..., replace=True) — "
-                         f"запись ID={existing.get('id')} и её BSL-модули будут удалены, затем объект загрузится заново.")
-            lines.append("Либо удалите запись отдельно: delete_external_report_tool(source_path=...) или delete_external_report_tool(report_id=...).")
-            return '\n'.join(lines)
-        return f"❌ Ошибка: {result.get('error', 'неизвестная ошибка')}"
+        return notice + format_load_result(load_catalog(source_path, force=bool(replace)))
     except Exception as e:
-        return f"Ошибка при регистрации: {str(e)}"
+        return f"❌ Не могу загрузить: внутренняя ошибка: {str(e)}"
 
 
 @mcp.tool()
 def delete_external_report_tool(source_path: str = None, uuid: str = None, report_id: int = None, object_type: str = None):
     """Удалить внешний отчет/обработку из БД вместе со связанными BSL-модулями.
 
-    Дочерние таблицы (attributes/forms/templates/tabular_sections) удаляются каскадно.
+    Дочерние таблицы (attributes/tabular_sections/forms/form_ext/templates) удаляются каскадно,
+    модули bsl_modules — явно (FK на внешний объект в этой таблице отсутствует).
     Достаточно одного из аргументов: source_path (каталог выгрузки), uuid или report_id.
     object_type: external_report (по умолчанию) или external_processing.
     """
@@ -316,8 +332,16 @@ def delete_external_report_tool(source_path: str = None, uuid: str = None, repor
                  f"ID: {result.get('id')}",
                  f"Название: {result.get('name', '')}",
                  f"BSL-модулей удалено: {result.get('bsl_modules_deleted', 0)}"]
-        if result.get('children_cascaded'):
-            lines.append("Дочерние данные (реквизиты/ТЧ/формы/макеты) удалены каскадно.")
+        removed_children = result.get('children_deleted') or {}
+        readable = {"attributes": "реквизитов", "tabular_sections": "табличных частей",
+                    "forms": "форм", "form_ext": "описаний форм", "templates": "макетов"}
+        parts = [f"{readable.get(table, table)} {count}"
+                 for table, count in sorted(removed_children.items())
+                 if isinstance(count, int) and count > 0]
+        if parts:
+            lines.append("Удалено связанных строк: " + ", ".join(parts) + ".")
+        if result.get('children_cascaded') and not parts:
+            lines.append("Дочерних строк по parent_uuid не было.")
         return '\n'.join(lines)
     except Exception as e:
         return f"Ошибка при удалении: {str(e)}"

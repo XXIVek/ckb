@@ -125,7 +125,11 @@ def process_directory(root_dir: str, force: bool = False) -> dict:
                 stats['empty'] += 1
                 module_text = ""
 
-            with open(bsl_path, 'w', encoding='utf-8-sig', newline='\r\n') as f:
+            # newline='' — текст модуля уже содержит те переносы, что лежат в контейнере
+            # (Form.bin из XML-выгрузки: CR+LF). Перевод '\n' -> '\r\n' удваивал CR:
+            # модуль рос на 1 байт на строку, а после pack в Form.bin появлялись
+            # отдельные символы CR (пустые строки в редакторе формы).
+            with open(bsl_path, 'w', encoding='utf-8-sig', newline='') as f:
                 f.write(module_text)
 
             logger.info(f"  ✓ {len(module_text)} символов → Module.bsl")

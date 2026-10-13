@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-"""Генератор разделённых MCP-серверов."""
+"""Генератор разделённых MCP-серверов.
+
+⚠️ НЕ ИСПОЛЬЗУЕТСЯ для server_configurations_core.py!
+Core-сервер (контракт загрузки: get_load_config_rules_tool, load_1c_catalog_tool,
+delete_external_report_tool) ведётся ВРУЧНУЮ: он использует импорты из src/, которых фиксированный
+заголовок генератора не даёт, а тела инструментов генератор берёт из устаревшего монолита
+server_configurations.py, где контрактных инструментов нет. Случайный запуск
+`python generate_servers.py` перезапишет server_configurations_core.py и потеряет их.
+Норматив поведения: docs/config-scenarios/FLOWCHART_1c-configurations-core.md.
+Генератор оставлен только для остальных серверов (enrichment, export), если они понадобятся.
+"""
 import re
 from pathlib import Path
 
@@ -7,6 +17,9 @@ SRC = Path('C:/1C_LLM/ckb')
 server_file = SRC / 'server_configurations.py'
 content = server_file.read_text(encoding='utf-8')
 
+# ⚠️ Список устарел: в нём нет инструментов контракта загрузки
+# (get_load_config_rules_tool, load_1c_catalog_tool, delete_external_report_tool)
+# и есть инструменты, которых в core-сервере больше нет.
 CORE_TOOLS = {'list_configurations_tool', 'get_configuration_tool', 'find_config_by_name_uuid_tool',
     'count_objects_by_config_tool', 'delete_objects_by_config_tool', 'update_configuration_status_tool',
     'analyze_config_load_tool', 'delete_config_tool', 'register_external_processor_tool',

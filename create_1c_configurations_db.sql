@@ -1,11 +1,39 @@
 -- ============================================
--- БД 1c_configurations
--- Структура на основе спецификаций cc-1c-skills
--- Версия формата метаданных: 2.17
+-- БД ckb_1c_configurations — базовые таблицы: конфигурации, расширения,
+-- внешние обработки, модули BSL. Спецификации cc-1c-skills, формат метаданных 2.17.
 -- ============================================
-
--- Создание базы данных:
--- CREATE DATABASE ckb_1c_configurations;
+--
+-- СОЗДАНИЕ БАЗЫ «С НУЛЯ» — ровно два шага после CREATE DATABASE (порядок фиксирован):
+--   1) psql -v ON_ERROR_STOP=1 -d ckb_1c_configurations -f src/ddl_external_report.sql
+--        external_report + attributes, tabular_sections, forms, form_ext, templates
+--        + витрины анализа v_form_elements / v_form_events.
+--   2) psql -v ON_ERROR_STOP=1 -d ckb_1c_configurations -f create_1c_configurations_db.sql
+--        configurations, config_extensions, external_processing, bsl_modules (этот файл).
+--
+-- Граница владения (зафиксирована 13.10.2026 по живой БД: information_schema, pg_constraint,
+-- pg_indexes). Причина, почему раньше было два разных определения external_report:
+--   * external_report и его дочерние таблицы принадлежат только src/generate_ddl.py
+--     (генерирует src/ddl_external_report.sql). Копия в этом файле устарела
+--     (class_id вместо containedobject_*, synonym TEXT вместо jsonb, uuid без NOT NULL)
+--     и, применяясь первой, заглушала правильную таблицу: CREATE TABLE IF NOT EXISTS
+--     молча пропускал создание. Теперь таблицы external_report здесь нет.
+--   * исторические таблицы report_attributes, report_tabular_sections,
+--     tabular_section_attributes, report_forms, report_templates убраны: в живой БД их нет,
+--     загрузчик их не создаёт и не читает (в коде — только упоминания в документации);
+--     история в git. Индекс idx_external_report_name убран по той же причине — в живой БД
+--     его нет (есть только idx_external_report_uuid из шага 1).
+--   * FK bsl_modules.report_id -> external_report не объявляется: в живой БД его нет
+--     (известный дефект п.10 правил .clinerules — очистка модулей выполняется явно).
+--     Если FK будет добавлен, менять нужно и этот файл, и живую БД миграцией; расхождение
+--     поймает _cmp_ddl.py.
+--   * FK configurations.app_module_id/session_module_id/data_proc_module_id/ext_conn_module_id
+--     на bsl_modules не объявляются: ссылки взаимные (bsl_modules.configuration_id ->
+--     configurations), порядок CREATE TABLE их не разводит, в живой БД таких FK нет.
+--
+-- ПРОВЕРКА СООТВЕТСТВИЯ: python _cmp_ddl.py — собирает временную БД из шагов 1 и 2 и сверяет
+-- колонки, индексы/ограничения и определения витрин с живой ckb_1c_configurations.
+-- Для уже созданных БД изменения схемы применяются аддитивными migrate_*.sql.
+-- Создание самой базы: CREATE DATABASE ckb_1c_configurations;
 
 -- --------------------------------------------
 -- ТАБЛИЦА А. configurations (конфигурации)
@@ -22,10 +50,11 @@ CREATE TABLE IF NOT EXISTS configurations (
     usage_purpose VARCHAR(100),
     embedded_language VARCHAR(50),
     main_roles TEXT[],
-    app_module INT REFERENCES bsl_modules(id),
-    session_module INT REFERENCES bsl_modules(id),
-    data_proc_module INT REFERENCES bsl_modules(id),
-    ext_conn_module INT REFERENCES bsl_modules(id),
+    -- Ссылки на модули без FK — см. шапку файла (взаимные ссылки, в живой БД FK нет).
+    app_module_id INT,
+    session_module_id INT,
+    data_proc_module_id INT,
+    ext_conn_module_id INT,
     mobile_functionality TEXT[],
     default_language VARCHAR(50),
     short_info TEXT,
@@ -62,6 +91,9 @@ CREATE TABLE IF NOT EXISTS config_extensions (
 
 -- --------------------------------------------
 -- ТАБЛИЦА В. external_processing (внешние обработки)
+-- Загрузка внешнего процесса (узел V16 плана) ещё не реализована: src/loaders/external_processing
+-- отсутствует, в src/external_table_writer.py есть только ExternalProcessingRowWriter-заготовка.
+-- Таблица нужна, так как bsl_modules.processing_id на неё ссылается.
 -- --------------------------------------------
 CREATE TABLE IF NOT EXISTS external_processing (
     id SERIAL PRIMARY KEY,
@@ -77,31 +109,11 @@ CREATE TABLE IF NOT EXISTS external_processing (
 );
 
 -- --------------------------------------------
--- ТАБЛИЦА Г. external_report (внешние отчеты)
--- --------------------------------------------
-CREATE TABLE IF NOT EXISTS external_report (
-    id SERIAL PRIMARY KEY,
-    configuration_id INT REFERENCES configurations(id),
-    name VARCHAR(255) UNIQUE NOT NULL,
-    synonym TEXT,
-    comment TEXT,
-    version VARCHAR(50),
-    uuid UUID UNIQUE,
-    class_id VARCHAR(36) DEFAULT 'e41aff26-25cf-4bb6-b6c1-3f478a75f374',
-    main_data_composition_schema VARCHAR(255),
-    default_form VARCHAR(255),
-    auxiliary_form VARCHAR(255),
-    default_settings_form VARCHAR(255),
-    auxiliary_settings_form VARCHAR(255),
-    default_variant_form VARCHAR(255),
-    variants_storage VARCHAR(255),
-    settings_storage VARCHAR(255),
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
-);
-
--- --------------------------------------------
--- ТАБЛИЦА Д. bsl_modules (модули BSL)
+-- ТАБЛИЦА Г. bsl_modules (модули BSL)
+-- V13: модули внешнего объекта привязываются к родителю так же, как attributes и
+-- tabular_sections (parent_uuid + parent_type). Модули ФОРМ здесь не пишутся: их
+-- содержимое хранится в form_ext.ext (см. src/generate_ddl.py). Для живой БД эти
+-- колонки добавлены миграцией migrate_v13_forms_templates_bsl.sql.
 -- --------------------------------------------
 CREATE TABLE IF NOT EXISTS bsl_modules (
     id SERIAL PRIMARY KEY,
@@ -111,90 +123,25 @@ CREATE TABLE IF NOT EXISTS bsl_modules (
     code TEXT,
     object_type VARCHAR(50),
     object_name VARCHAR(255),
-    report_id INT REFERENCES external_report(id),
+    -- FK на external_report здесь нет — см. шапку файла (в живой БД его нет, очистка явная).
+    report_id INT,
     processing_id INT REFERENCES external_processing(id),
+    parent_uuid UUID,
+    parent_type TEXT NOT NULL DEFAULT 'external_report',
+    module_type VARCHAR(50),
+    code_size INTEGER,
+    truncated BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT NOW()
 );
 
 -- --------------------------------------------
--- ТАБЛИЦА Е. report_attributes (реквизиты отчета)
+-- ИНДЕКСЫ (только для таблиц этого файла; индексы внешнего отчёта — в src/ddl_external_report.sql)
 -- --------------------------------------------
-CREATE TABLE IF NOT EXISTS report_attributes (
-    id SERIAL PRIMARY KEY,
-    report_id INT NOT NULL REFERENCES external_report(id) ON DELETE CASCADE,
-    uuid VARCHAR(36),
-    name VARCHAR(255) NOT NULL,
-    synonym TEXT,
-    type VARCHAR(255),
-    password_mode BOOLEAN DEFAULT FALSE,
-    fill_checking VARCHAR(50),
-    created_at TIMESTAMP DEFAULT NOW()
-);
+CREATE INDEX IF NOT EXISTS idx_configurations_name ON configurations(name);
+CREATE INDEX IF NOT EXISTS idx_external_processing_name ON external_processing(name);
+CREATE INDEX IF NOT EXISTS idx_bsl_modules_config ON bsl_modules(configuration_id);
+CREATE INDEX IF NOT EXISTS idx_bsl_modules_parent_uuid ON bsl_modules(parent_uuid);
+CREATE INDEX IF NOT EXISTS idx_bsl_modules_module_type ON bsl_modules(module_type);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_bsl_modules_parent_file
+    ON bsl_modules(parent_uuid, file_path) WHERE parent_uuid IS NOT NULL;
 
--- --------------------------------------------
--- ТАБЛИЦА Ж. report_tabular_sections (табличные части)
--- --------------------------------------------
-CREATE TABLE IF NOT EXISTS report_tabular_sections (
-    id SERIAL PRIMARY KEY,
-    report_id INT NOT NULL REFERENCES external_report(id) ON DELETE CASCADE,
-    uuid VARCHAR(36),
-    name VARCHAR(255) NOT NULL,
-    synonym TEXT,
-    created_at TIMESTAMP DEFAULT NOW()
-);
-
--- --------------------------------------------
--- ТАБЛИЦА З. tabular_section_attributes (реквизиты ТЧ)
--- --------------------------------------------
-CREATE TABLE IF NOT EXISTS tabular_section_attributes (
-    id SERIAL PRIMARY KEY,
-    tsection_id INT NOT NULL REFERENCES report_tabular_sections(id) ON DELETE CASCADE,
-    uuid VARCHAR(36),
-    name VARCHAR(255) NOT NULL,
-    synonym TEXT,
-    type VARCHAR(255),
-    created_at TIMESTAMP DEFAULT NOW()
-);
-
--- --------------------------------------------
--- ТАБЛИЦА И. report_forms (формы отчета)
--- --------------------------------------------
-CREATE TABLE IF NOT EXISTS report_forms (
-    id SERIAL PRIMARY KEY,
-    report_id INT REFERENCES external_report(id),
-    uuid VARCHAR(36),
-    name VARCHAR(255) NOT NULL,
-    synonym TEXT,
-    form_type VARCHAR(50),
-    xml_file_path VARCHAR(500),
-    module_code TEXT,
-    created_at TIMESTAMP DEFAULT NOW()
-);
-
--- --------------------------------------------
--- ТАБЛИЦА К. report_templates (макеты отчета)
--- --------------------------------------------
-CREATE TABLE IF NOT EXISTS report_templates (
-    id SERIAL PRIMARY KEY,
-    report_id INT REFERENCES external_report(id),
-    uuid VARCHAR(36),
-    name VARCHAR(255) NOT NULL,
-    synonym TEXT,
-    template_type VARCHAR(100),
-    xml_file_path VARCHAR(500),
-    content_path VARCHAR(500),
-    created_at TIMESTAMP DEFAULT NOW()
-);
-
--- --------------------------------------------
--- ИНДЕКСЫ
--- --------------------------------------------
-CREATE INDEX idx_configurations_name ON configurations(name);
-CREATE INDEX idx_external_report_name ON external_report(name);
-CREATE INDEX idx_external_processing_name ON external_processing(name);
-CREATE INDEX idx_bsl_modules_config ON bsl_modules(configuration_id);
-CREATE INDEX idx_report_attributes_report ON report_attributes(report_id);
-CREATE INDEX idx_report_tsections_report ON report_tabular_sections(report_id);
-CREATE INDEX idx_tsection_attrs_tsection ON tabular_section_attributes(tsection_id);
-CREATE INDEX idx_report_forms_report ON report_forms(report_id);
-CREATE INDEX idx_report_templates_report ON report_templates(report_id);
