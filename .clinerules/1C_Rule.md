@@ -45,7 +45,7 @@
 | Список конфигураций | `list_configurations_tool(status?)` | Получить список всех загруженных конфигураций |
 | Информация о конфигурации | `get_configuration_tool(config_id)` | Детальная информация по ID |
 | Найти по имени/UUID | `find_config_by_name_uuid_tool(name_or_uuid)` | Поиск конфигурации |
-| Регистрация конфигурации | `register_external_report_tool(source_path)` | Зарегистрировать внешнюю обработку/отчет |
+| **Загрузка каталога (единственная точка входа)** | `load_1c_catalog_tool(source_path, force=False)` | Сервер сам определяет тип каталога и грузит; заменяет `register_*` |
 | Поиск объектов | `search_config_objects_tool(query, config_id?)` | Поиск по имени/описанию объектов конфигурации |
 | Структура объекта | `get_object_structure_tool(config_id, object_name)` | Получить реквизиты, формы объекта |
 | Список объектов по типу | `list_config_objects_tool(config_id, object_type?)` | Catalog, Document, Register и др. |
@@ -54,7 +54,14 @@
 | Значения перечислений | `get_enum_values_tool(config_id, enum_name?)` | Получить все значения Enum |
 | Прочитать XML/JSON | `read_config_file_tool(config_id, file_path?)` | Файлы конфигурации |
 | Пакетная индексация | `batch_index_from_dump_tool(config_id, type_filter?)` | Загрузка из ConfigDumpInfo.xml |
-| Анализ перед загрузкой | `analyze_config_load_tool(source_path)` | Проверка структуры без загрузки |
+| Удаление внешнего объекта | `delete_external_report_tool(source_path \| uuid \| report_id, object_type?)` | Удаляет запись внешнего объекта и его BSL-модули |
+
+> ⚠️ **Контракт загрузки — только три инструмента:** `get_load_config_rules_tool()`,
+> `load_1c_catalog_tool(source_path, force=False)`, `delete_external_report_tool(...)`.
+> Отдельный анализ перед загрузкой не нужен: точка входа определяет тип каталога сама
+> (`analyze_config_load_tool` — только диагностика). Остальные инструменты сервера
+> `1c-configurations-core` — вне контракта, будут удалены или перенесены.
+> Норматив поведения: `docs/config-scenarios/FLOWCHART_1c-configurations-core.md`.
 
 **Типы объектов (object_type):**
 

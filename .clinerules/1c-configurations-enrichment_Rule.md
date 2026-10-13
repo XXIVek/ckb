@@ -1,5 +1,16 @@
 # Правила работы с MCP сервером "1c-configurations-enrichment"
 
+> ⚠️ **СВЕРКА С РЕАЛЬНОСТЬЮ (13.10.2026).** Текст ниже описывает проектную схему, а не текущую
+> реализацию: таблицы `config_aliases`, `config_snippets`, `dependencies` отсутствуют и в
+> `ckb_1c_configurations`, и в `local_doc`; код `src/config_aliases.py`,
+> `src/config_snippets_manager.py` подключается к БД `configurations`, которой на сервере нет;
+> вызовы инструментов enrichment падают end-to-end. Актуальная схема и порядок реализации —
+> [docs/CONFIGURATIONS_ENRICHMENT_PLAN.md](../docs/CONFIGURATIONS_ENRICHMENT_PLAN.md) (узел V17),
+> инвентарь содержимого, из которого строятся алиасы и сниппеты, —
+> [docs/config-scenarios/ANALYSIS_2026-10-13_content_inventory.md](../docs/config-scenarios/ANALYSIS_2026-10-13_content_inventory.md).
+> Этот файл переписывается под реализованную схему на шаге V17.5 — до этого не использовать
+> `config_id` как идентификатор объекта: внешние объекты адресуются парой `(parent_uuid, uuid)`.
+
 ## 📋 Назначение сервера
 MCP сервер `1c-configurations-enrichment` (server_configurations.py) — это сервер обогащения данных конфигураций. Отвечает за связи между документацией и объектами конфигурации, алиасы для поиска, сниппеты для конфигураций и зависимость документов.
 
