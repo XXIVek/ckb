@@ -17,7 +17,8 @@ MCP сервер `1c-configurations-enrichment` (`server_configurations_enrichme
 загрузчик `load_1c_catalog_tool`.
 
 Ключевое отличие от прежнего текста правил: объект адресуется **uuid**, а не `config_id`.
-Внешние объекты живут в `external_report` / `external_processing`, таблицы `configuration` в
+Внешние объекты (отчёт и обработка) живут в **одной** таблице `external_report`, вид строки
+различает колонка `object_kind` (узел V22); таблиц `configuration` и `external_processing` в
 схеме нет. `config_id` в этих инструментах отсутствует вовсе.
 
 ## 🎯 Контракт — 18 инструментов
@@ -27,7 +28,7 @@ MCP сервер `1c-configurations-enrichment` (`server_configurations_enrichme
 | генерация | `generate_config_enrichment_tool` | `(uuid?, source_path?)` |
 | сводка + карточка | `config_enrichment_stats_tool` | `(uuid?, limit=20, card=True)` |
 | привязка к конфигурации (узлы V20, V20.1) | `set_object_configuration_tool` | `(uuid?, source_path?, configuration_id?)` |
-| содержимое макета (узел B) | `get_config_template_tool` | `(uuid?, source_path?, name?, include_query=False, max_bytes=2000)` |
+| содержимое макета (узел B) | `get_config_template_tool` | `(uuid?, source_path?, name?, template_id?, include_query=True)` |
 | алиасы | `add_config_aliases_tool` | `(aliases, uuid?, source_path?, target_type?, target_name?, target_uuid?, target_snippet_id?, description?, weight?)` |
 | | `search_config_aliases_tool` | `(query, uuid?, target_type?, limit=20)` |
 | | `resolve_config_alias_tool` | `(alias)` |
@@ -155,7 +156,7 @@ COALESCE(target_uuid,''))`. Целостность проверяет не сх�
 
 | `target_type` | Где цель | `target_uuid` |
 |---|---|---|
-| `ExternalReport` / `ExternalProcessing` | `external_report` / `external_processing` | uuid таблицы |
+| `ExternalReport` / `ExternalProcessing` | строка `external_report` любого вида (узел V22): вид различает колонка `object_kind`, отдельной таблицы `external_processing` в схеме нет | `uuid` строки заголовка; тип цели обязан совпадать с видом объекта |
 | `Attribute` | `attributes` (реквизит объекта) | `attributes.uuid` |
 | `TabularSectionColumn` | `attributes` (колонка ТЧ) | `attributes.uuid` |
 | `TabularSection` | `tabular_sections` | `tabular_sections.uuid` |
@@ -164,7 +165,6 @@ COALESCE(target_uuid,''))`. Целостность проверяет не сх�
 | `Template` | `templates` | `templates.uuid` |
 | `Module` | `bsl_modules` или `form_ext.ext` | `module:<bsl_module_id>` / `module:form:<uuid формы>` |
 | `ConfigSnippet` | `config_snippets` | `snippet:<id>` |
-| `Configuration`, `Catalog`, `Document`, … | таблицы объектов конфигурации | ❌ варианты загрузки 1–2 не реализованы, типы зарезервированы |
 | `Configuration`, `Catalog`, `Document`, … | таблицы объектов конфигурации | ❌ варианты загрузки 1–2 не реализованы, типы зарезервированы |
 | элементы макета-СКД (типы `DataSet`, `DCSParameter` … зарезервированы, целей в `config_aliases` нет) | содержимое `templates.ext` (узел B) | `dcs:<uuid макета>:<kind>:<имя>` — ключи отдаёт `src/enrichment_dcs.py::dcs_target_key` |
 
@@ -289,10 +289,12 @@ source_kind='template_query')` давало пусто). Реализация �
 `dcs_output_parameters`, `dcs_output_fields`. При `limit=0` раздел `dcs` не отдаётся, а
 счётчики остаются полными (то же правило узла V17.10).
 
-Инструмент `get_config_template_tool(uuid? | source_path?, name?, include_query=False,
-max_bytes=2000)`: состав конкретного макета (наборы данных, поля, связи, параметры,
-вычисляемые поля, итоги, варианты настроек, вывод). Текст запроса набора отдаётся только при
-`include_query=True` и усекается по `max_bytes` с явной пометкой. Несуществующее имя макета —
+Инструмент `get_config_template_tool(uuid? | source_path?, name?, template_id?,
+include_query=True)`: состав конкретного макета (наборы данных, поля, связи, параметры,
+вычисляемые поля, итоги, варианты настроек, вывод). Текст запроса набора по умолчанию отдаётся
+и усекается до `MAX_ANSWER` (8000 символов, константа `server_configurations_enrichment.py`)
+с явной пометкой и ссылкой на `config_snippets.answer` / `templates.ext`; `include_query=False`
+текст запроса скрывает. Несуществующее имя макета —
 отказ со списком доступных имён.
 
 За рамками узла B: типы целей `DataSet` / `DCSParameter` в словарь `config_aliases` не введены —
@@ -371,8 +373,9 @@ max_bytes=2000)`: состав конкретного макета (наборы
 
 ## ⚠️ Критические правила
 
-1. **Объект адресуется uuid или путём выгрузки.** `uuid` — uuid строки `external_report` /
-   `external_processing`, `source_path` — каталог выгрузки; достаточно одного. `config_id` в этих
+1. **Объект адресуется uuid или путём выгрузки.** `uuid` — uuid строки `external_report`
+   (любого вида: `object_kind` = `external_report` или `external_processing`, узел V22),
+   `source_path` — каталог выгрузки; достаточно одного. `config_id` в этих
    инструментах нет и не появится.
 2. **`delete_config_alias_tool` — мягкое снятие** (`active=false`): строка видна в истории,
    поиск её не отдаёт, перегенерация не восстанавливает и не удаляет. `hard=True` — убрать
@@ -431,10 +434,26 @@ max_bytes=2000)`: состав конкретного макета (наборы
    ссылки-сироты с `target_uuid = 'snippet:<id>'`, которого больше нет (проверено: три ссылки,
    поставленные на авто-сниппеты, пропали после прогона `validate_enrichment_flow.py`). Значит
    якорь берут на стабильную цель (`Template` / `Form` / `Module` / `Attribute` по имени цели)
-   или на ручной сниппет `is_verified=true`. Пробел контракта (устраняется узлом B):
-   `add_config_cross_reference_tool` не проставляет `target_uuid` цели, а
+   или на ручной сниппет `is_verified=true` (подтверждено 14.10.2026: ссылки на `Template` и `Module`
+   и ручные сниппеты перегенерацию пережили, ссылки на авто-сниппеты — нет). Пробел контракта
+   **остаётся** (узел E; узел B его не закрыл):
+   `add_config_cross_reference_tool` и `add_config_aliases_tool` не заполняют `target_uuid` цели, а
    `resolve_config_alias_tool` / `search_config_aliases_tool` его не показывают — точный ключ
-   цели виден только в карточке сниппета (`get_config_snippet_tool`) и в SQL-сверках.
+   цели виден только в карточке объекта, в карточке сниппета (`get_config_snippet_tool`) и в
+   SQL-сверках. `add_config_snippet_tool` `target_name` не принимает вовсе: основная цель
+   задаётся парой `target_type` + `target_uuid` (uuid цели берут из карточки объекта или из
+   `get_config_template_tool`). Адресация модуля формы при этом разная: в `dependencies` —
+   `Module:<ИмяФормы>` (например `Module:Отчет`), в `target_name` алиаса — `Form.<ИмяФормы>`
+   (`Form.Отчет`); форма `Module:Form.<ИмяФормы>` отклоняется как несуществующая цель, хотя
+   docstring инструмента обещает и такую запись (расхождение кода и docstring — узел E).
+   Пока цель не разрешается самим инструментом, `target_uuid` указывают **явно** — берут из
+   карточки объекта (`Template`/`Module`/`Attribute`), из `get_config_template_tool` или из
+   зависимостей ручного сниппета. Алиас или ссылка, добавленные только по `target_type` +
+   `target_name`, остаются с `target_key IS NULL`: на них не действует частичный уникальный
+   индекс (дубль не удержится), а раздел 16 `check_external_report_inventory.sql` показывает их
+   слепой зоной («алиасов с пустым target_key …»). Проверено 14.10.2026: 7 таких алиасов и одна
+   ссылка сняты (`hard=True`) и созданы заново с `target_uuid` — счётчик пустых ключей стал 0.
+
 10. **Только инструменты контракта.** Ответ оператору строится из ответов MCP-инструментов;
     прямые `psql.exe`, `information_schema` и чтение файлов выгрузки в анализе содержимого
     объекта не участвуют (см. `.clinerules/1c-configurations-core_Rule.md`, п. 5). Если нужного
@@ -450,7 +469,8 @@ max_bytes=2000)`: состав конкретного макета (наборы
 4b. get_config_template_tool(uuid=…, name=…)      # состав конкретного макета-СКД (узел B):
                                                    # наборы данных, поля, связи, параметры,
                                                    # вычисляемые поля, варианты настроек, вывод;
-                                                   # текст запроса — только include_query=True
+                                                   # текст запроса по умолчанию (include_query=True),
+                                                   # усечение до MAX_ANSWER=8000 символов
 5. add_config_aliases_tool                           # ОБЯЗАТЕЛЬНО, без вопроса оператора:
                                                    # русские формулировки, аббревиатуры,
                                                    # термины которых нет в выгрузке
@@ -478,15 +498,29 @@ max_bytes=2000)`: состав конкретного макета (наборы
 | `python tools/check_mcp_tool_wiring.py` | AST-сверка `EXPECTED_TOOLS` (core 3, enrichment 18, export 1) с регистрами реальных серверов: лишнего/недостающего инструмента быть не должно |
 | `python validate_project.py` | состояние проекта: живые модули загрузчика и обогащения, контракт инструментов, отсутствие кода, обращающегося к базе `configurations` |
 | `python _cmp_ddl.py` | шаги 1 → 1b → 2 установки против живой схемы `ckb_1c_configurations`: колонки, индексы, уникальные ограничения, FK, определения витрин |
-| `check_external_report_search.sql` (варианты 17–21, секции 32–36), `check_external_report_inventory.sql` (разделы 15–15f) | находимость алиасов и текста запроса макета, заполненность и покрытие обогащения в SQL; раздел `15f` — состояния привязок к конфигурации (`not_declared`/`bound`/`dangling`), обратный перечень, отсутствие внешнего ключа при наличии индекса |
+| `check_external_report_search.sql` (варианты 17–21, секции 32–36), `check_external_report_inventory.sql` (разделы 15–15g) | находимость алиасов и текста запроса макета, заполненность и покрытие обогащения в SQL; раздел `15f` — состояния привязок к конфигурации (`not_declared`/`bound`/`dangling`), обратный перечень, отсутствие внешнего ключа при наличии индекса; раздел `15g` — виды внешних объектов (узел V22): состав по `object_kind`, инварианты вида (ClassId, `parent_type` детей, self-цель, конфликт uuid), состояние схемы и витрины; раздел `16` — слепые зоны обогащения, в том числе «алиасов с пустым `target_key` = 0» (см. правило 9 об явном `target_uuid`) |
 
 Эталонные выгрузки: `C:\1C_LLM\LoadDoc\Test1_Otchet` (управляемая форма), `Test2_Otchet`
-(обычная форма). После `validate_load_flow.py --with-load` или `validate_enrichment_flow.py`
-БД очищается — эталоны нужно загрузить заново (`tools/restore_reference_pair.py`), их `id` меняются.
+(обычная форма) — их восстанавливает `tools/restore_reference_pair.py` (только эти два каталога).
+Эталон внешней обработки — `C:\1C_LLM\LoadDoc\TSD_0` (заголовок в `external_report` с
+`object_kind='external_processing'`, узел V22); в `restore_reference_pair.py` он **не** загружается:
+его грузят отдельно проверки узла V22 (`_v22_probe.py`, `_v22_enrich_probe.py`,
+`validate_load_flow.py --with-load`, `_v13_mcp_layer.py` — последний проходит их через
+обёртки MCP-инструментов), которые выгружают его за собой. После
+`validate_load_flow.py --with-load` или `validate_enrichment_flow.py`
+БД очищается — эталоны нужно загрузить заново (`tools/restore_reference_pair.py` + генерация
+обогащения), их `id` меняются. Вместе со строкой внешнего объекта снимаются **и все ручные
+обогащающие строки** (`config_aliases` c `origin='manual'`, `config_snippets` c `is_verified=true`,
+`config_cross_references`): перегенерация их не трогает, а удаление объекта — удаляет. Поэтому
+порядок всегда такой: сначала прогон валидаторов, только потом ручные алиасы, ручные сниппеты и
+ссылки на documentation (проверено 14.10.2026: после `validate_enrichment_flow.py` ручные строки
+эталонной пары исчезли, их наносили заново — см. строку V22.2 журнала).
 
 ## 🚫 Что сознательно не реализовано (V17.8 и далее)
 
-- обогащение конфигурации, расширения и внешней обработки (варианты загрузки 1, 2, 4 — заглушки);
+- обогащение конфигурации и расширения (варианты загрузки 1, 2 — заглушки); внешняя обработка
+  обогащается с узла V22: `parent_type` строк обогащения и self-цель обязаны совпадать с видом
+  заголовка (`object_kind`);
 - таблица объектов конфигурации (`Catalog`/`Document`/… как цели) — типов нет в словаре;
 - `pg_trgm` для поиска по середине идентификатора — не установлен;
 - автоматические cross-references со справочником языка: указатели ставит только оператор;

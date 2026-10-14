@@ -33,6 +33,19 @@ UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
 
 ROOT_TAGS = {"ExternalReport": "external_report", "ExternalDataProcessor": "external_processing"}
 
+# Узел V22 (14.10.2026): константы класса метаданных, которыми выгрузка 1С помечает
+# внешний объект в <InternalInfo><ContainedObject><ClassId>. Вид строки заголовка
+# (external_report.object_kind) заявляет корневой элемент XML (ExternalReport /
+# ExternalDataProcessor), а ClassId — независимое подтверждение из той же выгрузки.
+# Расхождение прерывает загрузка с причиной (тот же порядок, что R3 для пустого uuid):
+# иначе в одной таблице оказались бы строки, чей вид нельзя проверить, и поиск по виду
+# (обогащение, сводка, инвентарь) врал бы.
+OBJECT_CLASS_IDS = {
+    "external_report": "e41aff26-25cf-4bb6-b6c1-3f478a75f374",
+    "external_processing": "c3831ec8-d8d5-4f93-8a22-f9bfae07327f",
+}
+OBJECT_KIND_TITLES = {"external_report": "внешний отчёт", "external_processing": "внешняя обработка"}
+
 # Поля свойств -> колонки БД. Вид: text - текст, bool - логический, ref - имя формы/макета.
 REPORT_FIELDS = {
     "Name": ("name", "text"),
@@ -214,6 +227,40 @@ def _check_uuid(value, what, name=""):
     return {"success": True, "uuid": value}
 
 
+def _check_object_kind(obj_type, classid):
+    """Узел V22: вид внешнего объекта не должен противоречить ClassId из той же выгрузки.
+
+    None — противоречия нет. Чужой ClassId — словарь отказа ({"error", "hint"}), загрузка
+    прекращается до записи в БД, тот же порядок, что R3: корневой элемент и InternalInfo
+    описывают разные классы метаданных, строка была бы записана с неверным object_kind, и
+    поиск по виду (обогащение, сводка, инвентарь) показал бы не то.
+
+    Пустой ClassId — словарь предупреждения ({"warning"}), а не отказа. Вид по правилу R1
+    определяется корневым элементом XML выгрузки, поэтому отсутствие InternalInfo не делает
+    вывод о виде неверным — но подтверждения из выгрузки нет, и сказать это обязан загрузчик:
+    ручные и урезанные выгрузки реальны, а молча требовать InternalInfo значило бы отказать
+    корректному каталогу (именно так и ломались синтетические проверки R3).
+    """
+    expected = OBJECT_CLASS_IDS.get(obj_type)
+    if not expected:
+        return None  # неизвестного вида сюда не доходит: его отклоняет разбор корня
+    actual = str(classid or "").strip().lower()
+    title = OBJECT_KIND_TITLES.get(obj_type, obj_type)
+    if not actual:
+        return {"warning": (f"Вид объекта ({title}) подтверждён только корневым элементом XML: "
+                            "в <InternalInfo><ContainedObject><ClassId> пустое значение. "
+                            "object_kind записан по корневому элементу (R1), сверка с классом "
+                            "метаданных не выполнена.")}
+    if actual != expected.lower():
+        return {"success": False,
+                "error": f"Вид объекта не совпадает с ClassId: корневой элемент заявляет "
+                         f"'{obj_type}' ({title}), а ClassId = {actual}, ожидается {expected}",
+                "hint": "Загрузка прекращена: ExternalReport/ExternalDataProcessor и "
+                        "<ContainedObject><ClassId> описывают разные классы метаданных; "
+                        "строка была бы записана с неверным object_kind."}
+    return None
+
+
 def _read_properties(properties, fields):
     """Разбор <Properties> по таблице соответствия; результат - dict по колонкам БД."""
     row = {}
@@ -340,8 +387,10 @@ def parse_external_meta(xml_path, obj_type=None):
     """Разобрать корневой XML внешнего отчёта/обработки в контракты для писателей.
 
     Успех: {"success": True, "uuid", "object_type", "name", "report", "attributes",
-            "tabular_sections", "refs", "counts"}
-    Отказ: {"success": False, "error", "hint"} - загрузка прекращается (R3).
+            "tabular_sections", "refs", "warnings", "counts"}
+    Отказ: {"success": False, "error", "hint"} - загрузка прекращается (R3; узел V22 —
+           противоречие вида объекта и ClassId). warnings - то, что разобран, но о чём
+           обязан предупредить загрузчик (пустой ClassId).
     """
     try:
         tree = ET.parse(str(xml_path))
@@ -381,10 +430,19 @@ def parse_external_meta(xml_path, obj_type=None):
         report_row["generatedtype_category"] = generated[0].get("category")
         report_row["generatedtype_typeid"] = generated[0].get("typeid")
         report_row["generatedtype_valueid"] = generated[0].get("valueid")
-    if obj_type == "external_processing":
-        report_row["version"] = _text(_child(properties, "Version")) or "1.0.0.0"
-        report_row["class_id"] = (report_row.get("containedobject_classid")
-                                  or "e41aff26-25cf-4bb6-b6c1-3f478a75f374")
+    # Узел V22: выдуманную версию ("1.0.0.0") и class_id для обработки больше не пишем:
+    # колонок version/class_id в общей таблице-заголовке нет, а придуманное значение хуже
+    # отсутствующего — его нельзя отличить от заявленного разработчиком. Сведения из
+    # СведенияОВнешнейОбработке() в заголовок не переносятся: они читаются из модуля
+    # объекта как сниппет кода (source_kind='object_module'), а не как факт из выгрузки.
+
+    # Узел V22: вид строки обязан совпадать с классом метаданных из той же выгрузки.
+    # Противоречие — отказ (см. _check_object_kind), отсутствие ClassId — предупреждение:
+    # вид берётся из корневого элемента (R1), но подтвердить его нечем.
+    kind_issue = _check_object_kind(obj_type, report_row.get("containedobject_classid"))
+    if kind_issue and kind_issue.get("error"):
+        return kind_issue
+    kind_warnings = [kind_issue["warning"]] if kind_issue and kind_issue.get("warning") else []
 
     attributes = []
     tabular_sections = []
@@ -424,6 +482,7 @@ def parse_external_meta(xml_path, obj_type=None):
         "attributes": attributes,
         "tabular_sections": tabular_sections,
         "refs": refs,
+        "warnings": kind_warnings,
         "counts": {
             "attributes": len(attributes),
             "tabular_sections": len(tabular_sections),

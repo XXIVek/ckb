@@ -32,6 +32,7 @@ from psycopg2.extras import execute_values
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from external_db import transaction  # noqa: E402
+from external_meta_parser import OBJECT_KIND_TITLES  # noqa: E402
 from enrichment_dcs import card_summary as dcs_card_summary  # noqa: E402
 from external_table_writer import (  # noqa: E402
     ConfigAliasRowWriter,
@@ -46,10 +47,17 @@ MAX_AUTO_ALIASES_PER_SNIPPET = 10    # автоалиасы на сниппет;
 MIN_ALIAS_WORD_LEN = 3               # как extract_aliases в local_doc (len > 2)
 
 # Веса по типу цели (раздел 4.1 плана). Совпадают по смыслу с alias_targets в local_doc.
+# Узел V22: ключом является target_type, поэтому для внешней обработки нужны те же значения,
+# что и для отчёта: вид объекта не должен влиять на ранжирование его имени и синонима.
+# Внешний вид алиаса (ExternalReport / ExternalProcessing) задаёт строка заголовка object_kind,
+# а вес берётся по фактическому типу цели — расхождения здесь быть не должно.
 WEIGHTS = {
     "ExternalReport.name": 1.2,
     "ExternalReport.part": 0.9,
     "ExternalReport.synonym": 1.0,
+    "ExternalProcessing.name": 1.2,
+    "ExternalProcessing.part": 0.9,
+    "ExternalProcessing.synonym": 1.0,
     "Attribute.name": 0.9,
     "Attribute.synonym": 0.7,
     "TabularSection.name": 0.9,
@@ -153,6 +161,7 @@ def json_of(value, default):
 
 def resolve_object(uuid=None, source_path=None):
     """Найти объект выгрузки по uuid или каталогу выгрузки (через read_external_meta)."""
+    meta = None
     if not uuid and source_path:
         from external_report_loader import read_external_meta
         meta = read_external_meta(source_path)
@@ -164,7 +173,13 @@ def resolve_object(uuid=None, source_path=None):
                 "error": "Не указан объект: нужен uuid внешнего объекта или source_path каталога выгрузки",
                 "hint": "Пример: generate_config_enrichment_tool(uuid='d364e104-...') "
                         "или source_path=r'C:\\1C_LLM\\LoadDoc\\Test2_Otchet'."}
-    return {"success": True, "uuid": str(uuid).strip(), "object_type": "external_report"}
+    # Узел V22: вид объекта (отчёт / обработка) здесь НЕ решается. Когда объект задан
+    # uuid, вид знает только строка заголовка в БД — её читает object_row(); когда задан
+    # source_path, вид даёт read_external_meta по корневому XML. Оба пути сходятся в
+    # generate_enrichment, где вид берётся из БД: алиасы и parent_type обязаны совпасть
+    # с тем, что записал загрузчик.
+    return {"success": True, "uuid": str(uuid).strip(),
+            "object_type": (meta.get("object_type") if meta else None) or "external_report"}
 
 
 def fetch_rows(cur, sql, params=None):
@@ -194,13 +209,20 @@ def fetch_value(cur, sql, params=None):
 
 
 def object_row(cur, obj_uuid):
-    """Карточка внешнего отчёта: uuid, имя, синоним. Обогащение реализовано для него.
+    """Карточка внешнего объекта: uuid, имя, синоним и ВИД строки заголовка.
+
+    Обогащение реализовано для внешнего отчёта и (узел V22) для внешней обработки — обе
+    строки лежат в external_report и различаются колонкой object_kind. Вид берётся именно
+    отсюда, а не из имени параметра: parent_type дочерних строк и тип цели алиаса обязаны
+    совпадать с тем, что записал загрузчик, иначе алиас указывал бы на несуществующую цель.
 
     Публичная функция: ей пользуются API-модули, чтобы проверить существование объекта
     и взять его имя для карточки ответа.
     """
     rows = fetch_rows(cur,
-                      "SELECT uuid::text AS uuid, name, synonym FROM external_report "
+                      "SELECT uuid::text AS uuid, name, synonym, "
+                      "COALESCE(object_kind, 'external_report') AS object_kind "
+                      "FROM external_report "
                       "WHERE uuid = %s::uuid LIMIT 1", (obj_uuid,))
     return rows[0] if rows else None
 
@@ -299,24 +321,53 @@ def _item_captions(item):
     return captions
 
 
+def object_kind_of(obj):
+    """Вид внешнего объекта из строки заголовка (узел V22).
+
+    Значения совпадают со словарём parent_type дочерних таблиц: 'external_report',
+    'external_processing'. Пустое значение читается как 'external_report' — так задано
+    DEFAULT в схеме, и старые строки (до V22) именно им заполнены миграцией.
+    """
+    kind = str((obj or {}).get("object_kind") or "").strip().lower()
+    return kind if kind in OBJECT_KIND_TITLES else "external_report"
+
+
+def object_target_type(obj):
+    """Тип цели алиаса/зависимости для самого объекта (словарь target_type).
+
+    Тип цели обязан совпадать с видом строки заголовка: алиас внешней обработки, указывающий
+    на ExternalReport, вёл бы в другой объект с тем же uuid — то есть вникуда.
+    """
+    return "ExternalProcessing" if object_kind_of(obj) == "external_processing" \
+        else "ExternalReport"
+
+
 def build_object_aliases(obj, data):
-    """Алиасы по объекту и его сохранённых частях (раздел 4.1 плана V17)."""
+    """Алиасы по объекту и его сохранённых частях (раздел 4.1 плана V17).
+
+    Узел V22: вид объекта (отчёт / обработка) берётся из строки заголовка. Имя и синоним
+    обрабатываются одинаково для обоих видов — различается только тип цели и parent_type,
+    потому что они должны совпасть с записанными загрузчиком.
+    """
     obj_uuid = obj["uuid"]
-    collector = _AliasCollector(obj_uuid, "external_report")
+    kind = object_kind_of(obj)
+    target_type = object_target_type(obj)
+    kind_title = OBJECT_KIND_TITLES[kind]
+    collector = _AliasCollector(obj_uuid, kind)
 
     name = (obj.get("name") or "").strip()
     if name:
-        collector.add(name, "ExternalReport", target_name=name, target_uuid=obj_uuid,
-                      weight=WEIGHTS["ExternalReport.name"], description="имя внешнего отчёта")
+        collector.add(name, target_type, target_name=name, target_uuid=obj_uuid,
+                      weight=WEIGHTS[f"{target_type}.name"], description=f"имя объекта ({kind_title})")
         # Части имени по '_': «СравнениеУСНИ90_2» даёт и «СравнениеУСНИ90».
         for part in [p for p in name.split("_") if len(p) >= MIN_ALIAS_WORD_LEN]:
-            collector.add(part, "ExternalReport", target_name=name, target_uuid=obj_uuid,
-                          weight=WEIGHTS["ExternalReport.part"],
-                          description="часть имени внешнего отчёта")
+            collector.add(part, target_type, target_name=name, target_uuid=obj_uuid,
+                          weight=WEIGHTS[f"{target_type}.part"],
+                          description=f"часть имени объекта ({kind_title})")
     synonym = caption_of(json_of(obj.get("synonym"), {}))
     if synonym:
-        collector.add(synonym, "ExternalReport", target_name=name, target_uuid=obj_uuid,
-                      weight=WEIGHTS["ExternalReport.synonym"], description="синоним объекта")
+        collector.add(synonym, target_type, target_name=name, target_uuid=obj_uuid,
+                      weight=WEIGHTS[f"{target_type}.synonym"], description="синоним объекта")
 
     column_uuids = set()
     for section in data["tabular_sections"]:
@@ -585,6 +636,7 @@ def build_snippets(obj, data):
     """
     obj_uuid = obj["uuid"]
     obj_name = (obj.get("name") or "").strip() or obj_uuid
+    parent_type = object_kind_of(obj)
     snippets = []
 
     def add(question, answer, source_kind, source_uuid, source_path,
@@ -594,7 +646,7 @@ def build_snippets(obj, data):
         snippets.append({
             "row": {
                 "parent_uuid": obj_uuid,
-                "parent_type": "external_report",
+                "parent_type": parent_type,
                 "question": question,
                 "answer": answer,
                 "source_kind": source_kind,
@@ -738,13 +790,16 @@ def build_dependencies(snippet, index, own_decl_name=None):
 
 
 def build_snippet_aliases(snippet_row, snippet_id, obj_uuid, decl_name=None,
-                         max_auto=MAX_AUTO_ALIASES_PER_SNIPPET):
+                         max_auto=MAX_AUTO_ALIASES_PER_SNIPPET, parent_type="external_report"):
     """Автоалиасы сниппета: имя объявления (вес 1.1) + слова из текста (вес 1.0), не больше max_auto.
 
     Именно здесь нужен порог количества: автоалиасы из question/answer покрывают только
     те термины, которые встречаются в самом коде. Недостающее добавляет оператор инструментом
     add_config_aliases_tool (origin='manual', лимита нет) - так же, как add_aliases_tool
     дополняет алиасы сниппетов в local_doc.
+
+    parent_type (узел V22) — вид строки заголовка, к которой относится сниппет: он обязан
+    совпасть с parent_type самого сниппета и с parent_type, который записал загрузчик.
     """
     rows = []
     seen = set()
@@ -761,7 +816,7 @@ def build_snippet_aliases(snippet_row, snippet_id, obj_uuid, decl_name=None,
                      "target_type": "ConfigSnippet",
                      "target_name": snippet_row.get("question"),
                      "target_snippet_id": snippet_id,
-                     "parent_uuid": obj_uuid, "parent_type": "external_report",
+                     "parent_uuid": obj_uuid, "parent_type": parent_type,
                      "weight": weight, "description": description,
                      "origin": "generated", "active": True})
         return True
@@ -820,6 +875,7 @@ def generate_enrichment(uuid=None, source_path=None):
                 return {"success": False,
                         "error": f"Внешний объект с uuid={obj_uuid} в external_report не найден",
                         "hint": "Сначала загрузите каталог: load_1c_catalog_tool(source_path=...)."}
+            object_kind = object_kind_of(obj)
             data = collect_source_data(cur, obj_uuid)
 
             # узел V20.1: привязка к конфигурации в генерации не участвует — конфигурация есть
@@ -865,7 +921,8 @@ def generate_enrichment(uuid=None, source_path=None):
                 for dependency in build_dependencies(row, index, own_decl_name=snippet["decl_name"]):
                     dependency_rows.append(dict(dependency, snippet_id=snippet_id))
                 snippet_alias_rows += build_snippet_aliases(
-                    row, snippet_id, obj_uuid, decl_name=snippet["decl_name"])
+                    row, snippet_id, obj_uuid, decl_name=snippet["decl_name"],
+                    parent_type=object_kind)
 
             dependencies_inserted = ConfigSnippetDependencyRowWriter.insert_many(cur, dependency_rows)
             snippet_aliases_inserted, _ = ConfigAliasRowWriter.insert_many_skip_duplicates(
@@ -885,6 +942,11 @@ def generate_enrichment(uuid=None, source_path=None):
                 "success": True,
                 "uuid": obj_uuid,
                 "name": obj.get("name"),
+                # узел V22: вид объекта из строки заголовка — карточка обязана называть то,
+                # чем объект является на самом деле (отчёт / обработка), а не таблицу, в которой
+                # он лежит: обе строки живут в external_report.
+                "object_kind": object_kind,
+                "object_kind_title": OBJECT_KIND_TITLES[object_kind],
                 "removed": removed,
                 "created": {
                     "object_aliases": aliases_inserted,
@@ -1125,6 +1187,10 @@ def describe_object(uuid=None, source_path=None, limit=DESCRIBE_DEFAULT_LIMIT):
                 "       er.main_data_composition_schema, er.variants_storage, er.settings_storage, "
                 "       er.generatedtype_category, er.generatedtype_name, er.generatedtype_typeid::text, "
                 "       er.containedobject_classid::text, er.containedobject_objectid::text, er.created_at, "
+                # Узел V22: вид строки заголовка. Карточка обязана называть, чем объект является —
+                # отчётом или обработкой: обе строки лежат в external_report, и без этой колонки
+                # карточка обработки выглядела бы карточкой отчёта с пустыми свойствами отчёта.
+                "       COALESCE(er.object_kind, 'external_report') AS object_kind, "
                 # узел V20: привязка к конфигурации, заявленная оператором. NULL — это
                 # «привязка не заявлена», а не «отчёт универсальный»: отдельного состояния
                 # «универсальный» в модели нет. Название и версия читаются справочно, чтобы
@@ -1169,7 +1235,12 @@ def describe_object(uuid=None, source_path=None, limit=DESCRIBE_DEFAULT_LIMIT):
                 "        WHERE parent_uuid = %(u)s::uuid) AS doc_links",
                 {"u": obj_uuid})[0]
             result = {"success": True, "uuid": obj_uuid, "object": identity[0], "counts": counts,
-                      "caption": caption_of(identity[0].get("synonym")), "limit": limit}
+                      "caption": caption_of(identity[0].get("synonym")), "limit": limit,
+                      # узел V22: вид объекта — верхнеуровневое поле, а не только поле внутри
+                      # «object»: слой форматирования карточки обязан назвать вид, даже когда
+                      # разделы свойств не отдаются (limit=0).
+                      "object_kind": object_kind_of(identity[0]),
+                      "object_kind_title": OBJECT_KIND_TITLES[object_kind_of(identity[0])]}
             # Узел B: содержимое макетов-СКД считается по сохранённому templates.ext и входит
             # в counts наравне с прочими счётчиками — оно не зависит от limit. Перечень элементов
             # схемы карточка усечёт в слое форматирования, число элементов обязано быть настоящим.

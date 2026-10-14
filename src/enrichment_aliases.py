@@ -31,6 +31,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from external_db import transaction  # noqa: E402
 from external_table_writer import ConfigAliasRowWriter  # noqa: E402
+from external_meta_parser import OBJECT_KIND_TITLES  # noqa: E402
 from enrichment_generator import (  # noqa: E402
     MIN_ALIAS_WORD_LEN,
     WEIGHTS,
@@ -38,7 +39,9 @@ from enrichment_generator import (  # noqa: E402
     collect_source_data,
     fetch_rows,
     norm_alias,
+    object_kind_of,
     object_row,
+    object_target_type,
     resolve_object,
 )
 
@@ -119,16 +122,30 @@ def add_config_aliases(aliases, uuid=None, source_path=None, target_type=None,
                 resolved_uuid = None
                 resolved_snippet = int(target_snippet_id)
             else:
-                resolved_type = target_type or "ExternalReport"
+                # Узел V22: цель «сам объект» обязана быть того же вида, что и строка заголовка.
+                # Для внешней обработки алиас на ExternalReport вёл бы в несуществующий объект:
+                # таблицы external_processing больше нет, а uuid принадлежит обработке.
+                object_kind = object_kind_of(obj)
+                object_type = object_target_type(obj)
+                if target_type and target_type != object_type and target_type in (
+                        "ExternalReport", "ExternalProcessing"):
+                    return {"success": False,
+                            "error": f"Цель '{target_type}' не совпадает с видом объекта: "
+                                     f"uuid={obj_uuid} — {OBJECT_KIND_TITLES[object_kind]} "
+                                     f"(object_kind='{object_kind}'). Укажите target_type="
+                                     f"'{object_type}' или опустите target_type — цель на сам "
+                                     "объект подставляется по его виду."}
+                resolved_type = target_type or object_type
                 resolved_name = target_name or obj.get("name")
-                resolved_uuid = target_uuid or (obj_uuid if resolved_type == "ExternalReport"
+                resolved_uuid = target_uuid or (obj_uuid if resolved_type == object_type
                                                else None)
                 resolved_snippet = None
             weight_value = float(weight) if weight is not None else WEIGHTS.get(
                 f"{resolved_type}.name", 1.0)
             rows = [_alias_row(part, obj_uuid, resolved_type, resolved_name, resolved_uuid,
                                resolved_snippet, weight_value,
-                               description or "алиас, добавленный оператором", "manual")
+                               description or "алиас, добавленный оператором", "manual",
+                               parent_type=object_kind_of(obj))
                     for part in parts]
             inserted, skipped = ConfigAliasRowWriter.insert_many_skip_duplicates(cur, rows)
             return {"success": True, "uuid": obj_uuid, "object_name": obj.get("name"),

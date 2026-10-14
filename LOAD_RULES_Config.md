@@ -1,6 +1,6 @@
 # Правила загрузки каталогов 1С (кратко)
 
-> **Норматив поведения** — блок-схемы, правила R1–R11, матрица «узел → код»:
+> **Норматив поведения** — блок-схемы, правила R1–R12, матрица «узел → код»:
 > [docs/config-scenarios/FLOWCHART_1c-configurations-core.md](docs/config-scenarios/FLOWCHART_1c-configurations-core.md).
 > Этот файл — сжатая выжимка для AI-ассистента. При расхождении истинен норматив.
 
@@ -12,9 +12,10 @@
 | `load_1c_catalog_tool(source_path, force=False)` | **единственная точка входа загрузки** |
 | `delete_external_report_tool(source_path \| uuid \| report_id, object_type)` | удалить внешний объект и его BSL-модули |
 
-Другие инструменты сервера — **вне контракта** (будут удалены или перенесены), в загрузке они не
-участвуют. `register_external_report_tool` и `analyze_config_load_tool` вызывать не нужно: первый —
-устаревший псевдоним точки входа, второй — только диагностика определения варианта.
+Других инструментов на сервере нет: внеконтрактные удалены 14.10.2026 (обращались к базе
+`configurations`, которой на сервере нет). `register_external_report_tool` и
+`analyze_config_load_tool` вызывать не нужно: они удалены, определение варианта выполняется внутри
+точки входа.
 
 ## Как сервер сам определяет, что грузить (правило R1)
 
@@ -25,7 +26,7 @@
 | есть `Configuration.xml`, `ConfigurationExtensionPurpose` нет | конфигурация | `configurations` | ❌ заглушка |
 | есть `Configuration.xml` + `ConfigurationExtensionPurpose` | расширение | `config_extensions` | ❌ заглушка |
 | есть XML с элементом `ExternalReport` | внешний отчёт | `external_report` | ✅ реализован |
-| есть XML с элементом `ExternalDataProcessor` | внешняя обработка | `external_processing` | ❌ заглушка |
+| есть XML с элементом `ExternalDataProcessor` | внешняя обработка | `external_report` c `object_kind='external_processing'` (узел V22) | ✅ реализован |
 | ничего из перечисленного | — | — | ❌ «каталог не подходит» |
 
 В выгрузке 1С корневой элемент файла внешнего объекта — `MetaDataObject`
@@ -40,7 +41,7 @@
 | `✅ загружено` | объект новый | проверить карточку: ID, UUID, имя, число BSL-модулей |
 | `♻️ перезагружено` | был дубликат + `force=True` | — |
 | `⚠️ уже загружено` | UUID уже есть в таблице (в том числе при другой версии объекта) | повторить вызов с `force=True` или удалить через `delete_external_report_tool` |
-| `❌ не могу загрузить` | нет каталога / каталог не подходит / пустой UUID / сценарий не реализован / не получен ID | устранить причину и повторить |
+| `❌ не могу загрузить` | нет каталога / каталог не подходит / пустой UUID / сценарий не реализован / не получен ID / тот же `uuid` занят строкой другого вида (узел V22, статус `kind_conflict`) | устранить причину и повторить |
 
 Ключевые правила:
 
@@ -72,6 +73,14 @@
    сводке и в предупреждении генерации. `force=True` переносит значение на новую строку; карточка
    дубликата показывает привязку, карточка перезагрузки — строку «Привязка к конфигурации
    перенесена».
+9. **Внешний объект — одна таблица-заголовок и колонка вида (правило R12, узел V22).** И отчёт, и
+   обработка пишутся в `external_report`; вид задаёт `object_kind` (`external_report` /
+   `external_processing`), его заявляет класс писателя заголовка, а не разбор XML; пустой
+   `<xr:ClassId>` читается как `external_report` и даёт предупреждение, чужой ClassId — отказ.
+   Отдельной таблицы `external_processing` и колонки `bsl_modules.processing_id` в схеме нет;
+   `parent_type` во всех дочерних строках совпадает с `object_kind` заголовка. Один `uuid` под
+   двумя видами — отказ `kind_conflict` (это исход `❌`, а не дубликат: `force=True` удалил бы
+   чужой объект).
 
 ## Что сохраняется
 
@@ -156,14 +165,16 @@
   Тот же разбор одной разметки — `python tools/decode_form_layout.py`. Логи перенаправления
   пишутся с кириллицей только при
   `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8` и `$env:PYTHONIOENCODING='utf-8'`.
-- **Схема БД «с нуля» — ровно два шага после `CREATE DATABASE`** (порядок фиксирован,
+- **Схема БД «с нуля» — ровно три шага после `CREATE DATABASE`** (порядок фиксирован,
   подробности и причина — `.clinerules/1c-configurations-core_Rule.md`, раздел «Порядок создания
   БД «с нуля»», и п. 17 там же): шаг 1 `src/ddl_external_report.sql` (генерируется
-  `src/generate_ddl.py`; `external_report` + дочерние таблицы + витрины `v_form_elements` /
-  `v_form_events`), шаг 2 `create_1c_configurations_db.sql` (`configurations`,
-  `config_extensions`, `external_processing`, `bsl_modules`). Для уже созданной БД изменения схемы
-  применяются аддитивными `migrate_*.sql`; правка схемы обязана идти парой «миграция +
-  DDL/бутстрап», иначе `_cmp_ddl.py` падает.
+  `src/generate_ddl.py`; `external_report` — единая таблица-заголовок внешних объектов с колонкой
+  `object_kind` (узел V22) + дочерние таблицы + витрины `v_form_elements` / `v_form_events`),
+  шаг 1b `src/ddl_enrichment.sql` (`config_*` и витрины обогащения, узел V17), шаг 2
+  `create_1c_configurations_db.sql` (`configurations`, `config_extensions`, `bsl_modules`;
+  таблица `external_processing` с узла V22 не создаётся). Для уже созданной БД изменения схемы
+  применяются аддитивными `migrate_*.sql` (в том числе `migrate_v22_object_kind.sql`); правка
+  схемы обязана идти парой «миграция + DDL/бутстрап», иначе `_cmp_ddl.py` падает.
 - Ручная SQL-проверка заполнения, поиска и инвентаря: `check_external_report_fill.sql`
   (разделы 1–9 — целостность, дубликаты, сироты, заполненность jsonb; разделы 10–15 — V13:
   счётчики `forms`/`form_ext`/`templates`/`bsl_modules`, размещение модулей по R9, содержимое
@@ -191,7 +202,7 @@
 C:\1C_LLM\LoadDoc\
 ├── BGU2\                  ← конфигурация (заглушка)
 ├── TSD_R\                 ← расширение (заглушка)
-├── TSD_0\                 ← внешняя обработка (заглушка)
+├── TSD_0\                 ← внешняя обработка (реализован, узел V22)
 ├── Test1_Otchet\          ← внешний отчёт: реквизиты, ТЧ, форма, макет, Ext/objectmodule.bsl
 │                            (эталон проверки V12 + V13)
 ├── Test2_Otchet\          ← внешний отчёт только с формой и макетом (0 реквизитов и ТЧ)
@@ -206,7 +217,7 @@ C:\1C_LLM\LoadDoc\
 |---|---|---|
 | Полная конфигурация | [01_configuration.md](docs/config-scenarios/01_configuration.md) | ❌ не реализован |
 | Расширение | [02_extension.md](docs/config-scenarios/02_extension.md) | ❌ не реализован |
-| Внешняя обработка | [03_external_processor.md](docs/config-scenarios/03_external_processor.md) | ❌ не реализован |
+| Внешняя обработка | [03_external_processor.md](docs/config-scenarios/03_external_processor.md) | ✅ реализован узлом V22: заголовок в `external_report` с `object_kind='external_processing'`, содержимое `Forms/`, `Templates/`, `Ext/` и обогащение V17 работают так же, как для отчёта |
 | Внешний отчёт | [04_external_report.md](docs/config-scenarios/04_external_report.md) | ✅ реализован, включая дочерние данные (V12) и содержимое `Forms/`, `Templates/`, `Ext/` (V13); имена инструментов в документе устарели, норматив — FLOWCHART |
 
 ## Метрики качества загрузки
@@ -216,4 +227,4 @@ C:\1C_LLM\LoadDoc\
 | external_report | `forms`/`form_ext` = число каталогов `Forms/`, `templates` с заполненным `ext` или `ext_bin` = число каталогов `Templates/` | 0 — допустимо, если каталогов в выгрузке нет (`Test3_Otchet_Null`, `Test4_Otchet_Regress`) |
 | external_report | `bsl_modules` = число распознанных модулей `Ext/*.bsl` | модуль ФОРМ обязан быть в `form_ext.ext`, а не в `bsl_modules` (R9) |
 | external_report | `attributes` ≥ число `<Attribute>` + колонок ТЧ, `column_uuids` разрешаются полностью | битых ссылок и дублей быть не должно |
-| configuration / extension / external_processing | — | метрики появятся вместе с реализацией |
+| configuration / extension | — | метрики появятся вместе с реализацией вариантов 1–2. Внешняя обработка (узел V22) подчиняется тем же метрикам, что и внешний отчёт: заголовок в той же таблице `external_report`, вид различает `object_kind` |

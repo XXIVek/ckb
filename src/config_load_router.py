@@ -32,15 +32,22 @@ VARIANT_TITLES = {
 }
 
 # Целевые таблицы БД ckb_1c_configurations для каждого варианта.
+# Узел V22 (14.10.2026): оба внешних варианта пишут в ОДНУ таблицу-заголовок
+# external_report — вид строки различает колонка object_kind. Для конфигурации и
+# расширения целевые таблицы остались отдельными: это другой сценарий (не выгрузка
+# одного внешнего объекта), и они по-прежнему заглушки.
 VARIANT_TABLES = {
     VARIANT_CONFIGURATION: "configurations",
     VARIANT_EXTENSION: "config_extensions",
     VARIANT_EXTERNAL_REPORT: "external_report",
-    VARIANT_EXTERNAL_PROCESSING: "external_processing",
+    VARIANT_EXTERNAL_PROCESSING: "external_report",
 }
 
 # Варианты, которые пока нечем загрузить (R7 - заглушки).
-NOT_IMPLEMENTED_VARIANTS = (VARIANT_CONFIGURATION, VARIANT_EXTENSION, VARIANT_EXTERNAL_PROCESSING)
+# Узел V22: «внешняя обработка» снята из заглушек — заголовок и содержимое пишутся теми же
+# универсальными таблицами, что и отчёт (отдельный писатель строки заголовка —
+# ExternalProcessingRowWriter).
+NOT_IMPLEMENTED_VARIANTS = (VARIANT_CONFIGURATION, VARIANT_EXTENSION)
 
 CONFIGURATION_XML_NAME = "configuration.xml"
 
@@ -162,6 +169,9 @@ def _normalize(result, detection):
     result.setdefault("table", detection["table"])
     if result.get("success"):
         result["status"] = "reloaded" if result.get("replaced") else "loaded"
+    elif result.get("kind_conflict"):
+        # узел V22: uuid занят строкой другого вида — это не дубликат и не перезагрузка
+        result["status"] = "kind_conflict"
     elif result.get("already_exists"):
         result["status"] = "duplicate"
     elif not result.get("status"):
@@ -180,12 +190,14 @@ def load_catalog(source_path, force=False):
         return detection
 
     variant = detection["variant"]
-    if variant == VARIANT_EXTERNAL_REPORT:
+    if variant in (VARIANT_EXTERNAL_REPORT, VARIANT_EXTERNAL_PROCESSING):
+        # Узел V22: оба внешних варианта идут через один загрузчик — различие только в
+        # виде строки заголовка (его проставляет писатель) и в наборе колонок заголовка.
         result = register_external_report(
             source_path,
             force=bool(force),
             xml_path=detection["xml_path"],
-            obj_type=VARIANT_EXTERNAL_REPORT,
+            obj_type=variant,
         )
         return _normalize(result, detection)
 
@@ -201,6 +213,10 @@ def _existing_card(existing, table):
         f"  ID существующей записи: {existing.get('id')}",
         f"  Название: {existing.get('name', '')}",
         f"  UUID: {existing.get('uuid', '')}",
+        # узел V22: вид строки заголовка (внешний отчёт / внешняя обработка) — то, по чему
+        # строку ищут обогащение и сводка; в карточке дубликата он всегда совпадает с
+        # запрошенным вариантом (несовпадение — отдельный исход kind_conflict).
+        f"  Вид: {existing.get('object_kind', '')}",
         f"  Дата загрузки: {existing.get('created_at', '')}",
         f"  Связанные данные: BSL-модулей {existing.get('bsl_modules_count', 0)}",
     ]
@@ -293,6 +309,16 @@ def format_load_result(result):
             lines.append(f"⚠️ {warning}")
         return "\n".join(lines)
 
+    if status == "kind_conflict":
+        # узел V22: тот же uuid уже принадлежит строке другого вида. Отдельный исход,
+        # а не «дубликат»: force=True в такой ситуации снял бы чужой объект.
+        existing = result.get("existing") or {}
+        lines = ["❌ Не могу загрузить: " + str(result.get("error", "uuid занят строкой другого вида"))]
+        if result.get("hint"):
+            lines.append(f"   {result['hint']}")
+        lines.extend(_existing_card(existing, table))
+        return "\n".join(lines)
+
     if status == "duplicate":
         existing = result.get("existing") or {}
         lines = [f"⚠️ Уже загружено — загрузка НЕ выполнена: объект с UUID {existing.get('uuid', result.get('uuid', ''))} уже есть в таблице {table}."]
@@ -316,7 +342,8 @@ def format_load_result(result):
         lines = [f"❌ Не могу загрузить: {result.get('error', 'сценарий не реализован')}"]
         if result.get("hint"):
             lines.append(f"   {result['hint']}")
-        lines.append("   Реализован только вариант «внешний отчёт» (см. раздел 5 норматива загрузки).")
+        lines.append("   Реализованы варианты «внешний отчёт» и «внешняя обработка»; "
+                     "конфигурация и расширение — заглушки (см. раздел 5 норматива загрузки).")
         return "\n".join(lines)
 
     lines = [f"❌ Не могу загрузить: {result.get('error', 'неизвестная ошибка')}"]

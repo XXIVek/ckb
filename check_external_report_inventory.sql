@@ -434,6 +434,101 @@ SELECT 'внешних ключей external_report_configuration_fkey (долж
 FROM pg_constraint WHERE conrelid = 'external_report'::regclass
   AND conname = 'external_report_configuration_fkey';
 
+SELECT '### 15g. виды внешних объектов: отчёт и обработка в одной таблице (узел V22)' AS section;
+-- Узел V22: заголовок внешнего объекта ОДИН (external_report), вид строки различает колонка
+-- object_kind. Поэтому «сколько объектов в базе» без вида — вопрос, на который нельзя
+-- ответить честно: число объектов не говорит, чего именно. Раздел измеряет и состав по видам,
+-- и инварианты вида; он осмыслен и тогда, когда обработки в базе нет (тогда по виду нули, а
+-- инварианты обязаны сойтись такими же нулями). Тот же набор инвариантов проверяет
+-- validate_load_flow.py::check_kind_invariant, но только во время своего прогона и на своих
+-- каталогах; этот раздел работает на любом состоянии базы.
+SELECT 'объектов по видам: '
+       || COALESCE(string_agg(object_kind || ' = ' || cnt, ', ' ORDER BY object_kind),
+                   '(объектов в базе нет)') AS section_counts
+FROM (SELECT COALESCE(object_kind, '(пусто)') AS object_kind, count(*) AS cnt
+      FROM external_report GROUP BY COALESCE(object_kind, '(пусто)')) k;
+-- словарь видов замкнут CHECK'ом: нового вида без писателя заголовка и без словаря
+-- parent_type в обогащении появиться не может
+SELECT 'CHECK external_report_object_kind_check (должен быть 1) = ' || count(*)
+FROM pg_constraint WHERE conname = 'external_report_object_kind_check';
+SELECT 'строк вне словаря видов, NULL или неизвестный (должно быть 0) = ' || count(*)
+FROM external_report
+WHERE object_kind IS NULL
+   OR object_kind NOT IN ('external_report', 'external_processing');
+-- вид строки не может противоречить ClassId из той же выгрузки. Пустой ClassId в проверку не
+-- попадает: у внешнего объекта из выгрузки он бывает пуст, ожидаемое значение берётся из
+-- корневого тега ExternalReport / ExternalDataProcessor, а загрузчик обязан предупредить
+SELECT 'object_kind противоречит containedobject_classid (должно быть 0) = ' || count(*)
+FROM external_report
+WHERE COALESCE(lower(btrim(containedobject_classid::text)), '') <> ''
+  AND lower(btrim(containedobject_classid::text)) <>
+      CASE COALESCE(object_kind, '')
+          WHEN 'external_report'     THEN 'e41aff26-25cf-4bb6-b6c1-3f478a75f374'
+          WHEN 'external_processing' THEN 'c3831ec8-d8d5-4f93-8a22-f9bfae07327f'
+          ELSE lower(btrim(containedobject_classid::text))
+      END;
+-- дети обязаны наследовать вид родителя: колонка parent_type есть у forms, form_ext,
+-- templates, bsl_modules и у строк обогащения (у attributes/tabular_sections её нет, их вид
+-- определяется родителем через FK на external_report(uuid))
+SELECT 'дочерних строк с parent_type не вида родителя (должно быть 0) = '
+       || ((SELECT count(*) FROM forms c JOIN external_report e ON e.uuid = c.parent_uuid
+             WHERE c.parent_type IS DISTINCT FROM e.object_kind)
+         + (SELECT count(*) FROM form_ext c JOIN external_report e ON e.uuid = c.parent_uuid
+             WHERE c.parent_type IS DISTINCT FROM e.object_kind)
+         + (SELECT count(*) FROM templates c JOIN external_report e ON e.uuid = c.parent_uuid
+             WHERE c.parent_type IS DISTINCT FROM e.object_kind)
+         + (SELECT count(*) FROM bsl_modules c JOIN external_report e ON e.uuid = c.parent_uuid
+             WHERE c.parent_type IS DISTINCT FROM e.object_kind)
+         + (SELECT count(*) FROM config_aliases c JOIN external_report e ON e.uuid = c.parent_uuid
+             WHERE c.parent_type IS DISTINCT FROM e.object_kind)
+         + (SELECT count(*) FROM config_snippets c
+              JOIN external_report e ON e.uuid = c.parent_uuid
+             WHERE c.parent_type IS DISTINCT FROM e.object_kind)) AS bad_parent_type;
+
+-- цель «сам объект» обязана быть типа вида: ExternalProcessing у обработки и ExternalReport у
+-- отчёта, иначе алиас или указатель documentation указывает вникуда
+SELECT 'ссылок на сам объект с целевым типом не вида объекта (должно быть 0) = '
+       || ((SELECT count(*) FROM config_aliases c JOIN external_report e ON e.uuid = c.parent_uuid
+             WHERE c.active
+               AND ((e.object_kind = 'external_processing' AND c.target_type = 'ExternalReport')
+                 OR (e.object_kind = 'external_report' AND c.target_type = 'ExternalProcessing')))
+         + (SELECT count(*) FROM config_cross_references x
+              JOIN external_report e ON e.uuid = x.parent_uuid
+             WHERE (e.object_kind = 'external_processing' AND x.target_type = 'ExternalReport')
+                OR (e.object_kind = 'external_report' AND x.target_type = 'ExternalProcessing'))) AS bad_self_target;
+-- один uuid под двумя видами — отдельный исход загрузки (kind_conflict), второй строки
+-- возникать не должно
+SELECT 'uuid, занятых строками двух видов одновременно (должно быть 0) = ' || count(*)
+FROM (SELECT uuid FROM external_report GROUP BY uuid HAVING COUNT(DISTINCT object_kind) > 1) s;
+-- мёртвых объектов схемы быть не должно: вторую таблицу заголовка и колонку связи модулей
+-- узел V22 снял осознанно
+SELECT 'таблицы external_processing в схеме быть не должно = ' || count(*)
+FROM pg_class WHERE relname = 'external_processing';
+SELECT 'колонки bsl_modules.processing_id быть не должно = ' || count(*)
+FROM information_schema.columns
+WHERE table_name = 'bsl_modules' AND column_name = 'processing_id';
+-- витрина обязана отдавать вид: без неё вопрос «чего именно в базе N объектов» не задать
+SELECT 'витрина v_config_enrichment отдаёт object_kind (должно быть 1) = ' || count(*)
+FROM information_schema.columns
+WHERE table_name = 'v_config_enrichment' AND column_name = 'object_kind';
+-- обогащение по видам (его же печатает config_enrichment_stats_tool без uuid)
+SELECT 'обогащение по видам: '
+       || COALESCE(string_agg(object_kind || ': объектов ' || objects
+                              || ', алиасов ' || aliases || ', сниппетов ' || snippets,
+                              ' | ' ORDER BY object_kind), '(обогащения нет ни у одного объекта)')
+FROM (SELECT object_kind, count(*) AS objects,
+             COALESCE(sum(aliases_total), 0) AS aliases, COALESCE(sum(snippets), 0) AS snippets
+      FROM v_config_enrichment GROUP BY object_kind) k;
+-- у обработки self-цель обязана быть ExternalProcessing: без неё карточка и алиасы описывали
+-- бы обработку как отчёт
+SELECT 'объектов обработки с self-целью ExternalProcessing (должно быть равно числу объектов вида) = '
+       || count(*)
+FROM external_report e
+WHERE e.object_kind = 'external_processing'
+  AND EXISTS (SELECT 1 FROM config_aliases a
+               WHERE a.parent_uuid = e.uuid AND a.active
+                 AND a.target_type = 'ExternalProcessing');
+
 SELECT '### 16. обогащение: слепые зоны (что пока не заполнено)' AS section;
 SELECT 'объектов без обогащения (не сгенерировано) = ' || count(*)
 FROM external_report e

@@ -68,8 +68,10 @@ MCP сервер `1c-configurations-core` (server_configurations_core.py) — э
 │  База данных: ckb_1c_configurations      │
 │  - configurations                        │
 │  - config_extensions                     │
-│  - external_report                       │
-│  - external_processing                   │
+│  - external_report  (единая таблица      │
+│      заголовков внешних объектов: и      │
+│      отчётов, и обработок; вид строки    │
+│      задаёт колонка object_kind, V22)    │
 │  - attributes       (parent_uuid →       │
 │      external_report(uuid) ON DELETE     │
 │      CASCADE; uuid UNIQUE глобально)     │
@@ -88,13 +90,16 @@ MCP сервер `1c-configurations-core` (server_configurations_core.py) — э
 │      truncated; частичный UNIQUE         │
 │      (parent_uuid, file_path); FK на     │
 │      report_id отсутствует — очистка     │
-│      явная; FK есть на configuration_id  │
-│      и processing_id)                    │
+│      явная; FK есть только на            │
+│      configuration_id; колонка           │
+│      processing_id и таблица             │
+│      external_processing удалены         │
+│      узлом V22)                          │
 └───────────────────────────────────────────┘
 ```
 
 Таблиц `configuration`, `configuration_objects`, `object_attributes`, `register_dimensions`,
-`register_resources`, `enum_values` в схеме **нет** — раздел «Структура базы данных» ниже
+`register_resources`, `enum_values`, а с узла V22 и `external_processing` в схеме **нет** — раздел «Структура базы данных» ниже
 описывает устаревшую схему и требует переработки (см. п. 11).
 
 `uuid` в `attributes` и `tabular_sections` уникален **глобально** (`attributes_uuid_key`,
@@ -150,7 +155,7 @@ MCP сервер `1c-configurations-core` (server_configurations_core.py) — э
 |---|---|---|
 | 1 | `src/ddl_external_report.sql` (генерация: `src/generate_ddl.py`) | `external_report`, `attributes`, `tabular_sections`, `forms`, `form_ext`, `templates`, витрины `v_form_elements`, `v_form_events` |
 | 1b | `src/ddl_enrichment.sql` (узел V17) | `config_aliases`, `config_snippets`, `config_snippet_dependencies`, `config_cross_references`, витрины `v_enrichment_targets`, `v_enrichment_objects`; все FK — на шаг 1, поэтому шаг 1b идёт строго после него |
-| 2 | `create_1c_configurations_db.sql` | `configurations`, `config_extensions`, `external_processing`, `bsl_modules` |
+| 2 | `create_1c_configurations_db.sql` | `configurations`, `config_extensions`, `bsl_modules`; таблица `external_processing` из файла удалена узлом V22 (заголовок обработки — строка `external_report` с `object_kind='external_processing'`) |
 
 Для уже существующей БД вместо шага 1b — аддитивная `migrate_v17_enrichment.sql` (тот же SQL +
 заполнение `target_key`/`target_uuid` у заполненных ранее таблиц).
@@ -187,6 +192,15 @@ MCP сервер `1c-configurations-core` (server_configurations_core.py) — э
   потерянная ссылка обнаруживается при чтении — карточка и сводка различают «не заявлена» /
   «привязано» / «битая, требуется перепривязка»; тот же контракт, что у
   `config_cross_references.local_doc_id` (п. 20, раздел 12 норматива).
+- таблица `external_processing` и колонка `bsl_modules.processing_id` **удалены узлом V22**
+  (14.10.2026): заголовок внешней обработки — строка `external_report` с
+  `object_kind='external_processing'`, поэтому дочерние FK (`attributes`, `tabular_sections`,
+  `forms`, `templates`) остаются на `external_report(uuid)` и не дублируются под второй вид.
+  Правка идёт парой: аддитивная `migrate_v22_object_kind.sql` (колонка + CHECK + перенос
+  существующих строк по `containedobject_classid` + снятие FK/колонки + `DROP TABLE`) и удаление
+  объявлений из обоих DDL-источников (шаг 1 `src/generate_ddl.py` → `src/ddl_external_report.sql`,
+  шаг 2 `create_1c_configurations_db.sql`); в `v_config_enrichment` добавлена колонка
+  `object_kind` — её определение совпадает в генераторе DDL и в миграции дословно.
 
 Сверка: `python _cmp_ddl.py` — собирает временную БД `v13_ddl_check` всеми шагами 1, 1b и 2 и сверяет
 со живой `ckb_1c_configurations` **всё в схеме public**: колонки таблиц и витрин, индексы и
@@ -204,6 +218,10 @@ MCP сервер `1c-configurations-core` (server_configurations_core.py) — э
 Состояние 14.10.2026 после узла V20.1 (тот же день: внешний ключ снят, колонка и индекс
 остались): 282 колонки, 60 индексов/уникальных ограничений, 34 ограничения в `pg_constraint`
 (14 PK + 10 UNIQUE + 10 FK), 4 витрины — расхождений нет, код возврата 0.
+Состояние 14.10.2026 после узла V22 (внешняя обработка грузится в `external_report`,
+`object_kind` + CHECK, `external_processing` и `bsl_modules.processing_id` удалены,
+`v_config_enrichment.object_kind` добавлена): 273 колонки, 56 индексов/уникальных ограничений,
+30 ограничений в `pg_constraint`, 4 витрины — расхождений нет, код возврата 0.
 
 ### Обычные формы (`form_type='Ordinary'`, содержимое — `Form.bin`)
 
@@ -268,7 +286,7 @@ ordinary-формы и её заголовок — декодер заголов
 
 | Таблица | Ключевые колонки | Примечание |
 |---|---|---|
-| `external_report` | `id`, `uuid NOT NULL UNIQUE`, `containedobject_classid`, `containedobject_objectid`, `generatedtype_name/category/typeid/valueid`, `name`, `synonym jsonb`, `comment`, `default_form`, `auxiliary_form`, `main_data_composition_schema`, `default_settings_form`, `auxiliary_settings_form`, `default_variant_form`, `variants_storage`, `settings_storage`, `configuration_id` (узел V20; внешний ключ снят узлом V20.1, индекс сохранён), `created_at`, `updated_at` | карточка свойств отчёта: форма по умолчанию и основная схема компоновки данных — это колонки таблицы, а не вычисляемые значения. `configuration_id` — **заявленная оператором** привязка к строке заголовка конфигурации: NULL = «привязка не заявлена» (не «универсальный»), заголовок удалён после привязки = «битая ссылка, требуется перепривязка» (состояние считается JOIN'ом, снимка имени нет), из выгрузки 1С не заполняется, при `force=True` переносится (п. 20) |
+| `external_report` | `id`, `uuid NOT NULL UNIQUE`, `containedobject_classid`, `containedobject_objectid`, `generatedtype_name/category/typeid/valueid`, `name`, `synonym jsonb`, `comment`, `default_form`, `auxiliary_form`, `main_data_composition_schema`, `default_settings_form`, `auxiliary_settings_form`, `default_variant_form`, `variants_storage`, `settings_storage`, `configuration_id` (узел V20; внешний ключ снят узлом V20.1, индекс сохранён), `created_at`, `updated_at`, `object_kind` (узел V22, `NOT NULL DEFAULT 'external_report'`, CHECK `external_report_object_kind_check` допускает ровно два значения: `external_report`, `external_processing`) | карточка свойств внешнего объекта — **единая для отчёта и обработки**: форма по умолчанию и основная схема компоновки данных — это колонки таблицы, а не вычисляемые значения. `object_kind` проставляет сам писатель заголовка (`ExternalReportRowWriter` / `ExternalProcessingRowWriter`), а не разбор выгрузки, поэтому вид строки не может разойтись с классом-писателем; пустое значение читается как `external_report`. `configuration_id` — **заявленная оператором** привязка к строке заголовка конфигурации: NULL = «привязка не заявлена» (не «универсальный»), заголовок удалён после привязки = «битая ссылка, требуется перепривязка» (состояние считается JOIN'ом, снимка имени нет), из выгрузки 1С не заполняется, при `force=True` переносится (п. 20) |
 | `attributes` | `uuid UNIQUE` (глобально), `parent_uuid → external_report(uuid) ON DELETE CASCADE`, `parent_type`, `name`, `synonym jsonb`, `comment`, `type` (JSON-строка разбора `<Type>`), `description` | реквизиты объекта **и** колонки ТЧ; различие — только ссылка `tabular_sections.column_uuids` |
 | `tabular_sections` | `uuid UNIQUE` (глобально), `parent_uuid` (то же FK), `name`, `synonym jsonb`, `comment`, `column_uuids jsonb`, `internalinfo_generatedtype jsonb` (массив из 2 элементов) | |
 | `forms` | `UNIQUE (parent_uuid, uuid)` + индекс по `uuid`, `form_type` (`Managed`/`Ordinary`) | |
@@ -288,10 +306,11 @@ ordinary-формы и её заголовок — декодер заголов
 |---|---|---|
 | `configurations` | `id, name, synonym, comment, version, vendor_name, uuid, main_mode, usage_purpose, embedded_language, main_roles, app_module_id, session_module_id, data_proc_module_id, ext_conn_module_id, mobile_functionality, default_language, short_info, detailed_info, copyright, vendor_url, config_url, update_url, help_included, lock_mode_default, modality_mode, ext_comp_sync_mode, interface_compat_mode, compatibility_mode, created_at, updated_at` | 0 строк; вариант загрузки «конфигурация» — заглушка |
 | `config_extensions` | `id, configuration_id, name, synonym, comment, version, vendor_name, uuid, created_at, updated_at` | 0 строк; вариант «расширение» — заглушка |
-| `external_processing` | `id, configuration_id, name, synonym, comment, version, uuid, class_id, created_at, updated_at` | вариант «внешняя обработка» — заглушка |
-| `bsl_modules` | `id, configuration_id, module_name, file_path, code, object_type, object_name, report_id, processing_id, created_at, parent_uuid, parent_type, module_type, code_size, truncated` | модули `Ext/` пишутся с `parent_uuid`/`parent_type`/`module_type`; FK на `report_id` нет — очистка явная (п. 10) |
+| `bsl_modules` | `id, configuration_id, module_name, file_path, code, object_type, object_name, report_id, created_at, parent_uuid, parent_type, module_type, code_size, truncated` | модули `Ext/` пишутся с `parent_uuid`/`parent_type`/`module_type` для отчётов **и** обработок (узел V22: `parent_type` = `external_processing`); FK на `report_id` нет — очистка явная (п. 10). Колонка `processing_id` удалена узлом V22 |
 
-Индексация BSL-модулей конфигураций (`configuration_id`) не используется: вариантов 1, 2, 4 нет.
+Таблица `external_processing` (`id, configuration_id, name, synonym, comment, version, uuid, class_id, created_at, updated_at`) **удалена узлом V22** (14.10.2026): она была пуста (0 строк), давала второй заголовок для того же понятия и требовала дублирующих FK для дочерних таблиц; заголовок внешней обработки — строка `external_report` с `object_kind='external_processing'`. Для уже созданных БД — `migrate_v22_object_kind.sql` (п. 22).
+
+Индексация BSL-модулей конфигураций (`configuration_id`) не используется: вариантов 1, 2 нет.
 
 ### Загрузка правил (КРИТИЧНО!)
 
@@ -320,7 +339,7 @@ ordinary-формы и её заголовок — декодер заголов
 | диагностика выбора варианта (`analyze_config_load_tool`) | `load_1c_catalog_tool` вернёт `❌` с одной причиной; диагностика вне контракта не нужна |
 | список и карточка объекта (`list_configurations_tool`, `get_configuration_tool`, `get_object_structure_tool`) | `config_enrichment_stats_tool(uuid=…, card=True)` из enrichment-MCP; SQL `check_external_report_inventory.sql` |
 | поиск объектов и BSL-кода (`search_config_objects_tool`, `search_bsl_code_tool`) | `search_config_aliases_tool`, `search_config_snippets_tool`, `search_docs_tool` (documentation) |
-| чтение XML/JSON, перечислений, индексация из дампа | не реализовано: варианты 1–2, 4 (конфигурация, расширение, внешняя обработка) — заглушки |
+| чтение XML/JSON, перечислений, индексация из дампа | не реализовано: варианты 1–2 (конфигурация, расширение) — заглушки; внешняя обработка реализована узлом V22 той же точкой входа `load_1c_catalog_tool` |
 
 ### Определение варианта загрузки (правило R1)
 
@@ -331,7 +350,7 @@ ordinary-формы и её заголовок — декодер заголов
 | `configuration` | `Configuration.xml` без `ConfigurationExtensionPurpose` | `configurations` | ❌ заглушка |
 | `extension` | `Configuration.xml` + `ConfigurationExtensionPurpose` | `config_extensions` | ❌ заглушка |
 | `external_report` | XML с элементом `ExternalReport` | `external_report` | ✅ реализован |
-| `external_processing` | XML с элементом `ExternalDataProcessor` | `external_processing` | ❌ заглушка |
+| `external_processing` | XML с элементом `ExternalDataProcessor` | `external_report` + `object_kind='external_processing'` | ✅ реализован (узел V22) |
 | — | ничего из перечисленного | — | ❌ «каталог не подходит» |
 
 В выгрузке 1С корневой элемент файла внешнего объекта — `MetaDataObject`
@@ -371,7 +390,12 @@ delete_external_report_tool(source_path=...)  # или uuid=..., или report_i
 # python validate_external_children.py         # содержимое V12/V13/V14/V15, каскад, откат, сироты,
 #                                              # деградация без v8unpack и детерминированный повтор
 # python _v13_mcp_layer.py                     # тонкие обёртки MCP-инструментов без stdio:
-#                                              # load → duplicate → force → delete (uuid/id/path)
+#                                              # load → duplicate → force → delete (uuid/id/path);
+#                                              # с узла V22 здесь же проверяется и внешняя
+#                                              # обработка TSD_0 (вид в карточке, object_kind и
+#                                              # parent_type детей, удаление с object_type).
+#                                              # Прогон очищает БД — эталоны затем восстанавливают
+#                                              # tools/restore_reference_pair.py + генерация
 # python _cmp_ddl.py                           # полная сверка: шаги 1+2 установки против живой
 #                                              # схемы (колонки, индексы, FK, витрины)
 # python tools/restore_reference_pair.py       # восстановить эталонную пару (Test1_Otchet +
@@ -394,7 +418,11 @@ delete_external_report_tool(source_path=...)  # или uuid=..., или report_i
 #                                       # 10-10e = витрины по обоим типам форм,
 #                                       # 11 = слепые зоны: «форм с незаполненным составом = 0» [V15],
 #                                       # 12 = заполненность второстепенных колонок с пояснением,
-#                                       # 13 = атрибуты/команды формы, 14 = типы макетов);
+#                                       # 13 = атрибуты/команды формы, 14 = типы макетов,
+#                                       # 15 = заполненность обогащения, 15f = состояния
+#                                       #   привязок к конфигурации [V20.1], 15g = виды внешних
+#                                       #   объектов и инварианты вида [V22], 16 = слепые зоны
+#                                       #   обогащения («алиасов с пустым target_key = 0»));
 #                                       # пустые jsonb-массивы считаются пустыми
 #                                       # (jsonb_typeof/jsonb_array_length, а не IS NOT NULL)
 # python tools/decode_form_layout.py    # офлайн-разбор одной разметки 0/form + round-trip-проверка
@@ -438,7 +466,13 @@ delete_external_report_tool(source_path=...)  # или uuid=..., или report_i
 #      check_external_report_inventory.sql # раздел 15 — заполненность обогащения через
 #                                         # витрину v_config_enrichment; раздел 15f —
 #                                         # состояния привязок, битые ссылки, обратный
-#                                         # перечень, наличие индекса и отсутствие FK
+#                                         # перечень, наличие индекса и отсутствие FK;
+#                                         # раздел 15g (узел V22) — виды внешних объектов:
+#                                         # состав по object_kind и инварианты вида
+#                                         # (ClassId, parent_type детей, self-цель, конфликт
+#                                         # uuid, состояние схемы и колонки вида в витрине);
+#                                         # раздел 16 — слепые зоны обогащения, в т. ч.
+#                                         # «алиасов с пустым target_key = 0»
 ```
 
 ## ⚠️ Критические правила и ограничения
@@ -959,23 +993,30 @@ SQL-подтверждение — `check_external_report_fill.sql` раздел
 (есть пустая `configurations` и `config_extensions` — шаг 2 установки, для загрузки внешних
 отчётов не используются); фактические счётчики схемы сверяет `python _cmp_ddl.py`.
 
-### 12. Реализован только вариант 3 «внешний отчёт»
+### 12. Варианты «конфигурация» и «расширение» не реализованы
 
 **Файлы:** `src/config_load_router.py` (заглушки), `src/external_report_loader.py`
 **Статус:** ⚠️ Плановая незавершённость, зафиксирована в нормативе (правило R7, раздел 6):
-варианты `configuration`, `extension`, `external_processing` возвращают `❌ сценарий не реализован`.
-Дочерние данные внешнего отчёта (узел V12) и содержимое подкаталогов `Forms/`, `Templates/`,
-`Ext/` (узел V13) с 12.10.2026 **сохраняются** — см. п. 9 и п. 14. Снять заглушки
-можно только после проектирования соответствующих вариант-схем и снятия ограничений п. 13.
+варианты `configuration`, `extension` возвращают `❌ сценарий не реализован`. Вариант
+`external_processing` снят с заглушки узлом V22 (14.10.2026) и грузится теми же таблицами, что
+и отчёт, — см. п. 22. Дочерние данные внешнего объекта (узел V12) и содержимое подкаталогов
+`Forms/`, `Templates/`, `Ext/` (узел V13) с 12.10.2026 **сохраняются для обоих внешних видов** —
+см. п. 9 и п. 14. Снять оставшиеся заглушки можно только после проектирования соответствующих
+вариант-схем и снятия ограничений п. 13.
 
-### 13. Схема дочерних таблиц рассчитана только на внешний отчёт
+### 13. Схема дочерних таблиц была рассчитана только на внешний отчёт
 
 **Статус:** ⚠️ Частично снято узлом V13 (12.10.2026): `forms` и `templates` переведены на
-уникальность в пределах родителя, `attributes` и `tabular_sections` — всё ещё ограничены
+уникальность в пределах родителя, `attributes` и `tabular_sections` — всё ещё ограничены.
+**Для внешней обработки ограничение снято узлом V22** (14.10.2026): её заголовок — строка той же
+`external_report` (вид задаёт `object_kind`), поэтому FK `parent_uuid → external_report(uuid)`
+подходит и отчётам, и обработкам; наполнение подтверждено на `TSD_0`
+(реквизиты 35, ТЧ 2, формы 6, описания форм 6, макеты 3, BSL 1 — п. 22). Открытым остаётся
+для вариантов `configuration` и `extension` (п. 12): там коллизия uuid реальна (п. 2 ниже).
 **Проблема:**
 1. `attributes.parent_uuid` и `tabular_sections.parent_uuid` имеют FK только на
-   `external_report(uuid)`. Реквизиты и ТЧ конфигурации, расширения или внешней обработки
-   сохранить в эти таблицы нельзя — вставка упадёт с нарушением FK.
+   `external_report(uuid)`. Реквизиты и ТЧ конфигурации или расширения сохранить в эти таблицы
+   нельзя — вставка упадёт с нарушением FK (для внешней обработки — снято узлом V22).
 2. `attributes_uuid_key`, `tabular_sections_uuid_key` — глобальный `UNIQUE (uuid)`. Если
    расширение изменяет существующий реквизит базовой конфигурации, его uuid совпадает с uuid
    реквизита из базовой конфигурации, и вторая вставка упадёт с
@@ -989,7 +1030,9 @@ SQL-подтверждение — `check_external_report_fill.sql` раздел
 `idx_*_uuid`, т. е. повторная загрузка формы/макета из расширения коллизию не вызовет. Новая
 таблица `form_ext` привязана к форме (`form_id` FK, `ON DELETE CASCADE`, `UNIQUE(form_id)`) и
 типа родителя не зависит.
-**Что нужно при реализации вариантов 1, 2, 4:** для `attributes`/`tabular_sections` (и FK
+**Что нужно при реализации вариантов 1, 2** (внешняя обработка — снята узлом V22: её заголовок —
+строка `external_report`, поэтому FK и уникальность для неё работают без изменений):
+для `attributes`/`tabular_sections` (и FK
 `forms.parent_uuid`, `templates.parent_uuid`) заменить FK на полиморфную связь
 (`parent_uuid` + `parent_type` без FK или на таблицу родителей), заменить уникальность на
 `UNIQUE (parent_uuid, uuid)`, удалить дочерние данные явным `DELETE … WHERE parent_uuid = …`
@@ -1055,8 +1098,9 @@ jsonb `form_ext.items/events/commands`, `templates.ext`), и новый мани
 
 - поле `external_report.configuration_id` — **id строки заголовка конфигурации**
   (`configurations.id`), а не uuid метаданных: оператору нужна ссылка на строку заголовка.
-  Имя и тип совпадают с уже существующими ссылками `config_extensions`, `external_processing`,
-  `bsl_modules` — колонка `configuration_id INTEGER` + FK;
+  Имя и тип совпадают с уже существующими ссылками `config_extensions`, `bsl_modules` —
+  колонка `configuration_id INTEGER` (внешний ключ добавлен узлом V20 и снят узлом V20.1,
+  п. 21). Таблицы `external_processing` в этом перечне больше нет — она удалена узлом V22;
 - привязку **заявляет только оператор**: из выгрузки 1С значение не выводится,
   автоматического вывода и классификации («универсальный» / «параметризуемый» /
   «привязанный») нет — они отложены;
@@ -1170,3 +1214,86 @@ rc=0 — 34 проверки (схема: колонка и индекс ест�
 ответах инструментов такого утверждения быть не может.
 
 
+### 22. Внешняя обработка не загружалась: вариант 4 был заглушкой, а вторая таблица заголовка — мёртвой
+
+**Файлы:** `src/generate_ddl.py` + `src/ddl_external_report.sql`, `create_1c_configurations_db.sql`,
+`migrate_v22_object_kind.sql`, `src/external_table_writer.py`, `src/external_report_loader.py`,
+`src/config_load_router.py`, `src/external_meta_parser.py`, `src/enrichment_generator.py`,
+`src/enrichment_aliases.py`, `src/enrichment_snippets.py`, `validate_load_flow.py`,
+`_v13_mcp_layer.py`, `_v22_probe.py`, `_v22_enrich_probe.py`,
+`check_external_report_{fill,search,inventory}.sql`
+**Проблема:** заголовок внешней обработки пришлось бы писать во вторую таблицу
+`external_processing` (0 строк, ни одной ссылки), тогда как дочерние таблицы
+(`attributes`, `tabular_sections`, `forms`, `templates`) имеют FK только на
+`external_report(uuid)` — вариант 4 требовал второй копии всей обвязки и дублирующих FK
+(п. 13). Колонка `bsl_modules.processing_id` при этом не была заполнена ни одной строкой,
+а `delete_external_object()` убирал строку заголовка по `obj_type`, хотя различать таблицы
+больше нечем.
+**Статус:** ✅ **Реализовано 14.10.2026 (узел V22).** Модель: **один заголовок — одна таблица**,
+вид объекта — атрибут строки.
+- схема: `external_report.object_kind` (`TEXT NOT NULL DEFAULT 'external_report'`, CHECK
+  `external_report_object_kind_check` — ровно два значения, словарь совпадает со словарём целей
+  обогащения: `external_report` ↔ `ExternalReport`, `external_processing` ↔ `ExternalProcessing`);
+  таблица `external_processing` и колонка `bsl_modules.processing_id` **удалены**;
+  `v_config_enrichment` отдаёт `object_kind`; для живых БД — `migrate_v22_object_kind.sql`
+  (добавление колонки с переносом существующих строк по `containedobject_classid`:
+  `e41aff26-25cf-4bb6-b6c1-3f478a75f374` отчёт / `c3831ec8-d8d5-4f93-8a22-f9bfae07327f`
+  обработка, затем снятие таблицы и колонки);
+- запись: `ExternalProcessingRowWriter` пишет в `external_report` со своей спецификацией колонок
+  (без `class_id`), `object_kind` — константа писателя (`TableRowWriter.CONSTANTS`), поэтому вид
+  строки не может разойтись с классом, который её вставляет; `register_external_report` выбирает
+  писателя по `detect_external_object_type`, `find_external_object`/`delete_external_object`
+  работают по единой таблице (`obj_type` различает только заголовок карточки и текст сообщений:
+  колонка связи модулей `bsl_modules.report_id` одна на оба вида, `processing_id` удалена);
+- разбор: пустой или отсутствующий `<xr:ClassId>` — **предупреждение** (у внешнего объекта из
+  выгрузки он бывает пуст, ожидаемое значение берётся из корневого тега `ExternalDataProcessor`),
+  несовпасть с ожидаемым классом — по-прежнему ошибка R3, иначе строка легла бы с неверным
+  `object_kind`; предупреждения парсера доходят до карточки `load_1c_catalog_tool`;
+- обогащение: вид читается из заголовка (`object_kind_of`), от него зависят тип self-цели
+  (`ExternalReport.name` / `ExternalProcessing.name`), `parent_type` строк обогащения, заголовок
+  карточки (`object_kind_title`) и проверка self-цели в инструментах (`add_config_aliases_tool`,
+  `add_config_snippet_tool` называют вид прямо); сводка `config_enrichment_stats_tool()` без uuid
+  печатает разбивку по видам (`object_kinds`, `objects_external_report` /
+  `objects_external_processing`);
+- карточка: `✅ загружено` / `♻️ перезагружено` печатают тип объекта строкой «Тип: …» (заголовок
+  варианта из `_external_meta_info`), карточка `⚠️ уже загружено` — строку «Вид: …» (узел V22);
+  тот же `uuid`, уже занятый строкой **другого вида**, — отдельный статус `kind_conflict` внутри
+  исхода `❌`: причина «uuid занят строкой другого вида» + карточка занявшей строки, при этом
+  `force=True` не предлагается, потому что перезапись удалила бы чужой объект;
+  `delete_external_report_tool` принимает `object_type` только для различения ссылок
+  `bsl_modules` (таблица-заголовок одна);
+- инварианты в `validate_load_flow.py`: вид заголовка совпадает с ожидаемым по каталогу;
+  `object_kind` соответствует `containedobject_classid` (для непустого ClassId); self-цель
+  обогащения — `ExternalReport` у отчёта и `ExternalProcessing` у обработки; `parent_type` строк
+  обогащения совпадает с видом заголовка; нарушений по всей БД — 0.
+**Проверка (14.10.2026):** `python validate_load_flow.py --with-load` rc=0 — новый кейс `TSD_0`
+даёт `✅ загружено` с видом `external_processing` и счётчиками `35/2/6/6/3/1`
+(реквизиты 35, ТЧ 2, формы 6, описания форм 6, макеты 3, BSL 1);
+`python validate_external_children.py` rc=0; `python _v13_mcp_layer.py` rc=0 — **тот же день
+исправлено расхождение правил и кода**: скрипт действительно грузит `TSD_0` через обёртки
+MCP-сервера (загрузка → дубликат с видовой строкой `Вид: external_processing` → `force=True`
+с карточкой «Тип: внешняя обработка» и счётчиками `35/2/6/6/3/1` → сверка `object_kind` и
+`parent_type` детей → удаление по `source_path` с `object_type='external_processing'`), итог —
+сирот 0 и 0 строк вида, код возврата 0. До правки в списке каталогов `TSD_0` не было, а
+`_v22_probe.py` ходит прямо в `src/config_load_router`, минуя слой инструментов;
+`python _v22_probe.py` rc=0 — четыре каталога обработки (`Test0_ processing_Null`,
+`Test1_ processing`, `Test2_ processing`, `Test3_ processing`), содержимое форм/макетов/BSL с
+`parent_type='external_processing'`, конфликт одного uuid под двумя видами — **отказ, а не вторая
+строка**, удаление по uuid без сирот; `python _v22_enrich_probe.py` rc=0 — полный путь
+обогащения обработки (генерация → карточка → алиасы → сниппеты и зависимости → ссылка
+`local_doc` → сводка → удаление), вид во всех строках `external_processing`, self-цель
+`ExternalProcessing`; `python validate_enrichment_flow.py` rc=0 (122 проверки);
+`python _cmp_ddl.py` rc=0 — **273 колонки, 56 индексов/уникальных ограничений,
+30 внешних ключей и ограничений, 4 витрины**, расхождений нет (в том числе зафиксировано отсутствие таблицы
+`external_processing` и колонки `processing_id`); `python tools/check_mcp_tool_wiring.py` rc=0
+(core 3, enrichment 18, export 1); `python validate_project.py` rc=0; SQL-сверки
+`check_external_report_fill.sql` / `check_external_report_search.sql` /
+`check_external_report_inventory.sql` rc=0 — в инвентаре заведён раздел `15g` (состав объектов
+по `object_kind`, инварианты вида: расхождение с `containedobject_classid`, `parent_type` детей
+и self-цели, конфликт одного uuid под двумя видами; состояние схемы — CHECK есть, таблицы
+`external_processing` и колонки `processing_id` нет, витрина отдаёт вид). `check_external_report_fill.sql`
+и `check_external_report_search.sql` вид не различают: они проверяют общие для обоих видов
+наполнение и находимость, отдельной coverage по обработке в них нет и не требуется.
+**Что осталось вне объёма:** варианты `configuration` и `extension` (п. 12) — для них
+ограничение глобального `UNIQUE (uuid)` в `attributes`/`tabular_sections` (п. 13) остаётся в силе;
+автоматическая классификация «универсальный / привязанный» (п. 21) не реализована.

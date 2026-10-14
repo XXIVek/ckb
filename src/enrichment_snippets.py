@@ -37,7 +37,9 @@ from enrichment_generator import (  # noqa: E402
     fetch_rows,
     fetch_value,
     norm_alias,
+    object_kind_of,
     object_row,
+    object_target_type,
     resolve_object,
 )
 
@@ -86,12 +88,16 @@ TARGET_TABLES = {
 }
 
 
-def _known_target(cur, obj_uuid, target_type, target_name, target_uuid):
+def _known_target(cur, obj_uuid, target_type, target_name, target_uuid, object_kind=None):
     """Проверить, что цель зависимости реально есть в сохранённом содержимом объекта.
 
     Ручные зависимости оператор задаёт по имени; без проверки опечатка создала бы связь,
     которая ни на что не указывает. Для целей вне таблиц выгрузки (FormItem, Module,
-    ConfigSnippet, ExternalReport) проверка идёт по своим источникам.
+    ConfigSnippet, ExternalReport/ExternalProcessing) проверка идёт по своим источникам.
+
+    Узел V22: цель «сам объект» существует в одном виде — том, которым записана строка
+    заголовка. Зависимость ExternalReport для внешней обработки (и наоборот) отклоняется:
+    она указывала бы на тип, под которым у этого uuid нет строки, то есть вникуда.
     """
     if target_type in TARGET_TABLES:
         table, column = TARGET_TABLES[target_type]
@@ -113,8 +119,12 @@ def _known_target(cur, obj_uuid, target_type, target_name, target_uuid):
         except (TypeError, ValueError):
             return False
         return bool(rows)
-    if target_type == "ExternalReport":
-        return norm_alias(target_uuid or "") == norm_alias(obj_uuid)
+    if target_type in ("ExternalReport", "ExternalProcessing"):
+        if norm_alias(target_uuid or "") != norm_alias(obj_uuid):
+            return False
+        if object_kind is None:
+            return True
+        return target_type == object_target_type({"object_kind": object_kind})
     return False
 
 
@@ -202,6 +212,7 @@ def add_config_snippet(question, answer, uuid=None, source_path=None, source_kin
             obj_uuid, obj = _resolve_uuid(cur, uuid, source_path)
             if obj_uuid is None:
                 return obj
+            object_kind = object_kind_of(obj)
             dup = fetch_rows(cur, "SELECT id FROM config_snippets WHERE parent_uuid = %s::uuid "
                                   "AND source_kind = %s AND COALESCE(source_uuid, '') = "
                                   "COALESCE(%s, '') AND question = %s LIMIT 1",
@@ -213,7 +224,7 @@ def add_config_snippet(question, answer, uuid=None, source_path=None, source_kin
                                 "delete_config_snippet_tool."}
             bad = [dep for dep in dep_rows
                    if not _known_target(cur, obj_uuid, dep["target_type"], dep["target_name"],
-                                        dep.get("target_uuid"))]
+                                        dep.get("target_uuid"), object_kind=object_kind)]
             if bad:
                 return {"success": False,
                         "error": "Цели зависимостей не найдены среди сохранённого содержимого "
@@ -246,7 +257,10 @@ def add_config_snippet(question, answer, uuid=None, source_path=None, source_kin
             dep_rows = unique_rows
             row = {
                 "parent_uuid": obj_uuid,
-                "parent_type": "external_report",
+                # узел V22: parent_type ручного сниппета = вид строки заголовка, а не всегда
+                # 'external_report': иначе сниппет внешней обработки ссылался бы на несуществующий
+                # parent_type, и фильтр по виду объекта в сводке его бы не нашёл.
+                "parent_type": object_kind,
                 "question": str(question).strip(),
                 "answer": str(answer),
                 "source_kind": source_kind,
@@ -263,7 +277,8 @@ def add_config_snippet(question, answer, uuid=None, source_path=None, source_kin
                 dep["snippet_id"] = snippet_id
             deps_inserted = ConfigSnippetDependencyRowWriter.insert_many(cur, dep_rows)
             return {"success": True, "id": snippet_id, "uuid": obj_uuid,
-                    "object_name": obj.get("name"), "source_kind": source_kind,
+                    "object_name": obj.get("name"), "object_kind": object_kind,
+                    "source_kind": source_kind,
                     "is_verified": True, "question": row["question"],
                     "answer_size": len(row["answer"]), "dependencies": deps_inserted,
                     "duplicate_dependencies": duplicate_deps,
@@ -498,7 +513,7 @@ def _check_local_doc(local_doc_kind, local_doc_id):
 
 
 def add_config_cross_reference(uuid=None, source_path=None, local_doc_kind="group",
-                               local_doc_id=None, target_type="ExternalReport",
+                               local_doc_id=None, target_type=None,
                                target_name=None, target_uuid=None,
                                reference_type="linked_to"):
     """Поставить указатель documentation (local_doc) -> конкретная цель объекта выгрузки.
@@ -506,6 +521,11 @@ def add_config_cross_reference(uuid=None, source_path=None, local_doc_kind="grou
     Цель по умолчанию - сам внешний объект; для сниппета указывают
     target_type='ConfigSnippet' и target_uuid='snippet:<id>' (ту же запись цели читает
     get_config_snippet). Дубликат (та же пара local_doc + цель) не создаётся.
+
+    Узел V22: вид цели «сам объект» не задаётся константой — он берётся из строки
+    заголовка (ExternalReport или ExternalProcessing). Явно указанный вид проверяется:
+    ссылка на ExternalReport для внешней обработки вела бы в тип, под которым у этого
+    uuid строки нет, поэтому она отклоняется вместо того, чтобы замусоривать анализ.
     """
     if not local_doc_id:
         return {"success": False, "error": "Нужен local_doc_id - id строки в базе local_doc"}
@@ -522,9 +542,22 @@ def add_config_cross_reference(uuid=None, source_path=None, local_doc_kind="grou
             obj_uuid, obj = _resolve_uuid(cur, uuid, source_path)
             if obj_uuid is None:
                 return obj
-            resolved_uuid = target_uuid or (obj_uuid if target_type == "ExternalReport" else None)
+            object_kind = object_kind_of(obj)
+            self_target_type = object_target_type(obj)
+            if not target_type:
+                target_type = self_target_type
+            if target_type in ("ExternalReport", "ExternalProcessing") \
+                    and target_type != self_target_type:
+                return {"success": False,
+                        "error": f"target_type='{target_type}' не совпадает с видом объекта: "
+                                 f"uuid {obj_uuid} — {'внешняя обработка' if object_kind == 'external_processing' else 'внешний отчёт'} "
+                                 f"(ожидался {self_target_type})",
+                        "hint": "Уберите target_type (вид возьмётся из строки заголовка) или "
+                                "укажите цель внутри объекта: Template, Module, Form, "
+                                "Attribute, ConfigSnippet."}
+            resolved_uuid = target_uuid or (obj_uuid if target_type == self_target_type else None)
             resolved_name = target_name or (obj.get("name")
-                                           if target_type == "ExternalReport" else None)
+                                           if target_type == self_target_type else None)
             exists = fetch_rows(cur, "SELECT id FROM config_cross_references WHERE "
                                      "local_doc_kind = %s AND local_doc_id = %s "
                                      "AND target_type = %s AND COALESCE(target_uuid, '') = "
@@ -673,6 +706,18 @@ def enrichment_stats(uuid=None, limit=20):
                     "FROM external_report er "
                     "LEFT JOIN configurations cfg ON cfg.id = er.configuration_id")
                 result["totals"].update(binding[0] if binding else {})
+                # Узел V22: разбивка по ВИДУ объекта. Обе строки (отчёт и обработка) лежат в одной
+                # таблице-заголовке, поэтому «сколько объектов в базе» без object_kind — вопрос,
+                # на который нельзя ответить честно: число объектов не говорит, чего именно.
+                kinds = fetch_rows(
+                    cur, "SELECT v.object_kind, count(*) AS objects, "
+                         "coalesce(sum(v.aliases_total), 0) AS aliases, "
+                         "coalesce(sum(v.snippets), 0) AS snippets "
+                         "FROM v_config_enrichment v GROUP BY v.object_kind "
+                         "ORDER BY v.object_kind")
+                result["object_kinds"] = kinds
+                for kind_row in kinds:
+                    result["totals"][f"objects_{kind_row['object_kind']}"] = kind_row["objects"]
                 result["configurations"] = fetch_rows(
                     cur, "SELECT c.id, c.name, c.version, "
                          "(SELECT count(*) FROM external_report er "

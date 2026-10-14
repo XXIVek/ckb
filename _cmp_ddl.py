@@ -11,7 +11,8 @@
        config_snippet_dependencies, config_cross_references, витрины v_config_enrichment /
        v_config_alias_targets (тоже генерируется из src/generate_ddl.py);
     2. create_1c_configurations_db.sql      — configurations, config_extensions,
-       external_processing, bsl_modules.
+       bsl_modules (таблица external_processing удалена узлом V22: заголовок внешней
+       обработки — строка external_report с object_kind='external_processing').
 
 Сверяется ВСЁ в схеме public (перечни таблиц/витрин больше не задаются вручную):
 колонки, индексы и уникальные ограничения, внешние ключи (pg_constraint — иначе FK

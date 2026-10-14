@@ -241,6 +241,18 @@ def _parse_child_objects(root, ns):
     return attributes, tabular_sections, forms, templates
 
 
+# Узел V22 (14.10.2026): ОДНА таблица-заголовок на оба вида внешних объектов.
+# Ключ словаря — вид (он же parent_type у дочерних строк, он же значение
+# external_report.object_kind). Отличаются только заголовок в карточке и то, какие колонки
+# заполняет писатель; таблица, колонка связи модулей и наличие дочерних данных — общие:
+#   * table = external_report для обоих: у обработки заголовок — строка этой же таблицы,
+#     поэтому FK parent_uuid -> external_report(uuid) ON DELETE CASCADE работает и для неё
+#     (до V22 реквизит обработки отклонялся constraint attributes_parent_uuid_fkey);
+#   * bsl_column = report_id для обоих: колонка processing_id и её FK удалены вместе с
+#     таблицей external_processing (в ней было 0 строк, строк bsl_modules с processing_id
+#     не было);
+#   * has_children = True для обоих: attributes/tabular_sections/forms/form_ext/templates
+#     универсальны и читаются по parent_uuid.
 _EXTERNAL_TABLES = {
     "external_report": {
         "table": "external_report",
@@ -249,9 +261,9 @@ _EXTERNAL_TABLES = {
         "title": "внешний отчёт",
     },
     "external_processing": {
-        "table": "external_processing",
-        "bsl_column": "processing_id",
-        "has_children": False,
+        "table": "external_report",
+        "bsl_column": "report_id",
+        "has_children": True,
         "title": "внешняя обработка",
     },
 }
@@ -321,13 +333,18 @@ def find_external_object(uuid_val, obj_type="external_report"):
         "REPLACE(COALESCE(t.name, ''), '|', ' ')",
         "COALESCE(t.uuid::text, '')",
         "COALESCE(t.created_at::text, '')",
+        # узел V22: вид строки заголовка. uuid в таблице глобален (UNIQUE), поэтому он не
+        # может принадлежать и отчёту, и обработке: если найденная строка другого вида,
+        # оператор указал каталог не того объекта — это не дубликат для force=True.
+        "COALESCE(t.object_kind, '')",
         # узел V20: привязка к конфигурации заявлена оператором и из выгрузки не
         # восстанавливается, поэтому её читаем здесь же — force=True переносит её на
-        # новую строку. Колонка есть в обеих таблицах (external_report, external_processing).
+        # новую строку. Колонка общая для обоих видов (узел V22).
         "COALESCE(t.configuration_id::text, '')",
         f"(SELECT COUNT(*) FROM bsl_modules b WHERE b.{bsl_column} = t.id)",
     ]
-    keys = ["id", "name", "uuid", "created_at", "configuration_id", "bsl_modules_count"]
+    keys = ["id", "name", "uuid", "created_at", "object_kind", "configuration_id",
+            "bsl_modules_count"]
 
     if info["has_children"]:
         for child_table, key in (
@@ -368,6 +385,11 @@ def find_external_object(uuid_val, obj_type="external_report"):
     except (TypeError, ValueError):
         found["configuration_id"] = None
     found["object_type"] = obj_type
+    # узел V22: одна таблица-заголовок на оба вида, а uuid уникален глобально. Строка
+    # другого вида с тем же uuid — конфликт каталогов, а не дубликат: force=True снял бы
+    # чужой объект. Случай называется отдельно и не ведёт себя как перезагрузка.
+    found_kind = found.get("object_kind") or ""
+    found["kind_mismatch"] = bool(found_kind and found_kind != obj_type)
     return found
 
 
@@ -375,8 +397,9 @@ def delete_external_object(obj_id=None, uuid_val=None, obj_type="external_report
     """Удалить внешний отчёт/обработку вместе со всеми связанными данными (V13).
 
     Очистка явная, а не только каскадом:
-      * bsl_modules - явный DELETE по report_id/processing_id И по parent_uuid
-        (FK на bsl_modules.report_id в схеме отсутствует, каскада нет);
+      * bsl_modules - явный DELETE по report_id И по parent_uuid (колонка processing_id
+        удалена узлом V22 вместе с таблицей external_processing; FK на bsl_modules.report_id
+        в схеме отсутствует, каскада нет);
       * form_ext, forms, templates - явный DELETE по parent_uuid. Для forms/
         form_ext/templates FK parent_uuid -> external_report(uuid) ON DELETE CASCADE
         есть, но явный порядок (сначала form_ext, затем forms) делает счётчики
@@ -596,8 +619,29 @@ def register_external_report(source_path, replace=None, force=None, xml_path=Non
     # загруженного объекта, в БД ничего не меняется. Тот же UUID при другой версии - тот же
     # случай: сравнение версий не выполняется, колонки version в таблице нет.
     warnings = []
+    # Узел V22: предупреждения разбора корневого XML (пустой ClassId — вид подтверждён только
+    # корневым элементом). Отказом это не является, но и молчать загрузчик не должен.
+    warnings.extend(parsed.get("warnings") or [])
     replaced = None
     existing = find_external_object(report_uuid, obj_type)
+    if existing and existing.get("kind_mismatch"):
+        # узел V22: uuid занят строкой ДРУГОГО вида. Это не дубликат: force=True снял бы
+        # чужой объект вместе со всем его содержимым. Загрузка останавливается, оператор
+        # решает сам — указать верный каталог или удалить занятую строку.
+        return {
+            "success": False,
+            "kind_conflict": True,
+            "existing": existing,
+            "error": (
+                f"UUID {report_uuid} занят строкой другого вида: в таблице "
+                f"'{_external_meta_info(obj_type)['table']}' уже есть "
+                f"{existing.get('object_kind') or 'неизвестного вида'} "
+                f"(ID={existing['id']}, имя='{existing['name']}'), а каталог описывает "
+                f"{_external_meta_info(obj_type)['title']}"
+            ),
+            "hint": "Загрузка не выполнена: uuid уникален глобально. Проверьте каталог "
+                    "выгрузки либо удалите занятую строку delete_external_report_tool(report_id=...).",
+        }
     if existing:
         if not force:
             return {
@@ -605,7 +649,7 @@ def register_external_report(source_path, replace=None, force=None, xml_path=Non
                 "already_exists": True,
                 "existing": existing,
                 "error": (
-                    f"Внешний {'отчёт' if obj_type == 'external_report' else 'обработка'} с UUID {report_uuid} "
+                    f"Внешний объект ({_external_meta_info(obj_type)['title']}) с UUID {report_uuid} "
                     f"уже загружен в таблицу '{_external_meta_info(obj_type)['table']}' "
                     f"(ID={existing['id']}, имя='{existing['name']}')"
                 ),
@@ -645,10 +689,13 @@ def register_external_report(source_path, replace=None, force=None, xml_path=Non
     bsl_rows = subdirs["bsl_modules"]
 
     
-    # V9/V12/V13: основная запись и ВСЕ дочерние данные пишутся ОДНОЙ транзакцией.
+    # V9/V12/V13/V22: основная запись и ВСЕ дочерние данные пишутся ОДНОЙ транзакцией.
     # Не загрузилось - откат: в БД не остаётся ни основной записи, ни дочерних данных.
+    # Писатель заголовка выбирается по виду: обе строки идут в одну таблицу external_report,
+    # но спецификации колонок у них разные (узел V22), и вид проставляет сам писатель.
     table_writer = ExternalReportRowWriter if obj_type == "external_report" else ExternalProcessingRowWriter
-    parent_id_column = "report_id" if obj_type == "external_report" else "processing_id"
+    # Колонка связи модулей одна на оба вида: processing_id удалена узлом V22.
+    parent_id_column = _external_meta_info(obj_type)["bsl_column"]
     try:
         with transaction() as cursor:
             object_id = table_writer.insert(cursor, report_row)
@@ -693,8 +740,9 @@ def register_external_report(source_path, replace=None, force=None, xml_path=Non
         "id": object_id,
         "name": name,
         "object_type": obj_type,
+        "object_kind": obj_type,
         "table": _external_meta_info(obj_type)["table"],
-        "variant_title": "внешний отчёт" if obj_type == "external_report" else "внешняя обработка",
+        "variant_title": _external_meta_info(obj_type)["title"],
         "uuid": report_uuid,
         # Устаревший ключ сохранён для совместимости проверок: то же число, что
         # в bsl_modules_written (модули объекта и менеджера; модуль формы - в form_ext.ext).

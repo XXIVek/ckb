@@ -37,6 +37,11 @@ class TableRowWriter:
 
     TABLE = ""
     COLUMNS = {}
+    # Узел V22: значения колонок, которые заявляет сам писатель, а не разбор выгрузки.
+    # Так вид строки заголовка (object_kind) не может разойтись с классом-писателем:
+    # ExternalReportRowWriter пишет 'external_report', ExternalProcessingRowWriter —
+    # 'external_processing'. Для остальных писателей словарь пуст и поведение не меняется.
+    CONSTANTS = {}
 
     @classmethod
     def _adapt(cls, kind, value):
@@ -99,8 +104,13 @@ class TableRowWriter:
 
     @classmethod
     def values(cls, row):
-        """Кортеж значений по колонкам спецификации (порядок = порядок COLUMNS)."""
-        return tuple(cls._adapt(kind, row.get(column)) for column, kind in cls.COLUMNS.items())
+        """Кортеж значений по колонкам спецификации (порядок = порядок COLUMNS).
+
+        Колонки из CONSTANTS берутся из класса, а не из разобранной строки (узел V22).
+        """
+        return tuple(cls._adapt(kind, cls.CONSTANTS[column] if column in cls.CONSTANTS
+                                else row.get(column))
+                     for column, kind in cls.COLUMNS.items())
 
     @classmethod
     def insert_sql(cls):
@@ -156,15 +166,24 @@ class TableRowWriter:
 
 
 class ExternalReportRowWriter(TableRowWriter):
+    """Строка основной записи внешнего ОТЧЁТА (таблица external_report, object_kind='external_report').
 
-    """Строка основной записи внешнего отчёта (таблица external_report)."""
+    Узел V22 (14.10.2026): external_report — одна таблица-заголовок для всех внешних
+    объектов выгрузки, поэтому у писателя есть CONSTANTS: вид строки заявляет сам класс,
+    а не разобранная строка. Иначе вид мог бы разойтись с тем, какой писатель вызвали.
+    Спецификация колонок этого класса включает свойства, которые бывают только у отчёта
+    (main_data_composition_schema, *_settings_form, default_variant_form, variants_storage,
+    settings_storage); у обработки их в выгрузке нет, и её строку пишет отдельный класс.
+    """
 
     TABLE = "external_report"
+    CONSTANTS = {"object_kind": "external_report"}
     COLUMNS = {
+        "uuid": "uuid",
+        "object_kind": "text",
         "name": "text",
         "synonym": "jsonb_object",
         "comment": "text",
-        "uuid": "uuid",
         "containedobject_classid": "uuid",
         "containedobject_objectid": "uuid",
         "generatedtype_name": "text",
@@ -188,23 +207,47 @@ class ExternalReportRowWriter(TableRowWriter):
 
 
 class ExternalProcessingRowWriter(TableRowWriter):
-    """Строка основной записи внешней обработки (таблица external_processing).
+    """Строка основной записи внешней ОБРАБОТКИ (таблица external_report, object_kind='external_processing').
 
-    Вариант загрузки «внешняя обработка» пока не реализован (R7), писатель подготовлен
-    заранее. Дочерние данные для external_processing недоступны: FK
-    attributes.parent_uuid указывает только на external_report(uuid).
+    Узел V22 (14.10.2026): отдельный класс для записи строки обработки — так, как это
+    просил оператор. Отличия от писателя отчёта ровно два, и оба следуют из выгрузки:
+
+      1. CONSTANTS проставляет object_kind='external_processing' (вид строки в общей
+         таблице-заголовке);
+      2. в спецификации НЕТ колонок, которых нет у обработки в выгрузке: свойств
+         MainDataCompositionSchema, DefaultSettingsForm, AuxiliarySettingsForm,
+         DefaultVariantForm, VariantsStorage, SettingsStorage у внешнего обработчика нет
+         (проверено по Properties/Name всех трёх непустых выгрузок обработок: там только
+         Name, Synonym, Comment, DefaultForm, AuxiliaryForm). Поля, общие для отчёта и
+         обработки (uuid, name, synonym, comment, containedobject_*, generatedtype_*,
+         default_form, auxiliary_form, configuration_id), берутся теми же колонками той же
+         таблицы — сравнения «что у отчёта похоже на обработку» здесь нет, есть список
+         колонок, который обработка действительно заполняет.
+
+    Дочерние данные (attributes, tabular_sections, forms, form_ext, templates, bsl_modules)
+    пишутся теми же писателями: они универсальны и привязаны к родителю парой
+    parent_uuid + parent_type, а FK parent_uuid -> external_report(uuid) работает и для
+    обработки, потому что её заголовок — строка этой же таблицы.
     """
 
-    TABLE = "external_processing"
+    TABLE = "external_report"
+    CONSTANTS = {"object_kind": "external_processing"}
     COLUMNS = {
-        "name": "text",
-        "synonym": "json_text",
-        "comment": "text",
-        "version": "text",
         "uuid": "uuid",
-        "class_id": "text",
-        # узел V20: та же привязка, заявленная оператором, что и у external_report
-        # (колонка configurations.id в таблице есть с создания таблицы).
+        "object_kind": "text",
+        "name": "text",
+        "synonym": "jsonb_object",
+        "comment": "text",
+        "containedobject_classid": "uuid",
+        "containedobject_objectid": "uuid",
+        "generatedtype_name": "text",
+        "generatedtype_category": "text",
+        "generatedtype_typeid": "uuid",
+        "generatedtype_valueid": "uuid",
+        # свойства формы по умолчанию есть и у обработки — это общее поле
+        "default_form": "text",
+        "auxiliary_form": "text",
+        # привязка к конфигурации (configurations.id) заявляется оператором для обоих видов
         "configuration_id": "int",
     }
 
@@ -351,9 +394,13 @@ class BslModuleRowWriter(TableRowWriter):
     """Модули объекта/менеджера из Ext/*.bsl (таблица bsl_modules).
 
     Модули ФОРМ здесь не пишутся - их содержимое в form_ext.ext (решение оператора V13).
-    parent_uuid/parent_type указывают владельца; report_id/processing_id заполняются для
-    совместимости с существующими запросами. FK на report_id в схеме нет, поэтому при
-    удалении объекта очистка bsl_modules выполняется явно.
+    parent_uuid/parent_type указывают владельца (родитель — строка external_report любого
+    вида: отчёта или обработки, узел V22); report_id заполняется для совместимости с
+    существующими запросами. Колонка processing_id удалена узлом V22 вместе с таблицей
+    external_processing: модули внешнего объекта и так привязаны парой parent_uuid +
+    parent_type, а второй заголовок для того же понятия только порождал пустой FK.
+    FK на report_id в схеме нет, поэтому при удалении объекта очистка bsl_modules
+    выполняется явно.
     """
 
     TABLE = "bsl_modules"
@@ -364,7 +411,6 @@ class BslModuleRowWriter(TableRowWriter):
         "object_type": "text",
         "object_name": "text",
         "report_id": "int",
-        "processing_id": "int",
         "parent_uuid": "uuid",
         "parent_type": "text",
         "module_type": "text",

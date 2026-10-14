@@ -1,6 +1,10 @@
 -- ============================================
 -- БД ckb_1c_configurations — базовые таблицы: конфигурации, расширения,
--- внешние обработки, модули BSL. Спецификации cc-1c-skills, формат метаданных 2.17.
+-- модули BSL. Спецификации cc-1c-skills, формат метаданных 2.17.
+-- Внешние объекты выгрузки (отчёты И обработки) живут в ОДНОЙ таблице-заголовке
+-- external_report (шаг 1), вид строки задаёт колонка object_kind (узел V22, 14.10.2026).
+-- Таблица external_processing из этого файла удалена узлом V22 — она была пуста (0 строк)
+-- и давала второй заголовок для того же понятия; для живой БД — migrate_v22_object_kind.sql.
 -- ============================================
 --
 -- СОЗДАНИЕ БАЗЫ «С НУЛЯ» — ровно три шага после CREATE DATABASE (порядок фиксирован):
@@ -12,7 +16,8 @@
 --        + витрины v_enrichment_targets / v_enrichment_objects (узел V17). FK шага 1b смотрят
 --        в таблицы шага 1, поэтому порядок 1 -> 1b -> 2 обязателен.
 --   2) psql -v ON_ERROR_STOP=1 -d ckb_1c_configurations -f create_1c_configurations_db.sql
---        configurations, config_extensions, external_processing, bsl_modules (этот файл).
+--        configurations, config_extensions, bsl_modules (этот файл). Таблица
+--        external_processing удалена узлом V22: заголовок обработки — строка external_report.
 --
 -- Граница владения (зафиксирована 13.10.2026 по живой БД: information_schema, pg_constraint,
 -- pg_indexes). Причина, почему раньше было два разных определения external_report:
@@ -101,23 +106,16 @@ CREATE TABLE IF NOT EXISTS config_extensions (
 );
 
 -- --------------------------------------------
--- ТАБЛИЦА В. external_processing (внешние обработки)
--- Загрузка внешнего процесса (узел V16 плана) ещё не реализована: src/loaders/external_processing
--- отсутствует, в src/external_table_writer.py есть только ExternalProcessingRowWriter-заготовка.
--- Таблица нужна, так как bsl_modules.processing_id на неё ссылается.
+-- ТАБЛИЦА В. external_processing — УДАЛЕНА узлом V22 (14.10.2026).
+-- Внешняя обработка — тот же внешний объект выгрузки, что и отчёт: у неё есть реквизиты,
+-- табличные части, формы, макеты и модули. Дочерние таблицы универсальны и привязаны к
+-- заголовку через parent_uuid с FK -> external_report(uuid) ON DELETE CASCADE; вторая
+-- таблица заголовка заставила бы этот ключ снимать (проверено живой вставкой: реквизит
+-- обработки отклонялся constraint attributes_parent_uuid_fkey). Таблица была пуста
+-- (0 строк), на неё ссылался единственный FK — bsl_modules.processing_id, который снят
+-- вместе с колонкой. Вид строки задаёт external_report.object_kind (шаг 1).
+-- Для уже созданных баз — migrate_v22_object_kind.sql.
 -- --------------------------------------------
-CREATE TABLE IF NOT EXISTS external_processing (
-    id SERIAL PRIMARY KEY,
-    configuration_id INT REFERENCES configurations(id),
-    name VARCHAR(255) UNIQUE NOT NULL,
-    synonym TEXT,
-    comment TEXT,
-    version VARCHAR(50),
-    uuid UUID UNIQUE,
-    class_id VARCHAR(36) DEFAULT 'e41aff26-25cf-4bb6-b6c1-3f478a75f374',
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
-);
 
 -- --------------------------------------------
 -- ТАБЛИЦА Г. bsl_modules (модули BSL)
@@ -135,8 +133,11 @@ CREATE TABLE IF NOT EXISTS bsl_modules (
     object_type VARCHAR(50),
     object_name VARCHAR(255),
     -- FK на external_report здесь нет — см. шапку файла (в живой БД его нет, очистка явная).
+    -- report_id — id строки внешнего объекта в external_report. С узла V22 это относится и к
+    -- отчётам, и к обработкам: заголовки объединены в одну таблицу, колонка processing_id и
+    -- её FK удалены. Переименование report_id -> external_object_id отнесено к узлу V23
+    -- (переименование самой таблицы-заголовка), здесь колонка не переименовывается.
     report_id INT,
-    processing_id INT REFERENCES external_processing(id),
     parent_uuid UUID,
     parent_type TEXT NOT NULL DEFAULT 'external_report',
     module_type VARCHAR(50),
@@ -149,7 +150,7 @@ CREATE TABLE IF NOT EXISTS bsl_modules (
 -- ИНДЕКСЫ (только для таблиц этого файла; индексы внешнего отчёта — в src/ddl_external_report.sql)
 -- --------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_configurations_name ON configurations(name);
-CREATE INDEX IF NOT EXISTS idx_external_processing_name ON external_processing(name);
+-- idx_external_processing_name удалён узлом V22 вместе с таблицей external_processing.
 CREATE INDEX IF NOT EXISTS idx_bsl_modules_config ON bsl_modules(configuration_id);
 CREATE INDEX IF NOT EXISTS idx_bsl_modules_parent_uuid ON bsl_modules(parent_uuid);
 CREATE INDEX IF NOT EXISTS idx_bsl_modules_module_type ON bsl_modules(module_type);

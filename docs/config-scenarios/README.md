@@ -1,7 +1,7 @@
 # Сценарии загрузки конфигураций 1С
 
 > 📌 Этот каталог содержит детальные правила для каждого типа объекта. Общий обзор — [LOAD_RULES_Config.md](../LOAD_RULES_Config.md).
-> **Норматив поведения сервера (блок-схемы, правила R1–R8, матрица «узел → код»)** —
+> **Норматив поведения сервера (блок-схемы, правила R1–R12, матрица «узел → код»)** —
 > [FLOWCHART_1c-configurations-core.md](FLOWCHART_1c-configurations-core.md).
 
 ## 📋 Оглавление
@@ -11,8 +11,12 @@
 | 0 | Общий ствол и контракт | — | [FLOWCHART_1c-configurations-core.md](FLOWCHART_1c-configurations-core.md) | ✅ действует |
 | 1 | Полная конфигурация | `configuration` | [01_configuration.md](01_configuration.md) | ❌ заглушка (описание целевого поведения) |
 | 2 | Расширение конфигурации | `extension` | [02_extension.md](02_extension.md) | ❌ заглушка (описание целевого поведения) |
-| 3 | Внешняя обработка | `external_processing` | [03_external_processor.md](03_external_processor.md) | ❌ заглушка (описание целевого поведения) |
+| 3 | Внешняя обработка | `external_processing` | [03_external_processor.md](03_external_processor.md) | ✅ реализован узлом V22: заголовок в `external_report` с `object_kind='external_processing'` |
 | 4 | Внешний отчет | `external_report` | [04_external_report.md](04_external_report.md) | ✅ реализован с дочерними данными (V12/V13/V14/V14.1); состав ordinary-формы — узел V15 |
+
+> ⚠️ Нумерация сценариев в этом каталоге (3 — обработка, 4 — отчёт) исторически **не совпадает** с
+> нумерацией вариантов в нормативе (вариант 3 — внешний отчёт, вариант 4 — внешняя обработка).
+> Ориентироваться нужно на признак варианта из правила R1 и на имя файла сценария.
 
 ## 📊 Анализ содержимого БД и планы (созданы 13.10.2026)
 
@@ -43,10 +47,10 @@
 
 | Документ | Назначение |
 |----------|-----------|
-| [external_report_strategy.md](../external_report_strategy.md) | Схема БД внешних объектов: `external_report`/`external_processing` + `attributes`, `tabular_sections`, `forms`, `form_ext`, `templates`, `bsl_modules` |
+| [external_report_strategy.md](../external_report_strategy.md) | Схема БД внешних объектов: `external_report` (единый заголовок отчёта и обработки, вид — `object_kind`, узел V22) + `attributes`, `tabular_sections`, `forms`, `form_ext`, `templates`, `bsl_modules` |
 | [external_report_xml_guide.md](../external_report_xml_guide.md) | Разбор XML-структуры, допустимые значения, примеры SQL |
 | [1c-configurations-core_Rule.md](../../.clinerules/1c-configurations-core_Rule.md) | Правила и MCP-инструменты сервера core |
-| [1c-configurations-enrichment_Rule.md](../../.clinerules/1c-configurations-enrichment_Rule.md) | Правила сервера enrichment (внимание: реализация не соответствует, см. план V17) |
+| [1c-configurations-enrichment_Rule.md](../../.clinerules/1c-configurations-enrichment_Rule.md) | Правила сервера enrichment (реализовано: контракт — 18 инструментов, узел V17; привязка к конфигурации — V20/V20.1) |
 
 ## 📁 Структура каталога
 
@@ -57,7 +61,7 @@ config-scenarios/
 ├── 02_extension.md                        ← Расширение (5–50 объектов)
 ├── 03_external_processor.md               ← Внешняя обработка (one .epf)
 ├── 04_external_report.md                  ← Внешний отчет (one .erf)
-├── FLOWCHART_1c-configurations-core.md    ← Норматив: блок-схемы, правила R1–R10, матрица «узел → код»
+├── FLOWCHART_1c-configurations-core.md    ← Норматив: блок-схемы, правила R1–R12, матрица «узел → код»
 ├── ANALYSIS_2026-10-13_content_inventory.md  ← Инвентарь содержимого БД и слепые зоны
 └── TOOLS_REVISION_2026-10-13.md           ← Ревизия инструментов и политика артефактов
 ```

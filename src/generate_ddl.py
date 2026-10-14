@@ -28,7 +28,11 @@ sql_content = r"""-- ===========================================================
 -- Скрипт перестройки схемы для внешних отчетов/обработок 1С
 -- Дата: 10.10.2026, обновлено 13.10.2026 (узел V14/V15: IF NOT EXISTS + витрины раздела 7),
 -- 14.10.2026 (узел V20: configuration_id — заявленная оператором привязка к конфигурации;
--- узел V20.1 того же дня: FK снят, целостность проверяет инструмент, устаревание — при чтении)
+-- узел V20.1 того же дня: FK снят, целостность проверяет инструмент, устаревание — при чтении;
+-- узел V22 того же дня: external_report — ОДНА таблица-заголовок внешнего объекта выгрузки,
+-- вид строки различает колонка object_kind ('external_report' | 'external_processing');
+-- таблица external_processing и колонка bsl_modules.processing_id удалены: второй заголовок
+-- для того же понятия при пустой таблице только порождает расхождения)
 -- База: ckb_1c_configurations
 -- Источник истины: src/generate_ddl.py — правки вносить в него, этот файл перегенерируется.
 -- external_report и его индекс создаются через IF NOT EXISTS, чтобы скрипт применялся
@@ -39,6 +43,21 @@ sql_content = r"""-- ===========================================================
 CREATE TABLE IF NOT EXISTS external_report (
     id SERIAL PRIMARY KEY,
     uuid UUID UNIQUE NOT NULL,
+    -- Узел V22 (14.10.2026): ОДНА таблица-заголовок для всех внешних объектов выгрузки.
+    -- external_report — имя таблицы (переименование в external_object отнесено к узлу V23),
+    -- а вид строки задаёт эта колонка: 'external_report' (внешний отчёт) или
+    -- 'external_processing' (внешняя обработка). Словарь значений СОЗНАТЕЛЬНО тот же, что у
+    -- parent_type в дочерних таблицах (attributes/tabular_sections/forms/form_ext/templates/
+    -- bsl_modules): обогащение адресует содержимое парой parent_uuid + parent_type и менять
+    -- его не нужно. Значение заявляет загрузчик по корневому элементу XML (ExternalReport /
+    -- ExternalDataProcessor); дополнительно проверяется совпадение containedobject_classid с
+    -- константой класса этого вида (отчёт — e41aff26-25cf-4bb6-b6c1-3f478a75f374, обработка —
+    -- c3831ec8-d8d5-4f93-8a22-f9bfae07327f), несовпадение прерывает загрузку (тот же
+    -- порядок, что R3 для пустого uuid). Свойства, которых нет у обработки
+    -- (main_data_composition_schema, *_settings_form, default_variant_form, variants_storage,
+    -- settings_storage), у её строки равны NULL — это «свойства есть только у отчёта», а не
+    -- «у обработки пусто». Таблица external_processing (0 строк) этим узлом удалена.
+    object_kind TEXT NOT NULL DEFAULT 'external_report',
     containedobject_classid UUID DEFAULT 'e41aff26-25cf-4bb6-b6c1-3f478a75f374',
     containedobject_objectid UUID,
     generatedtype_name TEXT,
@@ -71,7 +90,13 @@ CREATE TABLE IF NOT EXISTS external_report (
     -- перепривязка ищется обратным запросом «кто привязан к конфигурации N».
     configuration_id INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    -- узел V22: словарь видов замкнут — нового вида без строки загрузчика и словаря
+    -- parent_type в обогащении здесь быть не может. Имя ограничения задано явно, чтобы
+    -- чистая установка и миграция migrate_v22_object_kind.sql давали один и тот же объект
+    -- (сверка _cmp_ddl.py).
+    CONSTRAINT external_report_object_kind_check
+        CHECK (object_kind IN ('external_report', 'external_processing'))
 );
 CREATE INDEX IF NOT EXISTS idx_external_report_uuid ON external_report(uuid);
 CREATE INDEX IF NOT EXISTS idx_external_report_configuration_id ON external_report(configuration_id);
@@ -438,7 +463,14 @@ SELECT e.id AS report_id,
           JOIN config_snippets s ON s.id = d.snippet_id
          WHERE s.parent_uuid = e.uuid) AS snippet_dependencies,
        (SELECT count(*) FROM config_cross_references x
-         WHERE x.parent_uuid = e.uuid) AS doc_links
+         WHERE x.parent_uuid = e.uuid) AS doc_links,
+       -- Узел V22: вид строки заголовка (отчёт / обработка). Сводка и SQL-инвентарь обязаны
+       -- различать виды: обе строки лежат в одной таблице, и без этой колонки вопрос «сколько
+       -- объектов и чего именно» к витрине не задать. Колонка стоит ПОСЛЕДНЕЙ намеренно:
+       -- PostgreSQL разрешает CREATE OR REPLACE VIEW так, чтобы новые столбцы только
+       -- добавлялись в конец списка, — аддитивная миграция migrate_v22_object_kind.sql
+       -- повторяет этот же текст и применяется к уже созданной базе без DROP VIEW.
+       COALESCE(e.object_kind, 'external_report') AS object_kind
 FROM external_report e;
 
 CREATE OR REPLACE VIEW v_config_alias_targets AS

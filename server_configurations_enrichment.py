@@ -66,6 +66,7 @@ from fastmcp import FastMCP
 
 from enrichment_generator import (generate_enrichment, describe_object, type_brief,
                                  set_object_configuration)
+from external_meta_parser import OBJECT_KIND_TITLES
 from enrichment_aliases import (add_config_aliases, search_config_aliases, resolve_config_alias,
                                 list_config_aliases, delete_config_alias)
 from enrichment_snippets import (add_config_snippet, get_config_snippet, list_config_snippets,
@@ -94,11 +95,19 @@ def _fail(res, verb):
 
 
 def _obj_line(res):
-    """Для какого объекта выгрузки сделана операция: имя + uuid."""
+    """Для какого объекта выгрузки сделана операция: имя + uuid.
+
+    Узел V22: если слой src/ отдал вид объекта (object_kind), он печатается — оператор обязан
+    видеть, что операция выполнена над обработкой, а не над отчётом: обе строки живут в одной
+    таблице external_report, и по одному uuid этого не отличить.
+    """
     if not res.get('uuid'):
         return ""
     name = res.get('object_name') or res.get('name') or ''
-    return f"Объект: {name} | uuid={res.get('uuid')}"
+    kind = res.get('object_kind')
+    kind_part = (f" | вид={res.get('object_kind_title') or OBJECT_KIND_TITLES.get(kind, kind)}"
+                 f" ({kind})") if kind else ""
+    return f"Объект: {name}{kind_part} | uuid={res.get('uuid')}"
 
 
 def _counts(pairs):
@@ -212,8 +221,17 @@ def config_enrichment_stats_tool(uuid: str = None, limit: int = 20, card: bool =
                      f"сниппетов {totals.get('snippets')}, зависимостей {totals.get('dependencies')}, "
                      f"связей documentation {totals.get('doc_links')}",
                      f"Объектов в выборке: {len(objects)}"]
+            # Узел V22: обе строки (отчёт и обработка) лежат в одной таблице-заголовке, поэтому
+            # сводка обязана называть вид — иначе «объектов N» не отвечает на вопрос, чего именно.
+            kinds = res.get('object_kinds') or []
+            if kinds:
+                lines.append("Виды объектов: " + ", ".join(
+                    f"{OBJECT_KIND_TITLES.get(row.get('object_kind'), row.get('object_kind'))}"
+                    f" ({row.get('object_kind')})={row.get('objects')}"
+                    for row in kinds))
             for row in objects[:MAX_ROWS]:
                 lines.append(f"  [{row.get('report_id')}] {row.get('report_name')} "
+                             f"| вид={OBJECT_KIND_TITLES.get(row.get('object_kind'), row.get('object_kind'))} "
                              f"| uuid={row.get('report_uuid')} | {_obj_counters(row)}")
             lines += _over_limit(objects)
             lines += _binding_lines(res)
@@ -757,15 +775,17 @@ def delete_config_snippet_tool(snippet_id: int):
 @mcp.tool()
 def add_config_cross_reference_tool(uuid: str = None, source_path: str = None,
                                     local_doc_kind: str = "group", local_doc_id: int = None,
-                                    target_type: str = "ExternalReport", target_name: str = None,
+                                    target_type: str = None, target_name: str = None,
                                     target_uuid: str = None, reference_type: str = "linked_to"):
     """Поставить указатель documentation (local_doc) -> конкретная цель объекта выгрузки.
 
     local_doc_kind='group' (справочник языка/платформы, id из groups) или 'snippet'
-    (id из knowledge_snippets). Цель по умолчанию — сам внешний объект; для цели на enrich-
-    сниппет указывают target_type='ConfigSnippet' и target_uuid='snippet:<id>' (ту же запись
-    цели читает get_config_snippet_tool). Указатель проверяется в базе local_doc: битый id не
-    сохраняется, чтобы связь вникуда не замусоривала анализ. Дубликат не создаётся.
+    (id из knowledge_snippets). Цель по умолчанию — сам объект выгрузки, а его тип цели
+    берётся из вида строки заголовка (узел V22): ExternalReport для отчёта и
+    ExternalProcessing для обработки; явно указанный тип другого вида отклоняется. Для цели на
+    enrich-сниппет указывают target_type='ConfigSnippet' и target_uuid='snippet:<id>' (ту же
+    запись цели читает get_config_snippet_tool). Указатель проверяется в базе local_doc: битый
+    id не сохраняется, чтобы связь вникуда не замусоривала анализ. Дубликат не создаётся.
     Это то, чего не хватало в старом register_cross_reference_tool: он ссылался на
     configuration_id, которого в схеме нет.
     """
@@ -836,6 +856,12 @@ def _card_identity_lines(res):
     counts = res.get("counts") or {}
     lines = ["КАРТОЧКА ОБЪЕКТА (по сохранённой выгрузке, без конфигуратора)",
              f"  [{obj.get('report_id')}] {obj.get('name')} | uuid={obj.get('uuid')}"]
+    # Узел V22: вид строки заголовка. Внешний отчёт и внешняя обработка лежат в одной таблице,
+    # поэтому карточка обязана сказать, чем является объект: без этой строки карточка обработки
+    # читалась бы как карточка отчёта, у которого «пропали» свойства отчёта.
+    object_kind = str(res.get("object_kind") or obj.get("object_kind") or "external_report")
+    lines.append(f"  Вид объекта: {OBJECT_KIND_TITLES.get(object_kind, object_kind)} "
+                 f"(object_kind='{object_kind}', строка таблицы external_report)")
     kind = str(obj.get("generatedtype_category") or "")
     if obj.get("generatedtype_name"):
         kind = f"{kind} ({obj['generatedtype_name']})" if kind else str(obj["generatedtype_name"])
@@ -880,6 +906,16 @@ def _card_identity_lines(res):
             properties.append(f"{label}: {obj[key]}")
     if properties:
         lines.append("  Свойства: " + "; ".join(properties))
+    elif object_kind == "external_report":
+        lines.append("  Свойств объекта в выгрузке нет (основная СКД, форма по умолчанию, форма "
+                     "настроек, вспомогательная форма) — это состояние объекта, а не пропуск разбора.")
+    if object_kind == "external_processing":
+        # Узел V22: у внешней обработки свойств СКД и настроек нет в принципе (в выгрузке они не
+        # выгружаются), а не «не разобраны». Форма по умолчанию и реквизиты при этом самые обычные.
+        # Сказать, что именно не применяется, — значит не оставить читателя с ложным ощущением
+        # неполных данных (карточка обработки не должна читаться как карточка отчёта с пробелами).
+        lines.append("  Свойства: основная СКД, форма настроек и хранилище вариантов к внешней "
+                     "обработке не применяются — в выгрузке их нет (это не пропуск данных).")
 
     names = {"object_attributes": "реквизитов объекта", "attributes": "строк attributes",
              "tabular_sections": "табличных частей", "forms": "форм",

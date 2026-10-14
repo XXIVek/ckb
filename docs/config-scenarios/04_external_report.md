@@ -30,7 +30,8 @@ Test1_Otchet/
 
 ```python
 load_1c_catalog_tool(source_path=r"C:\1C_LLM\LoadDoc\Отчет", force=False)
-# Внешний отчёт → запись в external_report (не в external_processing!),
+# Внешний отчёт → запись в external_report с object_kind='external_report' (узел V22: тот же
+# заголовок, что у внешней обработки; вид различает колонка, отдельной таблицы нет),
 # дети из корневого XML (V12) и из подкаталогов Forms/, Templates/, Ext/ (V13).
 # Дубликат по UUID → ⚠️ карточка; подтверждение перезагрузки — force=True.
 
@@ -76,7 +77,7 @@ delete_external_report_tool(source_path=... | uuid=... | report_id=...)
 
 | Таблица | Строк | Назначение | Связь |
 |---------|-------|-----------|---------------------|
-| `external_report` | Главный | Внешние отчеты 1С | — |
+| `external_report` | Главный | Внешние объекты 1С: отчёты и обработки; вид — `object_kind` (`external_report` / `external_processing`, CHECK, узел V22) | `uuid UNIQUE` |
 | `attributes` | Реквизиты | Универсальная таблица реквизитов и колонок ТЧ | `parent_uuid` → uuid ON DELETE CASCADE |
 | `tabular_sections` | ТЧ | Табличные части (колонки — jsonb `column_uuids`) | `parent_uuid` → uuid ON DELETE CASCADE |
 | `forms` | Формы | Регистрация форм (V13), `UNIQUE (parent_uuid, uuid)` | `parent_uuid` → uuid ON DELETE CASCADE |

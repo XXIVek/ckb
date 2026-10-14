@@ -449,6 +449,15 @@ for child in element:
     if tag_name == 'Name':
         name = child.text or ''
 Приложение B: Алгоритм парсинга XML в БД
+
+> ⚠️ Ниже — упрощённая схема разбора. Реальный загрузчик (`src/external_report_loader.py`,
+> `src/config_load_router.py`, `src/external_table_writer.py`) пишет заголовок любого внешнего
+> объекта — и отчёта, и обработки — в одну таблицу `external_report`, различая вид колонкой
+> `object_kind` (узел V22); отдельной таблицы `external_processing` в схеме нет, колонки
+> `bsl_modules.processing_id` тоже нет — модули связаны единой колонкой `report_id`.
+> Пустой `<xr:ClassId>` трактуется как отчёт с предупреждением, чужой непустой ClassId —
+> отказ загрузки (правило R12).
+
 Шаг 1: Определение типа объекта
 
 report_tag = root.find('.//md:ExternalReport', ns)

@@ -137,7 +137,14 @@ SELECT e.id AS report_id,
           JOIN config_snippets s ON s.id = d.snippet_id
          WHERE s.parent_uuid = e.uuid) AS snippet_dependencies,
        (SELECT count(*) FROM config_cross_references x
-         WHERE x.parent_uuid = e.uuid) AS doc_links
+         WHERE x.parent_uuid = e.uuid) AS doc_links,
+       -- Узел V22: вид строки заголовка (отчёт / обработка). Сводка и SQL-инвентарь обязаны
+       -- различать виды: обе строки лежат в одной таблице, и без этой колонки вопрос «сколько
+       -- объектов и чего именно» к витрине не задать. Колонка стоит ПОСЛЕДНЕЙ намеренно:
+       -- PostgreSQL разрешает CREATE OR REPLACE VIEW так, чтобы новые столбцы только
+       -- добавлялись в конец списка, — аддитивная миграция migrate_v22_object_kind.sql
+       -- повторяет этот же текст и применяется к уже созданной базе без DROP VIEW.
+       COALESCE(e.object_kind, 'external_report') AS object_kind
 FROM external_report e;
 
 CREATE OR REPLACE VIEW v_config_alias_targets AS

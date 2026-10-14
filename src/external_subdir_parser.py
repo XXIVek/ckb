@@ -608,6 +608,11 @@ def _read_template(xml_path, templates_dir, parent_uuid, parent_type, ref_names,
     ext_dir = _content_dir(templates_dir, (name, xml_path.stem))
     if ext_dir is None:
         row["ext_format"] = "none"
+        # ext_truncated — NOT NULL DEFAULT false, но писатель перечисляет колонки явно,
+        # поэтому NULL в контракте пришёл бы в INSERT как NULL и overriding default уронил
+        # бы вставку (найдено узлом V22 на бинарном макете Test2_ processing). Значение
+        # известно точно: содержимого нет — обрезать нечего.
+        row["ext_truncated"] = False
         warnings.append(f"Для макета '{name}' нет каталога содержимого Templates/{name}/Ext: "
                         "сохранена только регистрация макета.")
         return {"success": True, "template": row}
@@ -617,6 +622,7 @@ def _read_template(xml_path, templates_dir, parent_uuid, parent_type, ref_names,
     if template_xml is not None:
         content, truncated, size = _read_text_file(template_xml)
         if content is None:
+            row["ext_truncated"] = False
             warnings.append(f"Содержимое макета '{name}' ({template_xml.name}) не читается: "
                             "колонка templates.ext остаётся пустой.")
         else:
@@ -635,11 +641,21 @@ def _read_template(xml_path, templates_dir, parent_uuid, parent_type, ref_names,
         row["ext_path"] = _rel_path(template_bin, source_path)
         row["ext_bin"] = data
         row["ext_size"] = len(data) if data is not None else None
+        # Дефект, найденный узлом V22 на выгрузке Test2_ processing (макет TSD_M_SEARCH,
+        # Template.bin 37 053 байта): колонка ext_truncated NOT NULL DEFAULT FALSE, но
+        # TemplateRowWriter перечисляет колонки в INSERT явно, и отсутствие значения в
+        # контракте приходило как явный NULL — вставка падала с
+        # «null value in column "ext_truncated" … violates not-null constraint», то есть
+        # ЛЮБОЙ бинарный макет не загружался ни в отчёте, ни в обработке (у эталонных
+        # выгрузок макеты XML, поэтому ветка не проверялась). Бинарь не обрезается —
+        # об усечении сообщает именно false.
+        row["ext_truncated"] = False
         warnings.append(f"Макет '{name}' выгружен в бинарном виде "
                         f"(Templates/{name}/Ext/Template.bin): содержимое сохранено как есть "
                         "в templates.ext_bin.")
     else:
         row["ext_format"] = "none"
+        row["ext_truncated"] = False
         warnings.append(f"В каталоге Templates/{name}/Ext нет ни Template.xml, ни Template.bin: "
                         "содержимое макета не сохранено.")
     return {"success": True, "template": row}
