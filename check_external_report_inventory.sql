@@ -18,6 +18,15 @@
 -- должны совпасть с ожиданием), этот — описывает состав (что вообще видно).
 -- Пустой jsonb-массив не считается заполненным: используется jsonb_typeof и
 -- jsonb_array_length, а не IS NOT NULL.
+--
+-- Ожидания эталонной пары после V14/V15:
+--   Test1_Otchet — управляемая форма: содержимое (items/attributes/events/commands/
+--     auto_command_bar и скаляры) берётся из Form.xml (V13/V14.1), модуль — из Form/Module.bsl;
+--   Test2_Otchet — обычная форма «Отчет»: модуль из 0/module (V14), состав из 0/form (V15):
+--     items 10, attributes 4, events 1, commands 1, auto_command_bar «ДействияФормы».
+-- Слепые зоны, оставшиеся после V15: скалярные свойства ordinary-формы (Form.xml для неё
+-- не выгружается) и заголовок ordinary-формы — декодер его читает, но колонки под него в
+-- form_ext нет (DDL узла V15 не менялся), поэтому в БД он не сохраняется.
 -- ==========================================================================
 
 SELECT '### 0. колонки целевых таблиц' AS section;
@@ -97,15 +106,26 @@ WHERE b.parent_uuid IS NOT NULL AND e.id IS NULL;
 SELECT count(*) AS dup_forms FROM (SELECT parent_uuid, uuid FROM forms GROUP BY 1,2 HAVING count(*) > 1) d;
 SELECT count(*) AS orphan_attributes FROM attributes a LEFT JOIN external_report e ON e.uuid = a.parent_uuid WHERE e.id IS NULL;
 
-SELECT '### 7. классификация состояния обычных форм (после V14)' AS section;
+SELECT '### 7. классификация состояния обычных форм (после V14/V15 ожидаем OK)' AS section;
+-- V15: состав elements layout (0/form) разкладывается загрузчиком в items/attributes/events/
+-- commands/auto_command_bar, поэтому «ожидания» больше нет — пустые колонки ordinary-формы
+-- это ДЕФЕКТ (или следствие отсутствующего v8unpack: тогда в карточке загрузки предупреждение).
 SELECT f.name,
        CASE WHEN fe.ext_bin IS NULL THEN 'ДЕФЕКТ: Ordinary без ext_bin'
             WHEN fe.ext IS NULL     THEN 'ДЕФЕКТ V14: модуль формы не извлечён из ext_bin'
-            WHEN fe.items IS NULL OR jsonb_array_length(fe.items) = 0
-                 THEN 'ожидание V15: elements layout не разложен (items пустой массив)'
+            WHEN CASE WHEN jsonb_typeof(fe.items) = 'array'
+                      THEN jsonb_array_length(fe.items) = 0 ELSE true END
+                 THEN 'ДЕФЕКТ V15: состав 0/form не разложен'
             ELSE 'OK' END AS state,
-       length(fe.ext) AS ext_len, jsonb_array_length(fe.items) AS n_items
+       length(fe.ext) AS ext_len,
+       CASE WHEN jsonb_typeof(fe.items) = 'array' THEN jsonb_array_length(fe.items) END AS n_items,
+       CASE WHEN jsonb_typeof(fe.attributes) = 'array'
+            THEN jsonb_array_length(fe.attributes) END AS n_attributes,
+       CASE WHEN jsonb_typeof(fe.events) = 'array' THEN jsonb_array_length(fe.events) END AS n_events,
+       CASE WHEN jsonb_typeof(fe.commands) = 'array'
+            THEN jsonb_array_length(fe.commands) END AS n_commands
 FROM forms f JOIN form_ext fe ON fe.form_id = f.id WHERE f.form_type = 'Ordinary';
+-- Эталон Test2_Otchet: n_items = 10, n_attributes = 4, n_events = 1, n_commands = 1.
 
 SELECT '### 8. реквизиты/ТЧ/синонимы эталона — что видно без распаковки' AS section;
 SELECT e.name AS report, e.synonym IS NOT NULL AS has_synonym, e.comment IS NOT NULL AS has_comment,
@@ -200,6 +220,9 @@ SELECT COALESCE(element_kind, '-') AS element_kind, COALESCE(element_type, '-') 
 FROM v_form_elements GROUP BY 1,2,3 ORDER BY 3, 1, 2;
 
 SELECT '### 11. слепые зоны: что НЕ видно без распаковки Form.bin' AS section;
+-- После V15 все четыре флага для ordinary-формы обязаны быть false: состав разкладывается
+-- при загрузке из 0/form. Настоящие слепые зоны после V15 — скалярные свойства ordinary-формы
+-- (для неё Form.xml не выгружается) и её заголовок (колонки под него в form_ext нет).
 SELECT f.name AS form, f.form_type,
        (fe.items IS NULL OR jsonb_array_length(fe.items) = 0) AS items_empty,
        (fe.attributes IS NULL OR jsonb_array_length(fe.attributes) = 0) AS attributes_empty,
@@ -207,16 +230,31 @@ SELECT f.name AS form, f.form_type,
        (fe.commands IS NULL OR jsonb_array_length(fe.commands) = 0) AS commands_empty
 FROM forms f JOIN form_ext fe ON fe.form_id = f.id
 ORDER BY f.form_type, f.name;
+SELECT 'форм с незаполненным составом (Ожидание V15: 0) = ' || count(*)
+FROM forms f JOIN form_ext fe ON fe.form_id = f.id
+WHERE (fe.items IS NULL OR jsonb_array_length(fe.items) = 0)
+   OR (fe.attributes IS NULL OR jsonb_array_length(fe.attributes) = 0)
+   OR (fe.events IS NULL OR jsonb_array_length(fe.events) = 0)
+   OR (fe.commands IS NULL OR jsonb_array_length(fe.commands) = 0);
 
 -- 12. Заполненность второстепенных колонок: пусто по источнику или не разобрано.
 -- Смысл колонки note: отличить «свойства нет в выгрузке» (норма) от
 -- «свойство в выгрузке есть, но мы его не сохраняем» (слепая зона / дефект).
 SELECT '### 12. заполненность второстепенных колонок' AS section;
 SELECT col, filled, total, note FROM (
+    SELECT 'external_report.configuration_id (привязка к конфигурации)' AS col,
+           count(*) FILTER (WHERE configuration_id IS NOT NULL) AS filled,
+           count(*) AS total,
+           'узел V20/V20.1: заявляется только оператором (id строки configurations.id); внешнего '
+             || 'ключа в схеме нет осознанно — битой ссылки не создаёт инструмент, а потерянная '
+             || 'ссылка видна состоянием «битая» (раздел 15f); пусто = «привязка не заявлена», '
+             || 'а НЕ «отчёт универсальный»; из выгрузки 1С не берётся' AS note
+    FROM external_report
+    UNION ALL
     SELECT 'forms.synonym' AS col,
            count(*) FILTER (WHERE synonym IS NOT NULL AND synonym <> '{}'::jsonb) AS filled,
            count(*) AS total,
-           'подпись формы из Forms/<Имя>.xml; у ordinary {} — заголовок только в Form.bin (V15)' AS note
+           'подпись формы из Forms/<Имя>.xml; у ordinary {} — заголовок ordinary-формы декодер V15 читает из 0/form, но колонки под него в form_ext нет' AS note
     FROM forms
     UNION ALL
     SELECT 'forms.use_purposes', count(*) FILTER (WHERE jsonb_array_length(use_purposes) > 0),
@@ -228,7 +266,7 @@ SELECT col, filled, total, note FROM (
     SELECT 'form_ext.auto_command_bar (не пустой)',
            count(*) FILTER (WHERE jsonb_typeof(auto_command_bar) = 'object'
                               AND auto_command_bar <> '{}'::jsonb),
-           count(*), 'у managed — id/name/autofill панели; у ordinary {} (состав панели в Form.bin, V15)'
+           count(*), 'у managed — id/name/autofill панели; у ordinary — name/presentation/items панели действий из 0/form, узел V15'
              FROM form_ext
     UNION ALL
     SELECT 'form_ext скаляр report_form_type', count(*) FILTER (WHERE report_form_type IS NOT NULL),
@@ -285,8 +323,9 @@ SELECT col, filled, total, note FROM (
            count(*), 'в этой выгрузке свойства не заданы — пусто по источнику, не дефект' FROM attributes
 ) s ORDER BY col;
 
--- 13. Атрибуты самой формы (её источники данных) и команды формы из Form.xml.
---     У ordinary обе колонки пусты — содержимое появится после V15.
+-- 13. Атрибуты самой формы (её источники данных) и команды формы.
+--     V15: у ordinary те же колонки заполняются из 0/form (источники данных формы, команда
+--     панели «ДействияФормы»), поэтому раздел показывает обе разновидности формы.
 SELECT '### 13. атрибуты формы (источники данных) и команды формы' AS section;
 SELECT form, count(*) AS n_attributes_distinct,
        jsonb_agg((name, typ) ORDER BY name) AS attrs
@@ -317,3 +356,94 @@ SELECT name, COALESCE(template_type, '-') AS template_type, COALESCE(ext_root_ta
        position('SELECT' IN upper(ext)) > 0 AS has_sql_text,
        'структура макета (датасеты/поля/настройки) не разобрана — только текстовый поиск по ext' AS note
 FROM templates ORDER BY name;
+
+-- 15. Обогащение V17: что появляется ПОВЕРХ сохранённого содержимого и чего не хватает.
+SELECT '### 15. обогащение: счётчики по объекту (витрина v_config_enrichment)' AS section;
+SELECT report_name AS obj, aliases_total, aliases_manual, aliases_snippet, snippets,
+       snippet_dependencies, doc_links
+FROM v_config_enrichment ORDER BY 1;
+
+SELECT '### 15b. цели: строк-алиасов и РАЗЛИЧНЫХ целей по типам (это два разных счёта)' AS section;
+SELECT target_type, count(*) AS alias_rows, count(DISTINCT target_uuid) AS distinct_targets
+FROM v_config_alias_targets WHERE target_uuid IS NOT NULL
+GROUP BY target_type ORDER BY target_type;
+
+SELECT '### 15c. происхождение: что перегенерация снимает, а что нет' AS section;
+SELECT CASE WHEN origin = 'manual' THEN 'manual (перегенерация не трогает)'
+            ELSE 'generated (снимается и пишется заново)' END AS origin_kind, count(*)
+FROM config_aliases GROUP BY 1 ORDER BY 1;
+SELECT CASE WHEN is_verified THEN 'manual (перегенерация не трогает)'
+            ELSE 'generated (снимается и пишется заново)' END AS snippet_kind, count(*)
+FROM config_snippets GROUP BY 1 ORDER BY 1;
+
+SELECT '### 15d. сниппеты: откуда извлечены и на что ссылаются зависимости' AS section;
+SELECT s.source_kind, count(*) AS snippets, sum(count(*)) OVER () AS total
+FROM config_snippets s GROUP BY s.source_kind ORDER BY 2 DESC, 1;
+SELECT d.dependency_type, d.target_type, count(*) AS deps
+FROM config_snippet_dependencies d GROUP BY 1, 2 ORDER BY 3 DESC, 1, 2;
+
+SELECT '### 15e. узел A: запросы наборов данных макета разобраны в сниппеты' AS section;
+SELECT 'макетов, в ext которых есть <query> = ' || count(*)
+FROM templates
+WHERE ext IS NOT NULL
+  AND (position('<query>' IN ext) > 0 OR position(':query>' IN ext) > 0);
+SELECT 'сниппетов template_query = ' || count(*)
+       || ' (авто ' || count(*) FILTER (WHERE NOT is_verified)
+       || ', ручных ' || count(*) FILTER (WHERE is_verified)
+       || '; с целью Template ' || count(*) FILTER (WHERE target_type = 'Template') || ')'
+FROM config_snippets WHERE source_kind = 'template_query';
+-- СЛЕПАЯ ЗОНА была бы здесь: макет с <query>, по которого нет ни одного сниппета.
+SELECT 'СЛЕПАЯ ЗОНА: макетов с <query> без сниппета = ' || count(*)
+FROM templates t
+WHERE t.ext IS NOT NULL
+  AND (position('<query>' IN t.ext) > 0 OR position(':query>' IN t.ext) > 0)
+  AND NOT EXISTS (SELECT 1 FROM config_snippets s
+                   WHERE s.source_kind = 'template_query'
+                     AND s.source_uuid = 'template:' || t.uuid::text);
+
+SELECT '### 15f. привязки к конфигурации: состояния (узел V20.1 — FK снят, состояний три)' AS section;
+-- Внешнего ключа external_report.configuration_id -> configurations(id) в схеме нет осознанно:
+-- конфигурация — справочная система, которая нужна только при проверке данных отчёта, а FK
+-- блокировал бы ведение самого справочника. Поэтому состояние «битая ссылка» возможно по
+-- построению и обязано измеряться: это тот же признак, который инструменты требуют исправить
+-- (перепривязка). Снимок имени/версии не хранится — состояния считаются живым JOIN.
+SELECT 'объектов ' || count(*)
+       || ', привязка не заявлена ' || count(*) FILTER (WHERE state = 'not_declared')
+       || ', привязано ' || count(*) FILTER (WHERE state = 'bound')
+       || ', битая ссылка ' || count(*) FILTER (WHERE state = 'dangling')
+FROM (SELECT CASE WHEN er.configuration_id IS NULL THEN 'not_declared'
+                  WHEN c.id IS NULL THEN 'dangling' ELSE 'bound' END AS state
+      FROM external_report er
+      LEFT JOIN configurations c ON c.id = er.configuration_id) s;
+SELECT 'БИТЫХ привязок (должно быть 0 — иначе объекту нужна перепривязка) = ' || count(*)
+FROM external_report er
+WHERE er.configuration_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM configurations c WHERE c.id = er.configuration_id);
+-- обратный перечень (его же отдаёт config_enrichment_stats_tool без uuid): без него
+-- перепривязку было бы нечем искать
+SELECT 'cfg id=' || c.id || ' | ' || c.name
+       || ' | объектов привязано: '
+       || (SELECT count(*) FROM external_report er WHERE er.configuration_id = c.id)
+FROM configurations c ORDER BY c.name;
+SELECT 'заголовков конфигураций в справочнике = ' || count(*) FROM configurations;
+-- инфраструктура: индекс нужен обратному поиску, внешнего ключа быть не должно
+SELECT 'индекс idx_external_report_configuration_id (должен быть 1) = ' || count(*)
+FROM pg_indexes WHERE tablename = 'external_report'
+  AND indexname = 'idx_external_report_configuration_id';
+SELECT 'внешних ключей external_report_configuration_fkey (должно быть 0) = ' || count(*)
+FROM pg_constraint WHERE conrelid = 'external_report'::regclass
+  AND conname = 'external_report_configuration_fkey';
+
+SELECT '### 16. обогащение: слепые зоны (что пока не заполнено)' AS section;
+SELECT 'объектов без обогащения (не сгенерировано) = ' || count(*)
+FROM external_report e
+WHERE NOT EXISTS (SELECT 1 FROM config_aliases a WHERE a.parent_uuid = e.uuid);
+SELECT 'связей documentation = ' || count(*)
+       || ' (таблица заполняется отдельным сценарием: в пилоте связи не создавались)'
+FROM config_cross_references;
+SELECT 'алиасов с пустым target_key (цель не опознана) = ' || count(*)
+FROM config_aliases WHERE active AND target_key IS NULL;
+SELECT 'целей TabularSectionColumn: это колонки ТЧ (33 в эталоне) — в алиасах они общие '
+       || 'с реквизитами по таблице attributes, различие видно только по target_type' AS note,
+       count(*) AS alias_rows FROM v_config_alias_targets
+WHERE target_type = 'TabularSectionColumn';

@@ -7,6 +7,9 @@
     1. src/ddl_external_report.sql          — генерируется из src/generate_ddl.py;
        external_report + attributes, tabular_sections, forms, form_ext, templates,
        витрины v_form_elements / v_form_events;
+    1b. src/ddl_enrichment.sql              — узел V17: config_aliases, config_snippets,
+       config_snippet_dependencies, config_cross_references, витрины v_config_enrichment /
+       v_config_alias_targets (тоже генерируется из src/generate_ddl.py);
     2. create_1c_configurations_db.sql      — configurations, config_extensions,
        external_processing, bsl_modules.
 
@@ -26,6 +29,7 @@ import psycopg2
 TEMP_DB = "v13_ddl_check"
 BOOTSTRAP = r"C:\1C_LLM\ckb\create_1c_configurations_db.sql"
 DDL = r"C:\1C_LLM\ckb\src\ddl_external_report.sql"
+DDL_ENRICHMENT = r"C:\1C_LLM\ckb\src\ddl_enrichment.sql"
 PSQL = r"C:\Postgres\bin\psql.exe"
 ENV = {**os.environ, "PGPASSWORD": "Sta090860", "PGCLIENTENCODING": "UTF8"}
 
@@ -93,6 +97,7 @@ psql_run(["-c", f"CREATE DATABASE {TEMP_DB}", "-U", "postgres", "-h", "localhost
 print(f"1. Применяем скрипты установки к чистой БД {TEMP_DB} ...")
 errors = []
 for step, path in (("шаг 1 (src/ddl_external_report.sql)", DDL),
+                   ("шаг 1b (src/ddl_enrichment.sql)", DDL_ENRICHMENT),
                    ("шаг 2 (create_1c_configurations_db.sql)", BOOTSTRAP)):
     r = psql_run(["-v", "ON_ERROR_STOP=1", "-q", "-U", "postgres", "-h", "localhost",
                   "-d", TEMP_DB, "-P", "pager=off", "-f", path])
@@ -102,7 +107,7 @@ if errors:
     for e in errors:
         print("   ❌", e)
 else:
-    print("   ✅ оба шага применились без ошибок")
+    print("   ✅ все три шага применились без ошибок")
 
 live = snapshot("ckb_1c_configurations")
 new = snapshot(TEMP_DB)

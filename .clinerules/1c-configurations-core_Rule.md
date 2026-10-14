@@ -16,14 +16,18 @@ MCP сервер `1c-configurations-core` (server_configurations_core.py) — э
 | `load_1c_catalog_tool` | `(source_path: str, force: bool = False)` | **Единая точка входа загрузки.** Сама определяет вариант по файлам корневого каталога и грузит. Заменила `register_external_report_tool` и забрала внутрь анализ из `analyze_config_load_tool` |
 | `delete_external_report_tool` | `(source_path \| uuid \| report_id, object_type)` | Удаление внешнего объекта и его BSL-модулей |
 
-**Инструменты вне контракта** (сохранены на время перехода, будут удалены или перенесены;
-в сценарии загрузки на них ссылаться нельзя): `analyze_config_load_tool` (только диагностика),
-`register_external_report_tool` (устаревший псевдоним точки входа), `list_configurations_tool`,
-`get_configuration_tool`, `find_config_by_name_uuid_tool`, `search_config_objects_tool`,
-`list_config_objects_tool`, `get_object_structure_tool`, `count_objects_by_config_tool`,
-`delete_objects_by_config_tool`, `update_configuration_status_tool`, `delete_config_tool`,
-`batch_index_from_dump_tool`, `list_bsl_modules_tool`, `get_bsl_module_code_tool`,
-`read_config_file_tool`, `search_bsl_code_tool`, `get_enum_values_tool`.
+**Инструменты вне контракта удалены 14.10.2026** (были зарегистрированы 18 штук и обращались к
+несуществующей базе `configurations` — см. п. 8, п. 11): `analyze_config_load_tool`,
+`register_external_report_tool`, `list_configurations_tool`, `get_configuration_tool`,
+`find_config_by_name_uuid_tool`, `search_config_objects_tool`, `list_config_objects_tool`,
+`get_object_structure_tool`, `count_objects_by_config_tool`, `delete_objects_by_config_tool`,
+`update_configuration_status_tool`, `delete_config_tool`, `batch_index_from_dump_tool`,
+`list_bsl_modules_tool`, `get_bsl_module_code_tool`, `read_config_file_tool`,
+`search_bsl_code_tool`, `get_enum_values_tool`. Состав контракта сторожит
+`tools/check_mcp_tool_wiring.py` — лишний инструмент в сервере считается регрессией.
+Для чтения сохранённого содержимого объекта служат MCP `1c-configurations-enrichment`
+(карточка `config_enrichment_stats_tool(uuid=…, card=True)`, алиасы, сниппеты) и SQL-сверки
+`check_external_report_*.sql`, а не инструменты core.
 
 **Архитектура:** `server_configurations_core.py` — только тонкие обёртки (разбор аргументов →
 вызов функции из `src/` → форматирование). Логика загрузки — в `src/config_load_router.py`
@@ -36,12 +40,16 @@ MCP сервер `1c-configurations-core` (server_configurations_core.py) — э
 | `src/external_subdir_parser.py` | `parse_external_subdirs()` — разбор подкаталогов `Forms/`, `Templates/`, `Ext/` (узел V13) в контракты `forms`, `form_ext`, `templates`, `bsl_modules`; сверка имён с корневым XML даёт предупреждения, кривой uuid формы/макета — ошибку R3 |
 | `src/external_table_writer.py` | классы-писатели `ExternalReportRowWriter`, `ExternalProcessingRowWriter`, `AttributesRowWriter`, `TabularSectionsRowWriter`, `FormRowWriter`, `FormExtRowWriter`, `TemplateRowWriter`, `BslModuleRowWriter` (базовый `TableRowWriter`): спецификация колонок, `INSERT … RETURNING id`, пакетный `insert_many` |
 | `src/external_db.py` | подключение к `ckb_1c_configurations` через **psycopg2** и контекст `transaction()` — одна транзакция на загрузку объекта, при ошибке полный откат |
+| `src/external_form_decoder.py` | `decode_layout()` (узел V15) — разметка `0/form` обычной формы → колонки `form_ext` (`items`, `attributes`, `events`, `commands`, `auto_command_bar`). Обёртка над `v8unpack.MetaDataObject.Form.FormElements26/27`: версия берётся из первого элемента разметки; исключений не бросает — любой сбой возвращает `success=False` с причиной. Полный `elem.json` в БД не пишется: источник истины — `form_ext.ext_bin` |
 
 > ⚠️ Зависимости: `psycopg2` — обязательная (в окружении установлена, `requirements.txt` в корне
-> проекта нет). `v8unpack` — **опциональная** с 13.10.2026 (узел V14): нужна для извлечения модуля
-> обычной формы из `Form.bin` и для инструментов `tools/`; описана только в `tools/requirements.txt`
-> (`v8unpack>=1.2.0`). Без неё загрузка ведёт себя как V13 (`form_ext.ext` пуст, `ext_bin` заполнен)
-> и выдаётся предупреждение — отказа нет. Решение о переносе зависимости в корень — за узлом V15.
+> проекта нет). `v8unpack` — **решение зафиксировано 13.10.2026 (узел V15): остаётся
+> опциональной** и в корень проекта не переносится; описана только в `tools/requirements.txt`
+> (`v8unpack>=1.2.0`). Нужна для узлов V14 (модуль `0/module`) и V15 (разметка `0/form`) обычной
+> формы и для инструментов `tools/`. Без неё загрузка **не падает**: `ext_bin` сохраняется целиком,
+> `ext` и колонки состава остаются пустыми, в карточке выдаётся предупреждение с причиной
+> (поведение узла V13). Проверка деградации — `validate_external_children.py` (подмена `v8unpack`
+> в `sys.modules`), после неё — детерминированный повторный разбор того же каталога.
 > Не использовать `src/database.py` (это база `local_doc`) и `_get_config_db_connection()`
 > из `src/config_*.py` (база `configurations`, которой на сервере нет — см. п. 8).
 
@@ -111,8 +119,12 @@ MCP сервер `1c-configurations-core` (server_configurations_core.py) — э
   не дублируется;
 - **обычная форма** `Forms/<Имя>/Ext/Form.bin` → `form_ext.ext_bin` (`ext_format='bin'`), а с узла
   V14 дополнительно её модуль `0/module` → `form_ext.ext` (текст нормализуется: без BOM и без
-  обрамляющей пустоты; `ext_size` = размер контейнера). Разметка `0/form` не разкладывается —
-  `items`/`events`/`attributes`/`commands` остаются пустыми массивами (узел V15, п. 16);
+  обрамляющей пустоты; `ext_size` = размер контейнера). С узла V15 (13.10.2026) её разметка `0/form`
+  раскладывается декодером `src/external_form_decoder.py` в **те же** колонки, что и у управляемой
+  формы: `items` (`path`/`name`/`type`/`page`/`data_source`/`captions`), `attributes`
+  (источники данных формы), `events`, `commands`, `auto_command_bar`. Скалярные свойства
+  ordinary-формы (для неё `Form.xml` не выгружается) и её заголовок в БД не сохраняются —
+  колонки под них нет, DDL узла V15 не менялся;
 - свойства `Forms/<Имя>/Ext/Form.xml` → колонки `form_ext` (скаляры) и jsonb
   (`auto_command_bar`, `events`, `attributes`, `commands`, `items`);
 - `Templates/<Имя>/Ext/Template.xml` → `templates.ext` + `ext_root_tag`; `Template.bin` →
@@ -129,15 +141,19 @@ MCP сервер `1c-configurations-core` (server_configurations_core.py) — э
   индексация BSL через `psql.exe` из загрузчика удалена, `_run_psql` остался только в
   `delete_external_object()`.
 
-### Порядок создания БД «с нуля» (зафиксирован 13.10.2026)
+### Порядок создания БД «с нуля» (зафиксирован 13.10.2026, шаг 1b добавлен узлом V17 14.10.2026)
 
-Граница владения таблицами — по живой схеме; два скрипта применяются строго в этом порядке
+Граница владения таблицами — по живой схеме; скрипты применяются строго в этом порядке
 после `CREATE DATABASE ckb_1c_configurations`:
 
 | Шаг | Файл | Что создаёт |
 |---|---|---|
 | 1 | `src/ddl_external_report.sql` (генерация: `src/generate_ddl.py`) | `external_report`, `attributes`, `tabular_sections`, `forms`, `form_ext`, `templates`, витрины `v_form_elements`, `v_form_events` |
+| 1b | `src/ddl_enrichment.sql` (узел V17) | `config_aliases`, `config_snippets`, `config_snippet_dependencies`, `config_cross_references`, витрины `v_enrichment_targets`, `v_enrichment_objects`; все FK — на шаг 1, поэтому шаг 1b идёт строго после него |
 | 2 | `create_1c_configurations_db.sql` | `configurations`, `config_extensions`, `external_processing`, `bsl_modules` |
+
+Для уже существующей БД вместо шага 1b — аддитивная `migrate_v17_enrichment.sql` (тот же SQL +
+заполнение `target_key`/`target_uuid` у заполненных ранее таблиц).
 
 Правила, которые это обеспечивает (дефект устранён 13.10.2026, см. п. 17):
 
@@ -156,13 +172,38 @@ MCP сервер `1c-configurations-core` (server_configurations_core.py) — э
 - FK `bsl_modules.report_id → external_report` и FK `configurations.*_module_id → bsl_modules`
   нигде не объявляются: в живой БД их нет (п. 10 — очистка модулей явная; ссылки конфигураций
   взаимные). Меняется только парой «миграция + бутстрап», иначе `_cmp_ddl.py` покажет расхождение.
+- FK `external_report.configuration_id → configurations(id)` (добавлен узлом V20) **снят узлом
+  V20.1** (14.10.2026, тот же день): `configurations` — справочная таблица, которая нужна только
+  при проверке данных отчёта, а внешний ключ блокировал бы удаление или пересоздание строки
+  заголовка, то есть вести справочник было бы нельзя вовсе. Ни шаг 1 (`src/generate_ddl.py`, он же
+  `src/ddl_external_report.sql`), ни шаг 2 (`create_1c_configurations_db.sql`) его не объявляют —
+  защищённые DO-блоки удалены из обоих, иначе `_cmp_ddl.py` показал бы расхождение. Колонка
+  `configuration_id` и индекс `idx_external_report_configuration_id` **сохранены**: перепривязка
+  ищется обратным запросом («какие объекты привязаны к конфигурации N», «где битые ссылки»).
+  Для уже созданных БД — `migrate_v20_configuration_link.sql` (колонка + индекс; FK этим файлом
+  больше не создаётся) и `migrate_v21_drop_configuration_fk.sql`
+  (`ALTER TABLE … DROP CONSTRAINT IF EXISTS external_report_configuration_fkey`). Целостность
+  проверяет инструмент записи (`set_object_configuration_tool` отклоняет несуществующий id),
+  потерянная ссылка обнаруживается при чтении — карточка и сводка различают «не заявлена» /
+  «привязано» / «битая, требуется перепривязка»; тот же контракт, что у
+  `config_cross_references.local_doc_id` (п. 20, раздел 12 норматива).
 
-Сверка: `python _cmp_ddl.py` — собирает временную БД `v13_ddl_check` обоими шагами 1 и 2 и сверяет
+Сверка: `python _cmp_ddl.py` — собирает временную БД `v13_ddl_check` всеми шагами 1, 1b и 2 и сверяет
 со живой `ckb_1c_configurations` **всё в схеме public**: колонки таблиц и витрин, индексы и
 уникальные ограничения, внешние ключи (`pg_constraint`), нормализованные определения витрин.
 Перечни таблиц/витрин больше не задаются вручную — новый объект попадает в сверку сам.
-Состояние 13.10.2026: 212 колонок, 43 индекса/уникальных ограничения, 29 ограничений (PK/UNIQUE/FK),
-2 витрины — расхождений нет, код возврата 0.
+Счётчики печати́т сам `_cmp_ddl.py` — верить нужно им, а не записи ниже; ниже — снимок замера.
+Состояние 13.10.2026 (до V17): 212 колонок, 43 индекса, 29 ограничений, 2 витрины.
+Состояние 14.10.2026 (после узла V17 и индекса `uq_config_snippet_deps_stable_target`):
+281 колонка, 59 индексов/уникальных ограничений, 34 ограничения в `pg_constraint`
+(14 PK + 10 UNIQUE + 10 FK), 4 витрины (14 таблиц + 4 витрины в схеме public) —
+расхождений нет, код возврата 0.
+Состояние 14.10.2026 после узла V20 (`external_report.configuration_id` + индекс + FK):
+282 колонки, 60 индексов/уникальных ограничений, 35 ограничений в `pg_constraint`
+(14 PK + 10 UNIQUE + 11 FK), 4 витрины — расхождений нет, код возврата 0.
+Состояние 14.10.2026 после узла V20.1 (тот же день: внешний ключ снят, колонка и индекс
+остались): 282 колонки, 60 индексов/уникальных ограничений, 34 ограничения в `pg_constraint`
+(14 PK + 10 UNIQUE + 10 FK), 4 витрины — расхождений нет, код возврата 0.
 
 ### Обычные формы (`form_type='Ordinary'`, содержимое — `Form.bin`)
 
@@ -188,111 +229,98 @@ MCP сервер `1c-configurations-core` (server_configurations_core.py) — э
 модулем контейнера и инварианты; артефакты: `_v14_form_module.bsl`, `_v14_form_module.from_db.bsl`).
 Round-trip extract→pack сохраняет `0/form` и `0/module` точно,
 но меняет служебную раскладку контейнера (23 717 байт из 24 549) — бинарный diff неизбежен.
-**Элементы формы (`0/form`) по-прежнему не разложены** — `form_ext.items`/`events`/`attributes`/
-`commands` у `Ordinary` пустые массивы, это узел V15 (см. п. 16).
+
+**С узла V15 (13.10.2026) разметка `0/form` раскладывается**: `src/external_form_decoder.py::decode_layout`
+(обёртка над `v8unpack.MetaDataObject.Form.FormElements26/27`, версия читается из первого элемента
+разметки) вызывается из `src/external_subdir_parser.py::_apply_container_form_layout` в той же
+транзакции и заполняет **те же** колонки `form_ext`, что и разбор `Form.xml` у управляемой формы:
+`items` (`path`/`name`/`type`/`page`/`data_source`/`captions` + служебные `id`/`raw`-кратко),
+`attributes` (источники данных формы), `events`, `commands`, `auto_command_bar`. Контейнер
+`Form.bin` распакуется **один раз на форму** и переиспользуется для `0/module` (V14) и `0/form` (V15).
+Полный `elem.json` v8unpack (63 КБ против 10.6 КБ разметки) в БД не пишется: источник истины —
+`form_ext.ext_bin`, из которого `0/form` воспроизводится побайтово. Сбой разбора (нет `v8unpack`,
+неподдерживаемая версия разметки, битая разметка) — предупреждение и пустые колонки, загрузка идёт
+дальше; `ext_bin` при этом сохранён целиком.
+Эталон `Test2_Otchet` (форма `Отчет`, разметка `0/form` версии 27): `items` 10 (страница + 9
+элементов), `attributes` 4, `events` 1 (`ПередОткрытием`), `commands` 1 (`ДействияФормыОтчетСформировать`),
+`auto_command_bar.name` = `ДействияФормы`; через `v_form_elements` — 10 элементов, из них 3 с
+источником данных и 4 с подписью. Не сохраняются (колонки нет, DDL не менялся): скалярные свойства
+ordinary-формы и её заголовок — декодер заголовок читает и отдаёт в контракте (`caption`), но в БД
+он не пишется.
+Проверки V15: `validate_external_children.py` (наполнение, витрины, деградация без `v8unpack` и
+детерминированный повторный разбор, `force=True` без дублей); `validate_form_bin_decode.py`
+(секции V14 и V15: байты `ext`, счётчики jsonb против офлайн-разбора, строки витрин, round-trip
+`decode→encode` через `tools/decode_form_layout.check_round_trip`); офлайн-разбор подкаталогов —
+`python C:\TMP\_t2_probe_subdirs.py`; ручной разбор одной разметки — `python tools/decode_form_layout.py`.
 Подробности и замеры — норматив, раздел «Обычные формы».
 
 
 
 
-## 📊 Структура базы данных Configurations
+## 📊 Структура базы данных `ckb_1c_configurations` (живая схема)
 
-### Таблица `configuration` — Загруженные конфигурации/расширения
+Проверено по `information_schema` 14.10.2026; фактические счётчики сверяет `python _cmp_ddl.py`.
+Таблиц `configuration` (ед. ч.), `configuration_objects`, `object_attributes`, `register_dimensions`,
+`register_resources`, `enum_values` в схеме **нет** — прежнее описание этого раздела относилось к
+проектной схеме, которая так и не была реализована.
 
-| Поле | Тип | Описание |
-|------|-----|----------|
-| id | int | Первичный ключ |
-| name | text | Название (краткое) |
-| full_name | text | Полное название |
-| vendor | text | Разработчик |
-| version | text | Версия |
-| uuid | text | UUID конфигурации |
-| source_path | text | Путь к каталогу выгрузки |
-| dump_file | text | Имя файла ConfigDumpInfo.xml |
-| status | text | loaded / error / pending |
+### Шаг 1 — `src/ddl_external_report.sql` (генерируется `src/generate_ddl.py`)
 
-### Таблица `configuration_objects` — Объекты метаданных
+| Таблица | Ключевые колонки | Примечание |
+|---|---|---|
+| `external_report` | `id`, `uuid NOT NULL UNIQUE`, `containedobject_classid`, `containedobject_objectid`, `generatedtype_name/category/typeid/valueid`, `name`, `synonym jsonb`, `comment`, `default_form`, `auxiliary_form`, `main_data_composition_schema`, `default_settings_form`, `auxiliary_settings_form`, `default_variant_form`, `variants_storage`, `settings_storage`, `configuration_id` (узел V20; внешний ключ снят узлом V20.1, индекс сохранён), `created_at`, `updated_at` | карточка свойств отчёта: форма по умолчанию и основная схема компоновки данных — это колонки таблицы, а не вычисляемые значения. `configuration_id` — **заявленная оператором** привязка к строке заголовка конфигурации: NULL = «привязка не заявлена» (не «универсальный»), заголовок удалён после привязки = «битая ссылка, требуется перепривязка» (состояние считается JOIN'ом, снимка имени нет), из выгрузки 1С не заполняется, при `force=True` переносится (п. 20) |
+| `attributes` | `uuid UNIQUE` (глобально), `parent_uuid → external_report(uuid) ON DELETE CASCADE`, `parent_type`, `name`, `synonym jsonb`, `comment`, `type` (JSON-строка разбора `<Type>`), `description` | реквизиты объекта **и** колонки ТЧ; различие — только ссылка `tabular_sections.column_uuids` |
+| `tabular_sections` | `uuid UNIQUE` (глобально), `parent_uuid` (то же FK), `name`, `synonym jsonb`, `comment`, `column_uuids jsonb`, `internalinfo_generatedtype jsonb` (массив из 2 элементов) | |
+| `forms` | `UNIQUE (parent_uuid, uuid)` + индекс по `uuid`, `form_type` (`Managed`/`Ordinary`) | |
+| `form_ext` | `form_id → forms(id) ON DELETE CASCADE`, `UNIQUE(form_id)`, скалярные свойства содержимого формы, `auto_command_bar/events/attributes/commands/items jsonb`, `ext`, `ext_size`, `ext_truncated`, `ext_bin bytea`, `ext_format`, `ext_path` | пустой jsonb-массив ≠ NULL: признак разобранной формы `jsonb_array_length(items) > 0` |
+| `templates` | `UNIQUE (parent_uuid, uuid)`, `template_type`, `ext`, `ext_bin`, `ext_root_tag` | |
+| витрины `v_form_elements`, `v_form_events` | нормализуют ключи `Managed` (`kind`/`datapath`/`title`) и `Ordinary` (`type`/`data_source`/`captions`) через `COALESCE` | читаются и SQL-сверками, и карточкой `describe_object()` |
 
-| Поле | Тип | Описание |
-|------|-----|----------|
-| id | int | Первичный ключ |
-| type | text | Catalog, Document, Register и т.д. |
-| name | text | Имя объекта |
-| description | text | Описание |
-| configuration_id | int | FK → configuration |
+### Шаг 1b — `src/ddl_enrichment.sql` (узел V17)
 
-### Таблица `bsl_modules` — BSL-модули
+`config_aliases`, `config_snippets`, `config_snippet_dependencies`, `config_cross_references`,
+витрины `v_config_enrichment`, `v_config_alias_targets`. Описание колонок, правил генерации и
+словарь `target_type` — в `.clinerules/1c-configurations-enrichment_Rule.md`.
 
-| Поле | Тип | Описание |
-|------|-----|----------|
-| id | int | Первичный ключ |
-| module_name | text | Имя модуля |
-| file_path | text | Путь к .bsl файлу |
-| object_type | text | CommonModule, Catalog и т.д. |
-| object_name | text | Имя владельца |
-| code | text | Полный код BSL |
-| configuration_id | int | FK → configuration |
+### Шаг 2 — `create_1c_configurations_db.sql`
 
-### Таблица `enum_values` — Значения перечислений
+| Таблица | Колонки (живая схема) | Состояние |
+|---|---|---|
+| `configurations` | `id, name, synonym, comment, version, vendor_name, uuid, main_mode, usage_purpose, embedded_language, main_roles, app_module_id, session_module_id, data_proc_module_id, ext_conn_module_id, mobile_functionality, default_language, short_info, detailed_info, copyright, vendor_url, config_url, update_url, help_included, lock_mode_default, modality_mode, ext_comp_sync_mode, interface_compat_mode, compatibility_mode, created_at, updated_at` | 0 строк; вариант загрузки «конфигурация» — заглушка |
+| `config_extensions` | `id, configuration_id, name, synonym, comment, version, vendor_name, uuid, created_at, updated_at` | 0 строк; вариант «расширение» — заглушка |
+| `external_processing` | `id, configuration_id, name, synonym, comment, version, uuid, class_id, created_at, updated_at` | вариант «внешняя обработка» — заглушка |
+| `bsl_modules` | `id, configuration_id, module_name, file_path, code, object_type, object_name, report_id, processing_id, created_at, parent_uuid, parent_type, module_type, code_size, truncated` | модули `Ext/` пишутся с `parent_uuid`/`parent_type`/`module_type`; FK на `report_id` нет — очистка явная (п. 10) |
 
-| Поле | Тип | Описание |
-|------|-----|----------|
-| id | int | Первичный ключ |
-| value | text | Значение |
-| description | text | Описание |
+Индексация BSL-модулей конфигураций (`configuration_id`) не используется: вариантов 1, 2, 4 нет.
 
-### Загрузка правил и документации (КРИТИЧНО!)
+### Загрузка правил (КРИТИЧНО!)
 
 > ⚠️ **ВАЖНО:** Перед началом работы с конфигурацией **ВСЕГДА** загружайте правила через `get_load_config_rules_tool()`. Это обязательный первый шаг!
 
 | Инструмент | Параметры | Назначение |
 |-----------|-----------|------------|
-| `get_load_config_rules_tool()` | — | Загрузить LOAD_RULES_Config.md — общий обзор правил загрузки конфигураций. **Всегда вызывайте перед началом работы с конфигурациями!** |
-| `get_search_rules_tool()` | — | Загрузить SEARCH_RULES.md — правила поиска по конфигурациям |
+| `get_load_config_rules_tool()` (core-MCP) | — | Загрузить `LOAD_RULES_Config.md` — компактные правила загрузки каталогов. **Всегда вызывайте перед началом работы с конфигурациями!** |
+| `get_search_rules_tool()` (**1c-knowledge-base**, не core) | — | Правила поиска по `local_doc`; в core-MCP этого инструмента нет |
 
-### Регистрация и управление конфигурациями
+### Прочие инструменты core-MCP — удалены 14.10.2026
 
-| Инструмент | Параметры | Назначение |
-|-----------|-----------|------------|
-| `register_external_report_tool(source_path, replace?)` ⚠️ вне контракта | source_path: string; replace?: bool | Устаревший псевдоним единой точки входа: эквивалент `load_1c_catalog_tool(source_path, force=replace)`. Напрямую вызывать не нужно |
-| `delete_external_report_tool(source_path? / uuid? / report_id?, object_type?)` | достаточно одного из source_path/uuid/report_id; object_type: external_report (по умолчанию) или external_processing | Удалить внешний отчет/обработку из БД. bsl_modules чистится явно, дочерние таблицы (attributes/forms/templates/tabular_sections) — каскадно |
-| `list_configurations_tool(status?)` | status?: string | Список всех загруженных конфигураций |
-| `get_configuration_tool(config_id)` | config_id: int | Детальная информация о конфигурации |
-| `find_config_by_name_uuid_tool(name_or_uuid)` | name_or_uuid: string | Поиск по имени или UUID |
-| `update_configuration_status_tool(config_id, status, source_path?)` | config_id, status обязательные; source_path? опц. | Обновить статус и путь |
-| `delete_config_tool(config_id, force?)` | config_id: int, force?: boolean | Hard-delete конфигурации |
+Инструменты с `config_id` (`list_configurations_tool`, `get_configuration_tool`,
+`find_config_by_name_uuid_tool`, `update_configuration_status_tool`, `delete_config_tool`,
+`search_config_objects_tool`, `get_object_structure_tool`, `list_config_objects_tool`,
+`count_objects_by_config_tool`, `delete_objects_by_config_tool`, `list_bsl_modules_tool`,
+`get_bsl_module_code_tool`, `search_bsl_code_tool`, `get_enum_values_tool`,
+`read_config_file_tool`, `batch_index_from_dump_tool`) и псевдонимы точки входа
+(`register_external_report_tool`, `analyze_config_load_tool`) удалены: они обращались к базе
+`configurations`, которой на сервере нет (п. 8), и к отсутствующим таблицам схемы
+(`configuration`, `configuration_objects`, `object_attributes`, `enum_values`).
 
-### Поиск и работа с объектами
-
-| Инструмент | Параметры | Назначение |
-|-----------|-----------|------------|
-| `search_config_objects_tool(query, config_id?)` | query: string, config_id?: int | Поиск по имени/описанию объектов конфигурации |
-| `get_object_structure_tool(config_id, object_name)` | config_id: int, object_name: string | Получить структуру объекта (реквизиты, формы) |
-| `list_config_objects_tool(config_id, object_type?)` | config_id: int, object_type?: string | Список объектов по типу |
-| `count_objects_by_config_tool()` | — | ⚠️ Не работает: вызывает `count_objects_by_config()` без обязательного `config_id` (см. «Известные недостатки» п.7) |
-| `delete_objects_by_config_tool(config_id)` | config_id: int | Удалить все объекты конфигурации |
-
-### Работа с BSL-кодом
-
-| Инструмент | Параметры | Назначение |
-|-----------|-----------|------------|
-| `list_bsl_modules_tool(config_id)` | config_id: int | Список BSL-модулей |
-| `get_bsl_module_code_tool(config_id, module_name?)` | config_id: int, module_name?: string | Код модуля(ей) |
-| `search_bsl_code_tool(query, config_id?)` | query: string, config_id?: int | Поиск по BSL-коду |
-
-### Работа с метаданными
-
-| Инструмент | Параметры | Назначение |
-|-----------|-----------|------------|
-| `get_enum_values_tool(config_id, enum_name?)` | config_id: int, enum_name?: string | Значения перечисления |
-| `read_config_file_tool(config_id, file_path?)` | config_id: int, file_path?: string | Прочитать XML/JSON из каталога |
-
-### Индексация и анализ
-
-| Инструмент | Параметры | Назначение |
-|-----------|-----------|------------|
-| `batch_index_from_dump_tool(config_id, type_filter?)` | config_id: int, type_filter?: string | Пакетная индексация из ConfigDumpInfo.xml |
-| `analyze_config_load_tool(source_path)` ⚠️ вне контракта | source_path: string | Только диагностика: показывает, какой вариант выберет точка входа. Перед загрузкой вызывать не нужно — анализ выполняется внутри `load_1c_catalog_tool` |
+| Нужен был инструмент | Чем пользоваться |
+|---|---|
+| `load_1c_catalog_tool` вместо `register_external_report_tool` | единая точка входа, анализ варианта внутри неё |
+| диагностика выбора варианта (`analyze_config_load_tool`) | `load_1c_catalog_tool` вернёт `❌` с одной причиной; диагностика вне контракта не нужна |
+| список и карточка объекта (`list_configurations_tool`, `get_configuration_tool`, `get_object_structure_tool`) | `config_enrichment_stats_tool(uuid=…, card=True)` из enrichment-MCP; SQL `check_external_report_inventory.sql` |
+| поиск объектов и BSL-кода (`search_config_objects_tool`, `search_bsl_code_tool`) | `search_config_aliases_tool`, `search_config_snippets_tool`, `search_docs_tool` (documentation) |
+| чтение XML/JSON, перечислений, индексация из дампа | не реализовано: варианты 1–2, 4 (конфигурация, расширение, внешняя обработка) — заглушки |
 
 ### Определение варианта загрузки (правило R1)
 
@@ -340,7 +368,8 @@ delete_external_report_tool(source_path=...)  # или uuid=..., или report_i
 # Шаг 4: проверка состояния БД
 # python validate_load_flow.py [--with-load]   # счётчики детей: attributes, tabular_sections,
 #                                              # forms, form_ext, templates, bsl_modules
-# python validate_external_children.py         # содержимое V12/V13, каскад, откат, сироты
+# python validate_external_children.py         # содержимое V12/V13/V14/V15, каскад, откат, сироты,
+#                                              # деградация без v8unpack и детерминированный повтор
 # python _v13_mcp_layer.py                     # тонкие обёртки MCP-инструментов без stdio:
 #                                              # load → duplicate → force → delete (uuid/id/path)
 # python _cmp_ddl.py                           # полная сверка: шаги 1+2 установки против живой
@@ -351,16 +380,24 @@ delete_external_report_tool(source_path=...)  # или uuid=..., или report_i
 # (логи: [Console]::OutputEncoding=[System.Text.Encoding]::UTF8 + $env:PYTHONIOENCODING='utf-8')
 # SQL-сверки (обязательно с -v ON_ERROR_STOP=1, иначе psql вернёт 0 при ошибке в середине):
 #   check_external_report_fill.sql      # наполнение, секции 1-19 (16 = ordinary ext заполнен [V14],
-#                                       # 17 = инварианты V14, 18 = витрины, 19 = скаляры V14.1)
+#                                       # 17 = инварианты V14 + пустых items у Ordinary = 0 и
+#                                       #   заполненные attributes/events/commands/auto_command_bar = 1 [V15],
+#                                       # 18 = витрины: ordinary 10 элементов / 10 типов / 3 источника /
+#                                       #   4 подписи / 1 событие [V15], 19 = скаляры V14.1)
 #   check_external_report_search.sql    # поиск, варианты «ПОИСК 1-16» (разделы 10-31 файла):
 #                                       # 12-16 = элементы формы, подписи, источники данных,
-#                                       # имена обработчиков событий, FTS по составу элементов
+#                                       # имена обработчиков событий, FTS по составу элементов —
+#                                       # после V15 работают и для ordinary-форм (через витрины)
 #   check_external_report_inventory.sql # инвентарь «что видно из БД», разделы 0-14
-#                                       # (9c-9e = типы реквизитов и стандартные реквизиты ТЧ,
+#                                       # (7 = состояние ordinary-формы: ожидаем OK + счётчики V15,
+#                                       # 9c-9e = типы реквизитов и стандартные реквизиты ТЧ,
+#                                       # 10-10e = витрины по обоим типам форм,
+#                                       # 11 = слепые зоны: «форм с незаполненным составом = 0» [V15],
 #                                       # 12 = заполненность второстепенных колонок с пояснением,
 #                                       # 13 = атрибуты/команды формы, 14 = типы макетов);
 #                                       # пустые jsonb-массивы считаются пустыми
 #                                       # (jsonb_typeof/jsonb_array_length, а не IS NOT NULL)
+# python tools/decode_form_layout.py    # офлайн-разбор одной разметки 0/form + round-trip-проверка
 # psql: SELECT e.id, e.uuid,
 #       (SELECT COUNT(*) FROM attributes a WHERE a.parent_uuid = e.uuid),
 #       (SELECT COUNT(*) FROM tabular_sections t WHERE t.parent_uuid = e.uuid),
@@ -371,9 +408,38 @@ delete_external_report_tool(source_path=...)  # или uuid=..., или report_i
 #       FROM external_report e ORDER BY e.id;
 ```
 
-Инструменты вне контракта (`list_configurations_tool`, `search_config_objects_tool`,
-`batch_index_from_dump_tool` и др.) для загрузки не используются: они обращаются к БД
-`configurations`, которой на сервере нет, и к отсутствующим таблицам схемы.
+Инструменты вне контракта удалены 14.10.2026 (п. 11): они обращались к БД `configurations`,
+которой на сервере нет, и к отсутствующим таблицам схемы. Для анализа сохранённого содержимого
+служат enrichment-MCP и SQL-сверки; состав инструментов сторожит
+`python tools/check_mcp_tool_wiring.py` (встроен в `validate_project.py`).
+
+Проверки обогащения (узел V17) — тем же порядком:
+
+```text
+# python validate_enrichment_flow.py            # 122 проверок: загрузка → генерация →
+#                                               # идемпотентность → карточка объекта (состав,
+#                                               # счётчики против витрин, усечение при limit) →
+#                                               # алиасы и
+#                                               # resolve → сниппеты и зависимости → узел A
+#                                               # (запрос набора данных макета) → узел B (состав
+#                                               # макета-СКД из templates.ext) → привязка к
+#                                               # конфигурации (V20.1: отказ на битом id →
+#                                               # привязка → битая ссылка после удаления
+#                                               # заголовка → снятие) → links local_doc
+#                                               # → удаление и сироты; в конце восстанавливает
+#                                               # эталонную пару
+# python tools/check_v20_config_link.py         # привязка к конфигурации: схема без FK,
+#                                               # перенос при force=True, три состояния ссылки
+# python tools/check_mcp_tool_wiring.py         # контракт инструментов серверов по AST
+#                                               # (core 3, enrichment 18, export 1)
+# python validate_project.py                    # состояние проекта: живые модули, контракт,
+#                                               # запрет кода к БД configurations
+# SQL: check_external_report_search.sql  # варианты 17-18 — алиасы и поиск по сниппетам
+#      check_external_report_inventory.sql # раздел 15 — заполненность обогащения через
+#                                         # витрину v_config_enrichment; раздел 15f —
+#                                         # состояния привязок, битые ссылки, обратный
+#                                         # перечень, наличие индекса и отсутствие FK
+```
 
 ## ⚠️ Критические правила и ограничения
 
@@ -383,7 +449,19 @@ delete_external_report_tool(source_path=...)  # или uuid=..., или report_i
 2. **Загружайте каталог только через `load_1c_catalog_tool(source_path, force=False)`** —
    отдельный анализ перед загрузкой не нужен и не выполняется.
 3. Если `uuid` в XML пустой — это **ошибка загрузки** (R3), а не попытка вставки.
-4. Дубликат по UUID перезаписывается **только** явным `force=True`.
+4. Дубликат по UUID перезаписывается **только** явным `force=True` — и **только после вопроса
+   оператору**. Исход `⚠️ уже загружено` — это точка остановки диалога, а не повод выбирать
+   `force=True` самостоятельно: обычная просьба «загрузи конфигурацию» не означает согласия на
+   перезапись (оператор не знает о дубликате). Самостоятельное `force=True` допустимо лишь при
+   явной команде «замени конфигурацию» / «перезагрузи» — она и есть подтверждение.
+5. **За содержимым выгруженного объекта — только в MCP-инструменты.** Прямые `psql.exe`,
+   `information_schema`, чтение файлов выгрузки и иные обращения мимо MCP в ответе оператору
+   не участвуют: нужные данные отдают `config_enrichment_stats_tool(card=True)`,
+   `list_config_aliases_tool(target_type=…)`, `list_config_snippets_tool`, `get_config_snippet_tool`.
+   Если информации ни одним инструментом контракта не получить — это дефект контракта: нужно
+   сказать оператору и предложить инструмент, а не ходить в обход. Прямой SQL остаётся только
+   в скриптах-валидаторах и SQL-сверках проекта (`check_external_report_*.sql`, `_cmp_ddl.py`),
+   которые сами ничего не отвечают оператору.
 
 ### Известные проблемы и ограничения
 
@@ -425,20 +503,24 @@ delete_external_report_tool(source_path=...)  # или uuid=..., или report_i
 
 ---
 
-## 🐛 Известные недостатки (требуют исправления в коде)
+## 🐛 Известные недостатки (история и текущий статус)
+
+> Формулировки проблем сохранены намеренно — это журнал решений: видно, что именно ломалось и чем
+> это лечится. Статусы актуальны на 14.10.2026; открытые позиции помечены ⚠️, закрытые — ✅.
+> Проверки из раздела «Как проверять реализацию» выше обязателны после любой правки.
 
 ### 1. Ошибка `Failed to get object ID from INSERT result: []` при пустых ChildObjects
 **Файл:** `src/external_report_loader.py` (функция `register_external_report()`)  
 **Проблема:** При пустом `<ChildObjects/>` функция `_run_psql()` возвращает пустой список, и код не может извлечь ID через `[0]['result']`  
-**Статус:** ✅ Исправлено — добавлены fallback по UUID и по `MAX(id)`:
-```python
-result = _run_psql(sql)  # INSERT ... RETURNING id
-if object_id == 0 or object_id is None:
-    fb = _run_psql(f"SELECT id FROM external_report WHERE uuid = '{report_uuid}'::uuid")
-    # ...если пусто:
-    mx = _run_psql("SELECT MAX(id) FROM external_report")
-```
-**Проверка:** `register_external_report(r'C:\1C_LLM\LoadDoc\Test3_Otchet_Null')` → `{'success': True, 'id': 12, ...}`, запись в БД с корректной кириллицей
+**Статус:** ✅ **Исправлено дважды; окончательное решение — узел V9 (12.10.2026).** Сначала были
+добавлены fallback-чтения (`SELECT по uuid`, затем `SELECT MAX(id)`) — они работали, но маскировали
+причину. Сейчас ID возвращается тем же оператором вставки: `TableRowWriter.insert()` выполняет
+`INSERT … RETURNING id` через psycopg2 и читает `cursor.fetchone()` (см. п. 9, узел V9). Фолбэков в
+коде больше нет — `MAX(id)` и чтение ID по uuid в `src/` не встречаются; `_run_psql()` остался
+только для удалений и счётчиков в `delete_external_object()`.
+**Проверка:** `Test3_Otchet_Null` (пустой `ChildObjects`) загружается успешно — `validate_load_flow.py`,
+`_v13_mcp_layer.py`, `validate_external_children.py`; эталонные `Test1_Otchet`, `Test2_Otchet`,
+`Test4_Otchet_Regress` — те же прогоны.
 
 ### 2. Не отображается список MCP-инструментов для загрузки правил
 **Проблема:** В оригинальной документации отсутствовали инструменты `get_load_config_rules_tool()` и `get_search_rules_tool()`  
@@ -455,6 +537,34 @@ if object_id == 0 or object_id is None:
 **Проверка:** для `Test3_Otchet_Null` в БД корректно заполнены `synonym = {"ru": "Внешний отчет пустой"}`, `containedobject_classid/objectid`, `generatedtype_name/category/typeid`
 
 ### 5. Изменения в `src/*.py` не применяются к запущенному MCP-серверу
+
+**Обновление 13.10.2026 (узлы V14+V15): сначала процесс был старый, после перезапуска — живой прогон
+пройден.** До перезапуска `load_1c_catalog_tool(Test2_Otchet, force=True)` вернул карточку без строки
+состава формы и со старыми предупреждениями V13 («свойства формы не разобраны», «нет модуля
+Forms/Отчет/Ext/Form/Module.bsl»), а в БД у созданной записи `form_ext.items` оказался пустым
+массивом и `form_ext.ext` — NULL: процесс сервера был загружен до правок V14/V15. Запись удалена
+`delete_external_report_tool(report_id=232)`, эталонная пара восстановлена офлайн
+(`tools/restore_reference_pair.py`, текущий код `src/`). Офлайн-слой (`validate_external_children.py`,
+`_v13_mcp_layer.py`, `validate_form_bin_decode.py`, SQL-сверки) пройден с кодом возврата 0.
+
+**После перезапуска сервера оператором (13.10.2026) живой прогон через MCP подтверждён:**
+`get_load_config_rules_tool()` вернул правила узла V15 (признак нового кода);
+`load_1c_catalog_tool(Test2_Otchet)` → `⚠️ уже загружено` (карточка ID=234 со счётчиками детей);
+`load_1c_catalog_tool(Test2_Otchet, force=True)` → `♻️ перезагружено`, новая запись **ID=235**,
+«Удалена предыдущая запись ID=234 (BSL-модулей удалено: 1)» и три строки содержимого: состав формы
+«разложен из 0/form … (версия разметки 27): items 10, attributes 4, events 1, commands 1», модуль
+«извлечён из 0/module … (V14): 7639 символов», предупреждение о неразбираемых скалярных свойствах
+ordinary-формы. БД после живой загрузки: `items` 10, `attributes` 4, `events` 1, `commands` 1,
+`auto_command_bar.name=ДействияФормы`, `length(ext)=7591`, `octet_length(ext_bin)=24549`;
+`v_form_elements` — Ordinary 10 (10 с типом, 3 с источником данных, 4 с подписью), `v_form_events` —
+Ordinary 1, сирот 0. Негативные исходы тоже живые: `Test3_Otchet_Null` → `✅ загружено` (ID=236,
+нули по всем счётчикам) и удаление `delete_external_report_tool(source_path=…)` → «Дочерних строк по
+parent_uuid не было»; `BGU2` → `❌ сценарий «конфигурация» не реализован`; несуществующий путь →
+`❌ Каталог не найден`. **Эталонная пара сейчас: `Test1_Otchet` → `id=271`, `Test2_Otchet` → `id=272`** (после
+прогонов `validate_external_children.py`, `validate_enrichment_flow.py` и восстановления
+`tools/restore_reference_pair.py` + генерации обогащения 14.10.2026; id меняются при каждом
+очистительном регрессе, как и порядок внутри пары — актуальные берутся запросом
+`SELECT id, name FROM external_report ORDER BY id`; история: 233/235 → 248/249 → 259/260 → 261/262 → 271/272).
 
 **Обновление 12.10.2026:** правки контракта (`load_1c_catalog_tool`, `src/config_load_router.py`,
 переработка `src/external_report_loader.py`) внесены в код и проверены запуском
@@ -526,16 +636,16 @@ ID=131 (BSL-модулей удалено: 1)»); `BGU2`/`TSD_R`/`TSD_0`/нес�
 
 **Проверка (2026-10-11, каталог `C:\1C_LLM\LoadDoc\Test3_Otchet_Null`, UUID `6aabf7cf-2cd0-451e-8ee1-d4f12e38e612`):** первый вызов → `already_exists` (ID=12); `replace=True` → старая запись удалена, создана новая (ID=16); повтор без `replace` → снова `already_exists` (дублей нет); `delete_external_object(uuid=…)` → запись удалена; повторная загрузка → успех (ID=17). Итог: ровно 1 строка на UUID, `bsl_modules` по объекту — 0
 
-### 7. `count_objects_by_config_tool()` падает с TypeError
+### 7. `count_objects_by_config_tool()` падал с TypeError
 **Файл:** `server_configurations_core.py`  
 **Проблема:** инструмент объявлен без параметров и вызывает `_count_objects_by_config()`, тогда как `config_tools.count_objects_by_config(config_id)` требует обязательный `config_id` → `TypeError: count_objects_by_config() missing 1 required positional argument`  
-**Статус:** ⚠️ Не исправлено — инструмент непригоден; нужно либо добавить параметр `config_id`, либо переписать SQL на группировку по конфигурациям (как описано в назначении инструмента)
+**Статус:** ✅ **Закрыто 14.10.2026 устранением причины, а не частной правкой:** инструмент вместе с 17 прочими вне контракта удалён из сервера, `src/config_tools.py` удалён как файл (он обращался к базе `configurations`, которой на сервере нет). Группировка «что загружено и сколько детей» делается SQL-запросом из норматива (раздел «Проверка состояния БД») или витриной `v_config_enrichment`. Состав инструментов сервера сторожит `tools/check_mcp_tool_wiring.py`.
 
 ### 8. Обращение к несуществующей БД `configurations`
-**Файлы:** `src/config_tools.py` (`_run_config_psql(db="configurations")`), `src/external_processor_loader.py` (то же)  
-**Проблема:** на сервере PostgreSQL есть только `ckb_1c_configurations` и `local_doc`; запросы инструментов core-MCP завершаются ошибкой `FATAL: database "configurations" does not exist`. Кроме того имена таблиц в запросах устарели: в БД таблица называется `configurations` (мн. ч.), а не `configuration`; таблиц `configuration_objects`, `object_attributes` в схеме нет  
-**Затронутые инструменты:** `list_configurations_tool` (падает с «string indices must be integers, not 'str'» — не проверяется dict с ошибкой), `find_config_by_name_uuid_tool`, `get_configuration_tool`, `search_config_objects_tool`, `list_config_objects_tool`, `get_object_structure_tool`, `list_bsl_modules_tool`, `get_bsl_module_code_tool`  
-**Статус:** ⚠️ Не исправлено — из-за этого верификация загрузки внешних отчётов средствами core-MCP невозможна; внешние отчёты вообще не регистрируются в таблице конфигураций, они живут только в `external_report`/`external_processing`
+**Файлы (было):** `src/config_tools.py` (`_run_config_psql(db="configurations")`), `src/external_processor_loader.py` (то же)
+**Проблема:** на сервере PostgreSQL есть только `ckb_1c_configurations` и `local_doc`; запросы инструментов core-MCP завершались ошибкой `FATAL: database "configurations" does not exist`. Кроме того имена таблиц в запросах устарели: в БД таблица называется `configurations` (мн. ч.), а не `configuration`; таблиц `configuration_objects`, `object_attributes` в схеме нет
+**Затронутые инструменты:** `list_configurations_tool` (падал с «string indices must be integers, not 'str'» — не проверялся dict с ошибкой), `find_config_by_name_uuid_tool`, `get_configuration_tool`, `search_config_objects_tool`, `list_config_objects_tool`, `get_object_structure_tool`, `list_bsl_modules_tool`, `get_bsl_module_code_tool`
+**Статус:** ✅ **Закрыто 14.10.2026:** затронутые инструменты удалены из core-MCP (контракт — 3 инструмента), `src/config_tools.py` и `src/external_processor_loader.py` удалены, enrichment-код переведён на `src/external_db.py` (`ckb_1c_configurations`). Регрессия ловится `validate_project.py`: маркеры `dbname='configurations'` / `_run_config_psql` в коде MCP-серверов и `src/` запрещены. Внешние отчёты и так живут только в `external_report`/`external_processing`; таблица `configurations` пуста и для загрузки не используется.
 
 ### 9. Дочерние данные внешнего отчёта писались в несуществующие таблицы
 
@@ -657,36 +767,85 @@ ID=131 (BSL-модулей удалено: 1)»); `BGU2`/`TSD_R`/`TSD_0`/нес�
   или `E'\r?\n'`, а не `chr(10)`.
 **Проверка (13.10.2026):** `validate_form_bin_decode.py` с `--file …\Forms\Отчет\Ext\Form.bin
 --uuid d364e104-e1ef-49e7-8163-d2ab726aaa96 --form Отчет` — код возврата 0, секция «ПРОВЕРКА V14»
-(байтовое совпадение `ext` с модулем контейнера после нормализации + инварианты). Живой
-`load_1c_catalog_tool(Test2_Otchet)` после перезапуска сервера: `0/0/1/1/1/1` и новый текст
-предупреждения. SQL-подтверждение — разделы 15–18 `check_external_report_fill.sql`
+(байтовое совпадение `ext` с модулем контейнера после нормализации + инварианты). Поведение загрузчика
+подтверждено офлайн-слоем: `_v13_mcp_layer.py` (те же обёртки `load_1c_catalog_tool`, карточка
+`0/0/1/1/1/1` с текстом предупреждения V14) и `tools/restore_reference_pair.py`. **Живой вызов через
+MCP-сервер подтверждён после перезапуска `python server_configurations_core.py` (13.10.2026, см. п. 5):**
+карточка `force=True` содержит строку «Модуль формы … извлечён из 0/module … (V14): 7639 символов»,
+в БД `form_ext.ext` заполнен (7 591 символ после нормализации), `ext_size = octet_length(ext_bin)`.
+SQL-подтверждение — разделы 15–18 `check_external_report_fill.sql`
 (у `Ordinary` непустой `ext`, объявления процедур, `Экспорт` есть, витрины); раздел 19 относится
 к V14.1 (скалярные свойства содержимого формы) и ordinary-форму только перечисляет.
 
-### 16. Элементы обычной формы не разложены: `form_ext.items` у `Ordinary` — пустой массив
+### 16. Элементы обычной формы не раскладывались: `form_ext.items` у `Ordinary` оставался пустым массивом
 
-**Файл:** `src/external_subdir_parser.py` (декодера разметки ещё нет)
+**Файлы (было):** `src/external_subdir_parser.py` (декодера разметки не было)
 **Проблема:** модуль обычной формы извлекается (п. 15, V14), а разметка `0/form` — нет:
-`form_ext.items`/`events`/`attributes`/`commands` остаются `[]`, `auto_command_bar` — `{}`.
-Из БД не видно имён и типов элементов, подписей, привязок к источникам данных и обработчиков
-событий обычной формы. Проверено 13.10.2026: раздел 17 `check_external_report_fill.sql` —
-`ordinary-форм с пустыми items = 1`; раздел 18 — `v_form_elements` даёт строки только по
+`form_ext.items`/`events`/`attributes`/`commands` оставались `[]`, `auto_command_bar` — `{}`.
+Из БД не было видно имён и типов элементов, подписей, привязок к источникам данных и обработчиков
+событий обычной формы. Проверено 13.10.2026 до исправления: раздел 17 `check_external_report_fill.sql` —
+`ordinary-форм с пустыми items = 1`; раздел 18 — `v_form_elements` давал строки только по
 управляемой форме. При этом `0/form` (10 623 байта) восстанавливается из `form_ext.ext_bin`
 побайтово (пробник `C:\TMP\v14_probe.py`: decode→encode без правок = исходник; точечная правка
 подписи = 1 изменённая строка и валидный `Form.bin`).
-**Статус:** ⚠️ Не исправлено — отложено как **узел V15** (норматив, раздел 9 п. 6). План: новый
-`src/external_form_decoder.py` (обёртка над `v8unpack.MetaDataObject.Form.FormElements27`,
-контракт `tree/props/events/commands/attributes/captions/warnings`), вызов из
-`src/external_subdir_parser.py` в той же транзакции, заполнение **тех же** колонок `form_ext`,
-что и для `Managed` (новые колонки не нужны). Полный `elem.json` (63 КБ против 10.6 КБ разметки)
-в БД не писать: источник истины — `ext_bin`. Обязательна деградация без v8unpack и при
-неподдерживаемой версии разметки. Обратный ход — узел V16 (сборка `Form.bin`).
-**Что учитывать при анализе уже сейчас:**
+**Статус:** ✅ **Исправлено 13.10.2026 (узел V15).**
+- новый `src/external_form_decoder.py::decode_layout(layout_bytes, form_name, form_uuid)` —
+  обёртка над `v8unpack.MetaDataObject.Form.FormElements26/27` (класс выбирается по версии из
+  первого элемента `0/form`; у нашей выгрузки — `27`), контракт: `success/reason`, `columns`
+  (`items`, `attributes`, `events`, `commands`, `auto_command_bar`), `caption` (заголовок формы,
+  в БД не пишется), `layout_version`, `counts`, `warnings`. Исключений не бросает: любой сбой →
+  `success=False` с причиной;
+- вызов из `src/external_subdir_parser.py::_apply_container_form_layout` в той же транзакции
+  загрузки; контейнер `Form.bin` распакуется **один раз на форму** (`_container_files`) и
+  переиспользуется для `0/module` (V14, `_store_container_form_module` принимает уже распакованный
+  контейнер) и для `0/form` (V15);
+- заполняются **те же** колонки `form_ext`, что и у `Managed` (новые колонки не добавлены, DDL не
+  менялся): `items` — `path`/`name`/`type`/`page` + `data_source`/`captions` при наличии,
+  `attributes` — источники данных формы, `events` — события с представлениями, `commands` +
+  `auto_command_bar` — панель действий и её команды;
+- полный `elem.json` v8unpack (63 КБ против 10.6 КБ разметки) в БД не пишется: источник истины —
+  `form_ext.ext_bin`, из которого `0/form` воспроизводится побайтово;
+- деградация обязательна: нет `v8unpack` / неподдерживаемая версия разметки / битая разметка →
+  предупреждение в карточке, `ext_bin` сохранён, колонки состава пустые, загрузка продолжается.
+**Проверка (13.10.2026):**
+`validate_external_children.py` — код возврата 0: «состав ordinary-формы разложен из 0/form
+(items 10, attributes 4, events 1, commands 1)», «элементы доступны через `v_form_elements` (10)»,
+«привязки к источникам данных (3)», «подпись элемента (1)», «событие видно через `v_form_events` (1)»,
+«без `v8unpack` загрузка продолжается: `ext_bin` сохранён, состав пустой, предупреждение с причиной»,
+«после восстановления `v8unpack` тот же каталог разложен полностью (детерминированность)»,
+`force=True` — состав разложен заново без дублей `form_ext`;
+`validate_form_bin_decode.py --file …\Forms\Отчет\Ext\Form.bin --uuid d364e104-… --form Отчет` —
+код возврата 0: байтовое совпадение `ext` (V14), офлайн-разбор `0/form` = счётчики из БД
+(items/attributes/events/commands 10/4/1/1, `auto_command_bar.name=ДействияФормы`), `v_form_elements`
+отдаёт те же 10 элементов (типы `CommandPanel/Field/Label/ListField/Page/TableField`, источники
+`ДатаОтчета/Организация/ПолеСписка1`, подписи `Учреждение/Дата отчета/Поле списка1:/Выберите счета:`),
+round-trip `0/form` побайтово (10 623 байта) — `tools/decode_form_layout.check_round_trip`;
+живая проверка через MCP-сервер **подтверждена после перезапуска сервера (13.10.2026, см. п. 5)**:
+`load_1c_catalog_tool(Test2_Otchet, force=True)` вернул `♻️ перезагружено` (новая запись **ID=235**) со
+строкой «Состав формы 'Отчет' разложен из 0/form контейнера Form.bin (версия разметки 27): items 10,
+attributes 4, events 1, commands 1 — колонки form_ext заполнены так же, как для управляемой формы»;
+в БД у этой записи `items` 10, `attributes` 4, `events` 1, `commands` 1,
+`auto_command_bar.name=ДействияФормы`, `ext` заполнен. До перезапуска тот же вызов давал пустой
+`items` и `ext IS NULL` (процесс исполнял код до правок) — запись тогда была удалена, эталонная пара
+восстановлена `tools/restore_reference_pair.py`: `Test1_Otchet` → `id=233`, `Test2_Otchet` → `id=235`;
+SQL-подтверждение — `check_external_report_fill.sql` разделы 17–18 (пустых `items` = 0;
+заполненных `attributes/events/commands/auto_command_bar` = 1; через витрины 10/10/3/4 и 1 событие),
+`check_external_report_search.sql` разделы 27–31 (ПОИСК 12–16 нашли ordinary-элементы, подписи,
+источники данных и событие), `check_external_report_inventory.sql` разделы 7, 10–13 (состояние
+`OK`, «форм с незаполненным составом = 0», `v_form_elements` 16 строк: 6 Managed + 10 Ordinary).
+**За рамками узла V15:** скалярные свойства ordinary-формы и её заголовок в БД не сохраняются
+(для ordinary нет `Form.xml`, колонки под эти значения нет); обратная сборка `Form.bin` — узел V16.
+**Что учитывать при анализе:**
 - пустой jsonb-массив ≠ NULL: признак разобранной формы — `jsonb_array_length(items) > 0`,
-  а не `items IS NOT NULL`;
-- витрины `v_form_elements`/`v_form_events` (`migrate_v14_form_analysis_views.sql`) нормализуют
-  ключи Managed (`kind`/`datapath`/`title`) и будущие Ordinary (`type`/`data_source`/`captions`)
-  через `COALESCE`; у Managed иерархия элементов парсером не сохраняется (нет `path`/`page`);
+  а не `items IS NOT NULL`; `jsonb_array_length` падает на не-массиве, тип проверять через
+  `jsonb_typeof` и `CASE`, а не через `OR`;
+- витрины `v_form_elements`/`v_form_events` (`migrate_v14_form_analysis_views.sql`, включены в шаг 1
+  установки) нормализуют ключи Managed (`kind`/`datapath`/`title`) и Ordinary
+  (`type`/`data_source`/`captions`) через `COALESCE`; у Managed иерархия элементов парсером не
+  сохраняется (нет `path`/`page`), у Ordinary она есть;
+- у ordinary-элементов `element_kind` и `element_type` заполняются одинаково (типы из
+  `FormItemTypes`), `handler` у событий ordinary-разметкой не задаётся — искать по имени события;
+  типы источников данных формы (`attributes`) ordinary-разметка не отдаёт;
 - FTS по `simple` не ищет по хвосту и середине идентификатора 1С (он — одна лексема): подстрока
   через `position()`, хвост/середина требуют `pg_trgm` (в кластере доступен, не установлен) или
   алиасов обогащения (см. `docs/config-scenarios/CONFIGURATIONS_ENRICHMENT_PLAN.md`);
@@ -762,8 +921,9 @@ ID=131 (BSL-модулей удалено: 1)»); `BGU2`/`TSD_R`/`TSD_0`/нес�
 `check_external_report_fill.sql` раздел 19 — «управляемых форм с `Form.xml` и пустым
 `report_form_type`» = 0 и «с заполненными `report_result` и `report_form_type`» = 1 после загрузки
 `Test1_Otchet`; офлайн-разбор — `python C:\TMP\_t1_probe_parser.py` (значения совпадают с файлом).
-У `Test2_Otchet` (`ext_format='bin'`) поведение не изменилось: свойства ordinary-формы не
-разбираются — это узел V15 (п. 16).
+У `Test2_Otchet` (`ext_format='bin'`) поведение не изменилось: скалярные свойства ordinary-формы не
+разбираются и после узла V15 — для ordinary нет `Form.xml`, а колонки под значения из `0/form` не
+добавлялись (состав элементов при этом разложен, см. п. 16).
 
 
 ### 10. «Сиротские» BSL-модули в БД
@@ -779,17 +939,25 @@ ID=131 (BSL-модулей удалено: 1)»); `BGU2`/`TSD_R`/`TSD_0`/нес�
 поэтому новых сирот при перезагрузке/удалении не появляется (подтверждено: `♻️ перезагружено`
 удалил 2 модуля старой записи). FK на `bsl_modules.report_id` по-прежнему отсутствует.
 **Проблема:** в `bsl_modules` есть строки с `report_id`, ссылающимся на уже удалённые внешние отчёты (FK на `bsl_modules.report_id` отсутствует, каскада нет)  
-**Статус:** ⚠️ Не исправлено — при удалении объекта `delete_external_object()` чистит `bsl_modules` явно; уже накопившиеся сироты требуют отдельной одноразовой чистки
+**Статус:** ⚠️ Схема не меняется осознанно: FK на `report_id` нет, очистка — явная (`delete_external_object()` удаляет модули и по `report_id`, и по `parent_uuid`). Одноразовая чистка накопившихся сирот выполнена 12.10.2026; по состоянию на 14.10.2026 сирот 0 (`bsl_modules`, `config_aliases`, `form_ext` — проверки в `validate_enrichment_flow.py`, `validate_external_children.py` и разделе 10 норматива). Появление FK — отдельная задача: она требует миграции и правки бутстрапа, иначе `python _cmp_ddl.py` покажет расхождение (п. 17).
 
-### 11. Инструменты вне контракта всё ещё зарегистрированы в MCP-сервере
+### 11. Инструменты вне контракта были зарегистрированы в MCP-сервере
 
 **Файл:** `server_configurations_core.py`
-**Проблема:** сервер выставляет 21 инструмент, из них по контракту — 3. Остальные 18 помечены в коде
-комментариями «ВНЕ КОНТРАКТА»/«УСТАРЕЛ», но остаются видимыми AI-ассистенту и могут быть выбраны
+**Проблема:** сервер выставлял 21 инструмент, из них по контракту — 3. Остальные 18 помечены в коде
+комментариями «ВНЕ КОНТРАКТА»/«УСТАРЕЛ», но оставались видимыми AI-ассистенту и могли быть выбраны
 ошибочно. Большинство из них неработоспособно (обращение к БД `configurations`, которой нет — см. п. 8).
-**Статус:** ⚠️ Не исправлено — требуется удалить или перенести инструменты, обновить
-`validate_project.py`, если он на них ссылается, и обновить разделы «Структура БД» этого файла
-(`configuration`, `configuration_objects`, `object_attributes`, `enum_values` в схеме отсутствуют).
+**Статус:** ✅ **Исправлено 14.10.2026.** 18 внеконтрактных инструментов удалены из
+`server_configurations_core.py` (вместе с 5 внеконтрактными инструментами
+`server_configurations_export.py`), мёртвые `src/config_*.py` удалены, генератор
+`generate_servers.py` удалён (он не давал импортов `src/` и терял инструменты контракта —
+оба сервера теперь ведутся вручную). Состав инструментов проверяется статически:
+`tools/check_mcp_tool_wiring.py` с `EXPECTED_TOOLS` (core 3, enrichment 18, export 1) встроен в
+`validate_project.py` — лишний или исчезнувший инструмент даёт код возврата 1.
+Разделы «Структура базы данных» этого файла приведены к живой схеме: таблиц `configuration`,
+`configuration_objects`, `object_attributes`, `enum_values` в `ckb_1c_configurations` нет
+(есть пустая `configurations` и `config_extensions` — шаг 2 установки, для загрузки внешних
+отчётов не используются); фактические счётчики схемы сверяет `python _cmp_ddl.py`.
 
 ### 12. Реализован только вариант 3 «внешний отчёт»
 
@@ -827,3 +995,178 @@ ID=131 (BSL-модулей удалено: 1)»); `BGU2`/`TSD_R`/`TSD_0`/нес�
 `UNIQUE (parent_uuid, uuid)`, удалить дочерние данные явным `DELETE … WHERE parent_uuid = …`
 (каскад по FK при этом недоступен). Изменение схемы — отдельная задача, требующая миграции и
 обновления `src/generate_ddl.py` (после неё — прогон `python _cmp_ddl.py`).
+
+### 19. Перезагрузка `force=True` необратима: предыдущее состояние объекта нигде не сохраняется
+**Файлы:** `src/external_report_loader.py` (блок R4/R5: `delete_external_object()` → повторная
+вставка), `src/config_load_router.py` (карточка `♻️ перезагружено`)
+**Проблема:** при `force=True` старая запись и все её дочерние строки удаляются, новая пишется
+заново; колонки `version` нет, сравнение содержимого не выполняется (в коде прямо: «сравнение
+версий не выполняется, колонки version в таблице нет»). Пока сценарий был «только читать
+выгрузку» — это безопасно. При сценарии «создаём и исправляем внешние отчёты/обработки»
+становится опасным: теряется и состояние «до» правки, и ответ на вопрос «что именно изменилось
+между двумя состояниями», нужный перед обратной выгрузкой в файлы (узел V18).
+**Статус:** ⚠️ **Осознанная незавершённость — узел V19. Модель принята оператором 14.10.2026,
+код и схема не изменены.** Норматив:
+[docs/CONFIGURATIONS_ENRICHMENT_PLAN.md](../docs/CONFIGURATIONS_ENRICHMENT_PLAN.md), раздел 11
+(подраздел «Принятая модель», правила M1–M8, открытые точки A1–A4).
+
+Принята версионность **в самих таблицах**, а не снимками: цепочка строк на один `uuid`
+(`revision_no` в пределах `uuid`, `changed_at`, `changed_by`; первая загрузка = ревизия 1) плюс
+**манифест состава детей на строке родителя** — там, где он уже есть (`tabular_sections.column_uuids`,
+jsonb `form_ext.items/events/commands`, `templates.ext`), и новый манифест `external_report`
+(uuid реквизитов объекта, ТЧ, форм, макетов; пути модулей `Ext/`). Снятие ребёнка выражается
+новой ревизией родителя без этого uuid; «текущее» состояние — максимальный `revision_no` по `uuid`,
+разрешаемый через манифест текущей ревизии родителя, и обеспечивать это обязаны инструменты MCP.
+Явная загрузка каталога (`force=True`) по M7 **сбрасывает историю**: цепочки снимаются, загруженный
+каталог становится ревизией 1.
+
+Ранее рекомендовавшийся вариант снимков (`object_revisions` + `content jsonb` + `content_hash`)
+**отклонён**: он даёт только историю, но не редактируемое состояние с неизменным `uuid` объекта;
+построчная история через триггеры и колонка `revision` без правила «текущая версия» — тоже.
+
+Что придётся менять при реализации (замеры 14.10.2026): `UNIQUE (uuid, revision_no)` вместо
+`external_report.uuid UNIQUE`, `attributes_uuid_key`, `tabular_sections_uuid_key`,
+`forms_parent_uuid_uuid_key`, `templates_parent_uuid_uuid_key`, `uq_form_ext_form_id`, частичного
+индекса `bsl_modules (parent_uuid, file_path)`; FK `parent_uuid → external_report(uuid)` придётся
+снять (при двух ревизиях `uuid` не уникален) и делать каскад явными `DELETE` в
+`delete_external_object()` — прецедент с `bsl_modules` (п. 10) уже есть; 31 место чтений в рантайм-
+коде и витрины `v_form_elements`/`v_form_events`/`v_config_enrichment`/`v_config_alias_targets`
+получают фильтр текущего состояния; проверки «сирот» и «потерянных ссылок» считаются по манифесту
+текущего состояния; регрессии, использующие `force=True` (`validate_load_flow.py --with-load`,
+`validate_external_children.py`, `validate_enrichment_flow.py`, `tools/restore_reference_pair.py`),
+по M7 стирают историю — их переводят на отдельный тестовый объект или на флаг «сохранить историю».
+Порядок: **V19 → V18**. До реализации `force=True` допустим только как осознанная замена: исход
+`⚠️ уже загружено` обязан сопровождаться вопросом оператору (правило R5), а карточка
+`♻️ перезагружено` — означать потерю прежнего состояния.
+
+### 20. У внешнего объекта не было способа заявить принадлежащую ему конфигурацию
+**Файлы:** `src/generate_ddl.py` + `src/ddl_external_report.sql`, `create_1c_configurations_db.sql`,
+`migrate_v20_configuration_link.sql`, `src/external_table_writer.py`,
+`src/external_report_loader.py`, `src/config_load_router.py`, `tools/check_v20_config_link.py`
+**Проблема:** вопрос «отчёт универсальный или принадлежит конкретной конфигурации» в базе было
+некомфортно задавать: в `external_report` не было поля, связывающего объект с конфигурацией, а
+`containedobject_classid` / `containedobject_objectid` — это идентификаторы класса и объекта
+метаданных типа «Отчёт», к конфигурации отношения не имеют. При этом косвенные признаки
+принадлежности в обогащении есть (`cfg:`-типы реквизитов, источники данных и типы полей СКД,
+имена регистров/документов/перечислений в запросах и модулях форм) — но надёжного правила
+вывода они не дают.
+**Статус:** ✅ **Реализовано 14.10.2026 (узел V20) в объёре, согласованном с оператором.**
+Модель (полные формулировки D1–D7 — раздел 12 `docs/CONFIGURATIONS_ENRICHMENT_PLAN.md`):
+
+- поле `external_report.configuration_id` — **id строки заголовка конфигурации**
+  (`configurations.id`), а не uuid метаданных: оператору нужна ссылка на строку заголовка.
+  Имя и тип совпадают с уже существующими ссылками `config_extensions`, `external_processing`,
+  `bsl_modules` — колонка `configuration_id INTEGER` + FK;
+- привязку **заявляет только оператор**: из выгрузки 1С значение не выводится,
+  автоматического вывода и классификации («универсальный» / «параметризуемый» /
+  «привязанный») нет — они отложены;
+- `NULL` = «привязка **не заявлена**». Это не «подтверждено, что отчёт универсальный»:
+  состояния «универсальный» в модели нет, отдельного флага нет. Карточка объекта прямо пишет
+  «Привязка к конфигурации: не заявлена (NULL = привязки нет; это НЕ значит, что отчёт
+  универсальный…)» — и никогда не выдаёт «универсальный» как факт об объекте;
+- ~~FK есть, `ON DELETE` не задан сознательно~~ → **внешний ключ снят узлом V20.1 в тот же
+  день** (см. п. 21): `configurations` — справочная таблица, ключ блокировал бы удаление
+  заголовка и потому делал ведение справочника невозможным. Вместо ключа работают два механизма,
+  уже применяемые в проекте к `config_cross_references.local_doc_id`: запись проверяет инструмент
+  `set_object_configuration_tool` (несуществующий id отклоняется, битой ссылки он не создаёт),
+  а потерянная ссылка обнаруживается **при чтении** — карточка и сводка различают
+  `not_declared` / `bound` / `dangling` и прямо требуют перепривязки. Снимок имени и версии не
+  заводится: ссылка разрешается живым JOIN'ом. `ON DELETE SET NULL` был отклонён и до снятия FK —
+  он терял бы факт, что привязка была, и молча превращал бы объект в «не заявлено»;
+- `configurations` — **справочная таблица**: одна строка на конфигурацию, `id` стабилен;
+  версионирование узла V19 на неё не распространяется. Если это изменится, привязку нужно
+  переразрешать после загрузки новой ревизии (тот же порядок, что при удалённой строке
+  заголовка — привязать заново);
+- `force=True` **переносит** привязку на новую строку (`register_external_report` читает её в
+  `find_external_object` и подставляет в контракт вставки): иначе заявление оператора терялось
+  бы при каждой перезагрузке, а восстановить его было бы неоткуда. Карточка дубликата
+  показывает привязку («будет перенесена при force=True»), карточка перезагрузки — строку
+  «Привязка к конфигурации перенесена: configuration_id=N»;
+- карточка объекта (`config_enrichment_stats_tool(uuid=…, card=True)`) отдаёт
+  `configuration_id` / `configuration_name` / `configuration_version` / `configuration_state`
+  (LEFT JOIN `configurations`) и печатает строку «Привязка к конфигурации: configuration_id=N —
+  <заголовок> | версия …»;
+
+**За рамками узла V20 — закрыто узлом V20.1 в тот же день (п. 21):** MCP-инструмент установки
+привязки добавлен в enrichment-MCP (`set_object_configuration_tool`, контракт 17 → 18), обратный
+запрос «какие объекты привязаны к конфигурации N» отдаёт сводка
+`config_enrichment_stats_tool()` без uuid (раздел «ПРИВЯЗКИ К КОНФИГУРАЦИИ», счётчики
+`configuration_not_declared` / `configuration_bound` / `configuration_dangling` в `totals`) плюс
+раздел `15f` в `check_external_report_inventory.sql`. Автоматическая классификация
+(«универсальный / параметризуемый / привязанный») по-прежнему **не реализована** — решение
+оператора не изменилось.
+
+**Проверка:** `python _cmp_ddl.py` rc=0 (282 колонки, 60 индексов, 34 ограничения — внешнего
+ключа `external_report_configuration_fkey` в схеме нет, 4 витрины, расхождений нет);
+`python tools/check_v20_config_link.py` rc=0 — 34 проверки: схема (колонка и индекс есть, FK нет),
+привязка читается как id, карточка называет заголовок и версию, карточка дубликата показывает
+привязку, `force=True` переносит её, несуществующий id отклоняется инструментом, удаление
+конфигурации со снятым FK свободно, после удаления заголовка ссылка называется битой и требует
+перепривязки, после снятия — «не заявлена», карточка эталона целая (счётчики совпадают с БД и
+витринами), уборка за собой. Эталонная пара при этом не трогается: загрузка и удаление идут на
+`Test3_Otchet_Null`, тестовый заголовок конфигурации создаётся и удаляется самим скриптом.
+`tools/check_mcp_tool_wiring.py` rc=0 (core 3, enrichment 18 — контракт изменён узлом V20.1,
+export 1), `validate_project.py` rc=0, `validate_enrichment_flow.py` rc=0 (122 проверки, включая
+фазу 6d привязки/перепривязки), `check_external_report_inventory.sql` rc=0 (раздел `15f`).
+
+### 21. Внешний ключ на конфигурации мешал вести справочник заголовков, а битая ссылка была невидима
+**Файлы:** `src/generate_ddl.py` + `src/ddl_external_report.sql`, `create_1c_configurations_db.sql`,
+`migrate_v20_configuration_link.sql`, `migrate_v21_drop_configuration_fk.sql`,
+`src/enrichment_generator.py` (`_binding_state_row`, `set_object_configuration`,
+`describe_object`, `generate_enrichment`), `src/enrichment_snippets.py` (`enrichment_stats`),
+`server_configurations_enrichment.py` (`set_object_configuration_tool`, `_binding_lines`,
+`_card_identity_lines`), `check_external_report_inventory.sql` (раздел `15f`),
+`tools/check_mcp_tool_wiring.py`, `tools/check_v20_config_link.py`, `validate_enrichment_flow.py`
+(фаза `phase_configuration_link`)
+**Проблема:** узел V20 поставил FK `external_report.configuration_id → configurations(id)` без
+`ON DELETE`. Практика того же дня показала две неудобности: (1) строку заголовка конфигурации
+нельзя ни удалить, ни пересоздать, пока на неё есть привязки, т. е. вести справочник заголовков
+нельзя вовсе; (2) ошибка приходила в момент записи сырым текстом psycopg2 про
+`external_report_configuration_fkey`, тогда как оператор о ней узнавал там, где она ему не нужна —
+при загрузке каталога или при правке привязки через SQL. Обратная сторона: при FK состояние
+«ссылка есть, а заголовка нет» в базе возникнуть не могло, поэтому и инструментов, которые его
+называют, не было.
+**Статус:** ✅ **Реализовано 14.10.2026 (узел V20.1, решение оператора того же дня).** Модель:
+`configurations` — **справочная система**, нужная только при проверке данных отчёта; ни загрузка
+каталога, ни генерация обогащения, ни карточка, ни разбор макета-СКД к ней в своей работе не
+обращаются, поэтому целостность связи ведёт приложение, а не схема (тот же контракт, что у
+`config_cross_references.local_doc_id`, где FK невозможен из-за другой базы).
+- схема: FK снят (`migrate_v21_drop_configuration_fk.sql`, `DROP CONSTRAINT IF EXISTS`), DO-блоки
+  FK удалены из шага 1 и шага 2, `migrate_v20_configuration_link.sql` больше FK не создаёт —
+  любая цепочка применения (чистая установка / V20 / V20+V21) приходит к одной схеме:
+  **колонка `configuration_id` + индекс `idx_external_report_configuration_id`, внешнего ключа нет**;
+- индекс сохранён намеренно: обратный запрос («что привязано к конфигурации N», «где битые
+  ссылки») — штатный шаг перепривязки;
+- запись: `set_object_configuration_tool(uuid | source_path, configuration_id)` — новый инструмент
+  enrichment-MCP (контракт 17 → 18). `configuration_id` — id строки заголовка; `None`/`""`/`null`
+  — снять привязку. Несуществующий или нечисловой id **отклоняется**, привязка не ложится, в ответе
+  перечисляются доступные заголовки. Инструмент возвращает прежнее и новое состояние, разрешённые
+  имя и версию и число объектов, привязанных к заголовку;
+- чтение: состояние считается одним SQL-CASE по `cfg.id` (`_binding_state_row`) и отдаётся в трёх
+  местах — карточка объекта (`configuration_state` + строка шапки), сводка
+  (`config_enrichment_stats_tool` без uuid: раздел «ПРИВЯЗКИ К КОНФИГУРАЦИИ» + счётчики
+  `configuration_not_declared` / `configuration_bound` / `configuration_dangling` в `totals`),
+  генерация обогащения (предупреждение, состав обогащения при этом строится как обычно). Три
+  состояния: `not_declared` («не заявлена», НЕ «универсальный»), `bound`, `dangling`
+  («БИТАЯ … требуется перепривязка» с указанием инструмента);
+- снимок имени и версии рядом с id **не заводится**: карточка разрешает ссылку живым JOIN'ом,
+  поэтому переиспользование id новым заголовком видно по другому имени и версии, а не спрятано в
+  устаревшей копии;
+- `force=True` по-прежнему переносит привязку (правило R11): снятый FK на это не влияет.
+**Проверка:** `python _cmp_ddl.py` rc=0 — 282 колонки, 60 индексов, **34 ограничения**
+(было 35: снят один FK), 4 витрины, расхождений нет; `python tools/check_v20_config_link.py`
+rc=0 — 34 проверки (схема: колонка и индекс есть, `external_report_configuration_fkey` нет;
+несуществующий id отклоняется; удаление заголовка теперь свободно и делает ссылку битой;
+карточка/сводка/генерация называют битую ссылку и требуют перепривязку; снятие возвращает
+«не заявлена»; эталонная пара и обогащение эталона не тронуты);
+`python validate_enrichment_flow.py` rc=0 — 122 проверки, новая фаза `phase_configuration_link`
+(отказ на битом id → привязка → карточка `bound` → удаление заголовка → `dangling` в карточке,
+сводке и генерации → перепривязка/снятие → уборка за собой);
+`python tools/check_mcp_tool_wiring.py` rc=0 (core 3, **enrichment 18**, export 1);
+`python validate_project.py` rc=0; `check_external_report_inventory.sql` rc=0 — раздел `15f`
+(состояния привязок, число битых, обратный перечень, наличие индекса и отсутствие FK).
+**Что осталось вне модели (осознанно):** автоматическая классификация («универсальный /
+параметризуемый / привязанный») — не реализована; состояния «универсальный» в модели нет, и в
+ответах инструментов такого утверждения быть не может.
+
+

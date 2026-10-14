@@ -1,159 +1,86 @@
 #!/usr/bin/env python3
-"""EXPORT server."""
+# -*- coding: utf-8 -*-
+"""MCP-сервер `1c-configurations-export` — реверс-инжиниринг конфигурации в файлы.
+
+ВЕДЁТСЯ ВРУЧНУЮ. Прежний генератор `generate_servers.py` удалён 14.10.2026: он писал шапку только
+с sys/pathlib/fastmcp и терял импорты из `src/`, а тела инструментов брал из устаревшего монолита
+`server_configurations.py` — у сгенерированной версии было 6 инструментов, вызывающих
+несуществующие `_export_config_changes`, `_get_export_log`, `_mark_object_modified`,
+`_get_modified_objects`, `_clear_modified_flag`, `_count_modified_objects` (замер 13.10.2026: 6/6
+падают `NameError`).
+
+Сценарий экспорта НЕ реализован, инструментов экспорта здесь больше нет. Причины (проверено
+по живой схеме `ckb_1c_configurations`, а не по описанию):
+
+  * код `src/config_export_manager.py` и `src/config_change_tracker.py` подключался к базе
+    `configurations`, которой на сервере нет (есть `ckb_1c_configurations` и `local_doc`) — оба
+    модуля удалены 14.10.2026 вместе с мёртвым кодом `src/config_tools.py`;
+  * они читали таблицы `configuration`, `configuration_objects`, `config_export_log` —
+    в живой схеме их нет;
+  * главное: в текущей схеме нет объектов, которые изменяются В БАЗЕ. Загрузчик пишет
+    содержимое выгрузки как есть, обогащение (config_aliases, config_snippets) метаданные
+    тоже не меняет. Возвращать «изменённые объекты» в XML нечего.
+
+Что осталось полезным: один инструмент диагностики `export_readiness_tool()`. Он не обещает
+экспорт, а по живой схеме показывает, чего именно не хватает, чтобы сценарий появился
+(узел V18: таблица объектов конфигурации с их XML + отслеживание изменений + сборка XML).
+"""
 import sys
 from pathlib import Path
-src_dir = Path(__file__).parent / 'src'
+
+src_dir = Path(__file__).parent / "src"
 sys.path.insert(0, str(src_dir))
-from fastmcp import FastMCP
+from fastmcp import FastMCP  # noqa: E402
+from external_db import transaction  # noqa: E402
 
 mcp = FastMCP("1c-configurations-export")
 
+# что должно существовать, чтобы экспорт имел смысл: объекты, изменяемые в базе, и журнал
+REQUIRED_TABLES = ("configuration_objects", "modified_objects", "config_export_log")
+
+
+def _table_exists(cur, table):
+    cur.execute("SELECT to_regclass(%s) IS NOT NULL AS ok", (f"public.{table}",))
+    return bool(cur.fetchone()[0])
+
 
 @mcp.tool()
-def export_config_changes_tool(config_id: int, target_path: str = None):
-    """Export configuration changes from DB to files (reverse engineering).
-    
-    Если target_path не указан, используется source_path из таблицы configuration.
+def export_readiness_tool():
+    """Готов ли сценарий экспорта (реверс-инжиниринга) и чего для него не хватает.
+
+    Отвечает честно вместо шести неработающих инструментов: показывает, каких таблиц нет в
+    живой схеме и сколько объектов конфигурации в базе вообще есть. Экспорт предполагает,
+    что объект был ИЗМЕНЁН в базе и его нужно собрать обратно в XML; в текущей схеме
+    изменений объектов нет, поэтому выгружать нечего.
     """
     try:
-        result = _export_config_changes(config_id=config_id, target_path=target_path)
-        if result.get('success'):
-            lines = [
-                "Экспорт завершён!",
-                f"ID конфигурации: {config_id}",
-                f"Базовый путь (source_path): {result.get('base_source_path', 'N/A')}",
-                f"Целевой путь: {result.get('target_path', 'N/A')}",
-                f"Файл экспорта: {result['export_file']}",
-                f"Объектов: {result['objects_count']}",
-                f"Сниппетов: {result['snippets_count']}"
-            ]
-            return '\n'.join(lines)
-        return f"Error: {result.get('error')}"
-    except Exception as e:
-        return f"Error exporting: {str(e)}"
+        with transaction() as cur:
+            present = {table: _table_exists(cur, table) for table in REQUIRED_TABLES}
+            cur.execute("SELECT count(*) FROM configurations")
+            configs = cur.fetchone()[0]
+            cur.execute("SELECT count(*) FROM external_report")
+            reports = cur.fetchone()[0]
+    except Exception as exc:
+        return f"❌ Готовность экспорта не проверена: {exc}"
 
-
-
-@mcp.tool()
-def get_export_log_tool(config_id: int = None, limit: int = 20):
-    """Get export log."""
-    try:
-        result = _get_export_log(config_id=config_id, limit=limit)
-        if not result or (len(result) == 1 and 'error' in result[0]):
-            return f"Error: {result[0].get('error')}"
-        if not result:
-            return "Export log is empty"
-        lines = [f"Export log ({len(result)} records):"]
-        for log in result:
-            status_icon = "+" if log['status'] == 'success' else "-"
-            lines.append(f"  [{status_icon}] #{log['id']} | {log['config_id']} | {log['objects_count']} obj. | {log['status']} | {log['exported_at']}")
-        return '\n'.join(lines)
-    except Exception as e:
-        return f"Error getting export log: {str(e)}"
-
-
-# =====================================================
-# ОТСЛЕЖИВАНИЕ ИЗМЕНЕНИЙ (change tracking)
-# =====================================================
-
-
-@mcp.tool()
-def mark_object_modified_tool(config_id: int, target_type: str, target_name: str, modified: bool = True):
-    """Отметить объект конфигурации как изменённый или снятый с отметки.
-    
-    Используется для отслеживания каких объектов были изменены
-    чтобы при экспорте выгрузить только их.
-    """
-    try:
-        result = _mark_object_modified(
-            config_id=config_id,
-            target_type=target_type,
-            target_name=target_name,
-            modified=modified
-        )
-        if result.get('success'):
-            return f"Объект '{target_name}' ({target_type}) - {result['status']}"
-        return f"Error: {result.get('error')}"
-    except Exception as e:
-        return f"Error marking object: {str(e)}"
-
-
-
-@mcp.tool()
-def get_modified_objects_tool(config_id: int):
-    """Получить список всех изменённых объектов конфигурации."""
-    try:
-        result = _get_modified_objects(config_id=config_id)
-        if not result or (len(result) == 1 and 'error' in result[0]):
-            return f"Error: {result[0].get('error')}"
-        if not result:
-            return "Нет изменённых объектов"
-        
-        lines = [f"Изменённые объекты конфигурации ID={config_id} ({len(result)} шт.):", ""]
-        for obj in result:
-            xml_size = obj.get('xml_size', 0) or 0
-            lines.append(f"  [{obj['type']}] {obj['name']}")
-            if obj.get('description'):
-                lines.append(f"    Описание: {obj['description'][:80]}")
-            lines.append(f"    Путь: {obj.get('file_relative_path', 'N/A')}")
-            lines.append(f"    XML: {xml_size} символов | Обновлено: {obj.get('updated_at', 'N/A')}")
-            lines.append("")
-        
-        return '\n'.join(lines)
-    except Exception as e:
-        return f"Error getting modified objects: {str(e)}"
-
-
-
-@mcp.tool()
-def clear_modified_flag_tool(config_id: int, target_type: str, target_name: str):
-    """Снять отметку об изменении с объекта (после успешного экспорта)."""
-    try:
-        result = _clear_modified_flag(
-            config_id=config_id,
-            target_type=target_type,
-            target_name=target_name
-        )
-        if result.get('success'):
-            return f"Отметка об изменении снята с '{target_name}' ({target_type})"
-        return f"Error: {result.get('error')}"
-    except Exception as e:
-        return f"Error clearing flag: {str(e)}"
-
-
-
-@mcp.tool()
-def count_modified_objects_tool(config_id: int):
-    """Подсчитать количество изменённых объектов по типам."""
-    try:
-        result = _count_modified_objects(config_id=config_id)
-        if 'error' in result:
-            return f"Error: {result['error']}"
-        
-        lines = [f"Статистика изменённых объектов конфигурации ID={config_id}", ""]
-        lines.append(f"  Всего изменённых: {result['total']}")
-        
-        if result.get('by_type'):
-            lines.append("  По типам:")
-            for item in result['by_type']:
-                lines.append(f"    * {item['type']}: {item['count']}")
-        
-        return '\n'.join(lines)
-    except Exception as e:
-        return f"Error counting modified objects: {str(e)}"
-
-
-def main():
-    print("1C Configurations Base - MCP Server")
-    mcp.run()
-
-
-if __name__ == "__main__":
-    main()
+    missing = [table for table, ok in present.items() if not ok]
+    lines = ["❌ Сценарий «экспорт изменений конфигурации» не реализован.",
+             f"Таблица конфигураций (configurations): строк {configs}; внешних объектов "
+             f"в базе: {reports}.",
+             "Отсутствующие таблицы: " + (", ".join(missing) if missing
+                                          else "все есть, но сценарий всё равно не реализован"),
+             "Причина не в обёртке: объекты выгрузки в текущей схеме только читаются из БД, "
+             "изменять в базе нечего, поэтому и выгружать в XML нечего.",
+             "Что нужно для экспорта (узел V18): таблица объектов конфигурации с их XML, "
+             "отслеживание изменённых объектов, сборка XML по схеме и сравнение с выгрузкой.",
+             "Загрузка каталогов — 1c-configurations-core (load_1c_catalog_tool); "
+             "обогащение сохранённого содержимого — 1c-configurations-enrichment."]
+    return "\n".join(lines)
 
 
 def main():
     mcp.run()
+
 
 if __name__ == "__main__":
     main()

@@ -139,23 +139,36 @@ JOIN external_report e ON e.uuid = fe.parent_uuid
 JOIN jsonb_array_elements(fe.items) el ON el ? 'datapath'
 WHERE split_part(el ->> 'datapath', '.', 2) = 'Организация' ORDER BY e.name;
 
-SELECT '=== 27. ПОИСК 12: элемент формы по имени и типу (после V15 и для ordinary) ===' AS section;
--- Витрина v_form_elements единая: Managed из Form.xml (V13), Ordinary из Form.bin (узел V15).
--- Сейчас ordinary-форма даёт 0 строк — это ожидание V15, а не ошибка поиска.
+SELECT '=== 27. ПОИСК 12: элемент формы по имени и типу (V15 работает и для ordinary) ===' AS section;
+-- Витрина v_form_elements единая: Managed из Form.xml (V13), Ordinary из 0/form контейнера
+-- Form.bin (узел V15). Различия ключей jsonb (kind/type, datapath/data_source, title/captions)
+-- закрыты в витрине через COALESCE, поэтому один и тот же запрос находит обе разновидности.
 SELECT 'ЭЛЕМЕНТ=' || report_name || '/' || form_name || ' имя=' || element_name
        || ' kind=' || COALESCE(element_kind, '-') || ' type=' || COALESCE(element_type, '-')
+       || ' form_type=' || form_type
 FROM v_form_elements
 WHERE element_name ILIKE '%Организация%' OR element_kind IN ('InputField', 'Field')
 ORDER BY 1;
-SELECT 'элементов ordinary-формы (Ожидание V15: >0) = ' || count(*)
+SELECT 'элементов ordinary-формы (Ожидание V15: 10 = страница + 9 элементов Test2_Otchet) = '
+       || count(*)
 FROM v_form_elements WHERE form_type = 'Ordinary';
+SELECT 'ordinary-элементов Field (Ожидание V15: 2 — Организация, ДатаОтчета) = ' || count(*)
+FROM v_form_elements WHERE form_type = 'Ordinary' AND element_kind = 'Field';
 
 SELECT '=== 28. ПОИСК 13: элемент формы по подписи (caption) ===' AS section;
 SELECT 'ЭЛЕМЕНТ=' || report_name || '/' || form_name || ' имя=' || element_name
        || ' подпись=' || caption_ru || ' kind=' || COALESCE(element_kind, '-')
 FROM v_form_elements
 WHERE caption_ru ILIKE '%период%' OR caption_ru ILIKE '%организация%'
+      OR caption_ru ILIKE '%счета%' OR caption_ru ILIKE '%учреждение%'
 ORDER BY 1;
+-- Подписи ordinary-элементов (надписи Test2_Otchet): «Учреждение», «Дата отчета»,
+-- «Поле списка1:», «Выберите счета:» — узел V15 извлекает их из 0/form.
+SELECT 'ordinary-элементов с подписью (Ожидание V15: 4) = ' || count(*)
+FROM v_form_elements WHERE form_type = 'Ordinary' AND caption_ru IS NOT NULL;
+SELECT 'ЭЛЕМЕНТ ПОДПИСЬ=' || report_name || '/' || element_path || ' -> ' || caption_ru
+FROM v_form_elements
+WHERE form_type = 'Ordinary' AND caption_ru IS NOT NULL ORDER BY 1;
 
 SELECT '=== 29. ПОИСК 14: элемент по источнику данных + сверка с реквизитами отчёта ===' AS section;
 -- Источник данных формы может быть реквизитом отчёта, колонкой ТЧ или атрибутом самой формы
@@ -181,18 +194,37 @@ FROM (
 LEFT JOIN attributes a ON a.parent_uuid = ve.report_uuid
      AND a.name = split_part(ve.data_source, '.', 2)
 ORDER BY 1;
+-- V15: ordinary-форма даёт те же строки витрины. У Test2_Otchet источники элементов
+-- (Организация, ДатаОтчета, ПолеСписка1) — атрибуты формы, а не реквизиты отчёта:
+-- пометка «нет среди реквизитов отчёта» для них ожидаема и корректна.
+SELECT 'ordinary-элементов с источником данных (Ожидание V15: 3) = ' || count(*)
+FROM v_form_elements WHERE form_type = 'Ordinary' AND data_source IS NOT NULL;
+SELECT 'атрибутов ordinary-формы в form_ext.attributes (Ожидание V15: 4 — включая '
+       || 'ВнешнийОтчетОбъект) = ' || count(*)
+FROM form_ext fe JOIN forms f ON f.id = fe.form_id
+CROSS JOIN LATERAL jsonb_array_elements(fe.attributes) AS attr
+WHERE f.form_type = 'Ordinary' AND (attr ->> 'name') IS NOT NULL;
 
 SELECT '=== 30. ПОИСК 15: обработчик события формы и его наличие в модуле ===' AS section;
 -- Событие без обработчика в тексте модуля = признак неполного разбора (или обработчика из
 -- другого модуля): для ordinary-формы модуль доступен с V14, поэтому проверка работает для обоих типов.
+-- У ordinary-разметки имени обработчика нет (event -> 'handler' не заполняется), поэтому
+-- дополнительно ищем по имени самого события: в ordinary-форме обработчик обычно и есть
+-- процедура с именем события.
 SELECT 'СОБЫТИЕ=' || ve.report_name || '/' || ve.form_name || ' ' || ve.event_name
-       || ' -> ' || COALESCE(ve.handler_name, '(не задан)')
-       || ' | в модуле формы: ' || (position(ve.handler_name IN fe.ext) > 0)::text
-       || ' | в модуле объекта: ' || (position(ve.handler_name IN b.code) > 0)::text
+       || ' -> ' || COALESCE(ve.handler_name, '(имя обработчика разметкой не задано)')
+       || ' | имя события в модуле формы: ' || (position(ve.event_name IN fe.ext) > 0)::text
+       || ' | обработчик в модуле формы: '
+       || (position(COALESCE(ve.handler_name, ve.event_name) IN fe.ext) > 0)::text
+       || ' | в модуле объекта: '
+       || (position(COALESCE(ve.handler_name, ve.event_name) IN b.code) > 0)::text
 FROM v_form_events ve
 JOIN form_ext fe ON fe.form_uuid = ve.form_uuid
 LEFT JOIN bsl_modules b ON b.parent_uuid = ve.report_uuid AND b.module_type = 'ObjectModule'
 ORDER BY 1;
+SELECT 'событий ordinary-формы через v_form_events (Ожидание V15: 1 — ПередОткрытием) = '
+       || count(*)
+FROM v_form_events WHERE form_type = 'Ordinary';
 -- Обратный ход: процедура из модуля ordinary-формы (V14) как ключ поиска объекта.
 -- Регулярки с кириллическими диапазонами на Windows-коллиляции ненадёжны — берём position().
 SELECT 'МОДУЛЬ ФОРМЫ ordinary: отчёт=' || e.name || ' форма=' || fe.name
@@ -245,6 +277,100 @@ JOIN external_report e ON e.uuid = fe.parent_uuid
 WHERE f.form_type = 'Ordinary'
 ORDER BY e.name;
 
+SELECT '=== 32. ПОИСК 17 (V17): объект по точному алиасу ===' AS section;
+-- Точное совпадение alias_norm — то же, что делает search_config_aliases_tool (rank最高的 слой).
+SELECT 'ТОЧНЫЙ АЛИАС «' || a.alias_name || '» → объект=' || e.name
+       || ' цель=' || a.target_type || ':' || COALESCE(a.target_name, '-')
+FROM v_config_alias_targets a
+JOIN external_report e ON e.uuid = a.parent_uuid
+WHERE a.alias_norm = lower('СреднийВозрастОС')
+ORDER BY 1;
+
+SELECT '=== 33. ПОИСК 18 (V17): цель по подстроке алиаса (FTS этого не умеет) ===' AS section;
+-- Идентификатор 1С — одна лексема, поэтому середина и хвост ищутся position() по alias_norm.
+SELECT 'ПОДСТРОКА «ДатаНачала» → объект=' || e.name || ' цель=' || a.target_type
+       || ':' || COALESCE(a.target_name, '-') || ' ключ=' || COALESCE(a.target_uuid, '-')
+FROM v_config_alias_targets a
+JOIN external_report e ON e.uuid = a.parent_uuid
+WHERE position('датаначала' IN a.alias_norm) > 0
+ORDER BY a.target_type, a.alias_norm LIMIT 20;
+SELECT 'ПОДСТРОКА «ийВозрастОС» (хвост идентификатора) → объектов=' ||
+       count(DISTINCT a.parent_uuid) || ' алиасов=' || count(*)
+FROM v_config_alias_targets a
+WHERE position(lower('ийВозрастОС') IN a.alias_norm) > 0;
+
+SELECT '=== 34. ПОИСК 19 (V17): код по имени процедуры через config_snippets.tsv ===' AS section;
+-- Сниппеты строятся из объявлений модулей (form_ext.ext и bsl_modules.code), индекс tsv
+-- вычислен в схеме (конфигурация 'simple'). Префикс задаём явно: to_tsquery('simple','имя:*').
+SELECT 'СНИППЕТ по имени процедуры → объект=' || e.name || ' вопрос=' || s.question
+       || ' verified=' || s.is_verified::text
+FROM config_snippets s
+JOIN external_report e ON e.uuid = s.parent_uuid
+CROSS JOIN LATERAL to_tsquery('simple', 'ПередОткрытием:*') q
+WHERE s.tsv @@ q
+ORDER BY 1;
+-- Фолбэк без FTS: подстрока по question (работает всегда, используется инструментом поиска).
+SELECT 'ПОДСТРОКА по вопросу сниппета → объект=' || e.name || ' вопрос=' || s.question
+FROM config_snippets s
+JOIN external_report e ON e.uuid = s.parent_uuid
+WHERE position('ПередОткрытием' IN s.question) > 0
+ORDER BY 1;
+
+SELECT '=== 35. ПОИСК 20 (V17): сниппеты по цели (get_config_snippets_for_object) ===' AS section;
+-- Зависимость уже несёт стабильный target_uuid — тот же ключ, что у алиаса этой цели.
+SELECT 'ЦЕЛЬ → сниппеты: объект=' || e.name || ' цель=' || d.target_type
+       || ':' || d.target_name || ' сниппетов=' || count(*)
+       || ' ключ=' || COALESCE(max(d.target_uuid), '-')
+FROM config_snippet_dependencies d
+JOIN config_snippets s ON s.id = d.snippet_id
+JOIN external_report e ON e.uuid = s.parent_uuid
+GROUP BY e.name, d.target_type, d.target_name
+ORDER BY 1 LIMIT 40;
+
+
+SELECT '=== 36. ПОИСК 21 (узел A): текст запроса набора данных макета в config_snippets ===' AS section;
+-- В схеме компоновки данных запрос набора лежит в <query> внутри <dataSet> (без суффикса Text).
+-- До узла A генератор вырезал только <*queryText*> - таких сниппетов не было вовсе.
+-- FTS по 'simple' ищет полные лексемы: «ВЫБРАТЬ» находится как слово, префикс задаём явно.
+SELECT 'ЗАПРОС МАКЕТА через FTS → объект=' || e.name || ' вопрос=' || s.question
+       || ' verified=' || s.is_verified::text
+FROM config_snippets s
+JOIN external_report e ON e.uuid = s.parent_uuid
+CROSS JOIN LATERAL to_tsquery('simple', 'ВЫБРАТЬ:*') q
+WHERE s.tsv @@ q AND s.source_kind = 'template_query'
+ORDER BY 1;
+-- Имя набора данных входит в question авто-сниппета - поиск по нему работает и без FTS.
+SELECT 'НАБОР ДАННЫХ по имени → объект=' || e.name || ' вопрос=' || s.question
+       || ' цель=' || s.target_type || ':' || COALESCE(s.target_uuid, '-')
+FROM config_snippets s
+JOIN external_report e ON e.uuid = s.parent_uuid
+WHERE s.source_kind = 'template_query'
+  AND position(lower('НаборДанных1') IN lower(s.question)) > 0
+ORDER BY 1;
+-- Текст запроса ищется и по коду сниппета (подстрока - фолбэк для середины идентификатора).
+SELECT 'ЗАПРОС по фрагменту кода → объект=' || e.name || ' вопрос=' || s.question
+FROM config_snippets s
+JOIN external_report e ON e.uuid = s.parent_uuid
+WHERE position('РасходыПриУСН' IN s.answer) > 0 AND s.source_kind = 'template_query'
+ORDER BY 1;
+-- Покрытие: каждый разобранный <query> макета обязан дать сниппет с целью на этот макет.
+SELECT 'ПОКРЫТИЕ: макетов с <query> = ' || count(*)
+       || ', из них со сниппетом = ' || count(*) FILTER (WHERE has_snippet)
+       || ', с целью Template = ' || count(*) FILTER (WHERE has_template_target)
+FROM (
+    SELECT t.uuid,
+           EXISTS (SELECT 1 FROM config_snippets s
+                    WHERE s.source_kind = 'template_query'
+                      AND s.source_uuid = 'template:' || t.uuid::text) AS has_snippet,
+           EXISTS (SELECT 1 FROM config_snippets s
+                    WHERE s.source_kind = 'template_query'
+                      AND s.target_type = 'Template'
+                      AND s.target_uuid = t.uuid::text) AS has_template_target
+    FROM templates t
+    WHERE t.ext IS NOT NULL
+      AND (position('<query>' IN t.ext) > 0 OR position(':query>' IN t.ext) > 0)
+) x;
+
 SELECT '=== 99. ИТОГОВЫЕ счётчики после всех тестов ===' AS section;
 SELECT 'external_report = ' || count(*) FROM external_report;
 SELECT 'attributes = ' || count(*) FROM attributes;
@@ -253,3 +379,8 @@ SELECT 'forms = ' || count(*) FROM forms;
 SELECT 'form_ext = ' || count(*) FROM form_ext;
 SELECT 'templates = ' || count(*) FROM templates;
 SELECT 'bsl_modules = ' || count(*) FROM bsl_modules;
+SELECT 'config_aliases = ' || count(*) FROM config_aliases;
+SELECT 'config_aliases активных = ' || count(*) FROM config_aliases WHERE active;
+SELECT 'config_snippets = ' || count(*) FROM config_snippets;
+SELECT 'config_snippet_dependencies = ' || count(*) FROM config_snippet_dependencies;
+SELECT 'config_cross_references = ' || count(*) FROM config_cross_references;

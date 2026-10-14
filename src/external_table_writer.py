@@ -76,6 +76,19 @@ class TableRowWriter:
                 return int(value)
             except (TypeError, ValueError):
                 return None
+        if kind == "float":
+            if value is None or value == "":
+                return None
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+        if kind == "text_array":
+            if not value:
+                return []
+            if isinstance(value, str):
+                return [part.strip() for part in value.split(",") if part.strip()]
+            return [str(item) for item in value if str(item).strip()]
         if kind == "bytes":
             if value is None:
                 return None
@@ -122,7 +135,28 @@ class TableRowWriter:
         Нужен там, где дочерняя таблица ссылается на id строки (form_ext.form_id).
         """
         return [cls.insert(cursor, row) for row in rows]
+
+    @classmethod
+    def insert_many_skip_duplicates(cls, cursor, rows):
+        """Вставить строки по одной, пропуская конфликты по уникальным ограничениям.
+
+        ON CONFLICT DO NOTHING без цели конфликта проверяет и частичные уникальные индексы
+        (uq_config_aliases_alias_target ... WHERE active), поэтому повторная генерация алиасов
+        не создаёт дублей и не прерывает транзакцию: если такой же алиас уже есть у цели
+        (например, его добавил оператор вручную), сгенерированный просто не вставляется.
+        Поштучная вставка выбрана намеренно: rowcount одного INSERT - это 0 или 1, тогда как
+        при пакетном execute_values число реально вставленных строк по страницам посчитать
+        надёжно нельзя, а молча считать их вставленными - значит врать в карточке результата.
+        """
+        inserted = 0
+        for row in rows:
+            cursor.execute(cls.insert_sql() + " ON CONFLICT DO NOTHING", cls.values(row))
+            inserted += cursor.rowcount
+        return inserted, len(rows) - inserted
+
+
 class ExternalReportRowWriter(TableRowWriter):
+
     """Строка основной записи внешнего отчёта (таблица external_report)."""
 
     TABLE = "external_report"
@@ -145,6 +179,11 @@ class ExternalReportRowWriter(TableRowWriter):
         "default_variant_form": "text",
         "variants_storage": "text",
         "settings_storage": "text",
+        # узел V20: id строки заголовка конфигурации (configurations.id), привязку к которой
+        # ЗАЯВИЛ ОПЕРАТОР. Из выгрузки 1С значение не берётся — в XML ссылки на конфигурацию
+        # нет. NULL означает «привязка не заявлена», а не «отчёт универсальный». При
+        # force=True загрузчик переносит прежнее значение на новую строку.
+        "configuration_id": "int",
     }
 
 
@@ -164,6 +203,9 @@ class ExternalProcessingRowWriter(TableRowWriter):
         "version": "text",
         "uuid": "uuid",
         "class_id": "text",
+        # узел V20: та же привязка, заявленная оператором, что и у external_report
+        # (колонка configurations.id в таблице есть с создания таблицы).
+        "configuration_id": "int",
     }
 
 
@@ -330,3 +372,93 @@ class BslModuleRowWriter(TableRowWriter):
         "truncated": "bool",
     }
 
+
+class ConfigAliasRowWriter(TableRowWriter):
+    """Алиас поиска по объекту выгрузки (таблица config_aliases, узел V17).
+
+    target_key в спецификации НЕТ: колонка вычисляемая (COALESCE(target_uuid,
+    'snippet:'||target_snippet_id)), вставлять в неё нельзя. Поэтому цель задают
+    либо target_uuid (uuid строки, id элемента jsonb, 'module:<id>'), либо
+    target_snippet_id (для целей-сниппетов). origin='generated' снимается при
+    перегенерации, origin='manual' (добавлен через MCP) остаётся.
+    """
+
+    TABLE = "config_aliases"
+    COLUMNS = {
+        "alias_name": "text",
+        "alias_norm": "text",
+        "target_type": "text",
+        "target_name": "text",
+        "target_uuid": "text",
+        "target_snippet_id": "int",
+        "parent_uuid": "uuid",
+        "parent_type": "text",
+        "weight": "float",
+        "description": "text",
+        "origin": "text",
+        "active": "bool",
+    }
+
+
+class ConfigSnippetRowWriter(TableRowWriter):
+    """Сниппет кода объекта (таблица config_snippets, узел V17).
+
+    tsv не указывается: колонка вычисляемая из question+answer (конфигурация simple).
+    source_kind/module: object_module | manager_module | form_module | common_module |
+    template_query (текст запроса из макета: и <*queryText*, и <query> набора данных СКД -
+    узел A); source_uuid - строка-источник ('module:<id>', 'form:<uuid>', 'template:<uuid>'),
+    source_path - путь файла выгрузки для проверки.
+    """
+
+    TABLE = "config_snippets"
+    COLUMNS = {
+        "parent_uuid": "uuid",
+        "parent_type": "text",
+        "question": "text",
+        "answer": "text",
+        "source_kind": "text",
+        "source_uuid": "text",
+        "source_path": "text",
+        "target_type": "text",
+        "target_uuid": "text",
+        "tags": "text_array",
+        "confidence": "float",
+        "is_verified": "bool",
+    }
+
+
+class ConfigSnippetDependencyRowWriter(TableRowWriter):
+    """Зависимость сниппета от объекта выгрузки (config_snippet_dependencies, V17).
+
+    snippet_id вставляет генератор: сниппеты вставляются по одной (insert_ids), чтобы
+    получить id. FK snippet_id -> config_snippets(id) ON DELETE CASCADE - единственный
+    FK подсистемы, остальные связи полиморфные.
+    """
+
+    TABLE = "config_snippet_dependencies"
+    COLUMNS = {
+        "snippet_id": "int",
+        "dependency_type": "text",
+        "target_type": "text",
+        "target_name": "text",
+        "target_uuid": "text",
+    }
+
+
+class ConfigCrossReferenceRowWriter(TableRowWriter):
+    """Указатель на documentation local_doc (config_cross_references, V17).
+
+    local_doc_id - числовая ссылка в ДРУГУЮ базу без FK: целостность проверяет
+    отдельный запрос к local_doc, а не схема (решение E5).
+    """
+
+    TABLE = "config_cross_references"
+    COLUMNS = {
+        "local_doc_kind": "text",
+        "local_doc_id": "int",
+        "target_type": "text",
+        "target_name": "text",
+        "target_uuid": "text",
+        "parent_uuid": "uuid",
+        "reference_type": "text",
+    }

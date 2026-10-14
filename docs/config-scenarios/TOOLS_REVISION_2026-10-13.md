@@ -23,12 +23,12 @@
 | Файл | Назначение | Статус | Решение |
 |---|---|---|---|
 | `server.py` | `1c-knowledge-base` (БД `local_doc`) | ✅ | оставить, вне рамок загрузки конфигураций |
-| `server_configurations_core.py` | `1c-configurations-core`, контракт загрузки (3 инструмента) | ⚠️ | оставить как единственный контрактный сервер; **вести вручную**, 18 инструментов вне контракта помечены — см. п. 11 правил |
-| `server_configurations_enrichment.py` | `1c-configurations-enrichment` | 🚫 | не отключать, но и не использовать: таблиц обогащения нет ни в одной БД. План запуска — [CONFIGURATIONS_ENRICHMENT_PLAN.md](../CONFIGURATIONS_ENRICHMENT_PLAN.md) |
-| `server_configurations_export.py` | `1c-configurations-export` | 🚫 | то же: работает с `configurations`/`configuration_objects`; до появления схемы конфигураций не использовать |
-| `server_configurations.py` | устаревший «единый» сервер конфигураций | 🧊 | не удалять, пока `generate_servers.py` берёт из него тела; после переноса генератора — удалить |
-| `server_configurations_backup.py`, `server_configurations_export_backup.py` | резервные копии | 🧊 | удалить вместе с устаревшим сервером (история есть в git) |
-| `generate_servers.py` | генератор серверов из устаревшего файла | ⚠️ | **не запускать** для `server_configurations_core.py` — потеряет инструменты контракта и импорты `src/`. Решение: либо не использовать генератор, либо перенести тела инструментов в `src/` |
+| `server_configurations_core.py` | `1c-configurations-core`, контракт загрузки (3 инструмента) | ✅ | **вести вручную**. 18 инструментов вне контракта УДАЛЕНЫ 14.10.2026 вместе с импортами модулей, живших в несуществующей БД `configurations` (замер 13.10.2026: из 18 работоспособны только файловые диагностики, остальные — `FATAL: database "configurations" does not exist`, `TypeError`, пустой результат как «ошибка»). Сервер = тонкие обёртки трёх функций из `src/`; состав контракта сторожит `tools/check_mcp_tool_wiring.py` |
+| `server_configurations_enrichment.py` | `1c-configurations-enrichment`, обогащение сохранённого содержимого (узел V17) | ✅ | **вести вручную**, 16 инструментов. С 14.10.2026 `config_enrichment_stats_tool(uuid=…)` отдаёт ещё и карточку свойств/назначения объекта (`src/enrichment_generator.py::describe_object`): свойства из `external_report`, реквизиты с типами, ТЧ, состав форм через витрины, макеты, модули, перечень сниппетов |
+| `server_configurations_export.py` | `1c-configurations-export`, диагностика готовности экспорта | ⚠️ | **вести вручную**, 1 инструмент `export_readiness_tool`. Шесть прежних инструментов удалены: сценарий реверс-инжиниринга не реализован (в базе нет объектов, изменяемых в БД). Относится к узлу V18, в текущей сессии не проверяется |
+| `server_configurations.py` | устаревший «единый» сервер конфигураций | 🚫 | 🗑 **удалён 14.10.2026** (история в git) |
+| `server_configurations_backup.py`, `server_configurations_export_backup.py` | резервные копии | 🚫 | 🗑 **удалены 14.10.2026**: экспорт-копия совпала с `server_configurations.py` побайтово (один SHA256), пользы не несли |
+| `generate_servers.py` | генератор серверов из устаревшего файла | 🚫 | 🗑 **удалён 14.10.2026**: генератор писал шапку только с `sys/pathlib/fastmcp` и терял импорты `src/` (17/17 и 6/6 `NameError`); все три сервера ведутся вручную. Место контроля — `tools/check_mcp_tool_wiring.py`: AST-разбор вызовов + сверка состава контракта `EXPECTED_TOOLS` (core 3, enrichment 16, export 1); встроен в `validate_project.py` |
 
 ## 3. Конвейер загрузки (реализация контракта)
 
@@ -40,11 +40,23 @@
 | `src/external_subdir_parser.py` | `Forms/`, `Templates/`, `Ext/` + контейнер `Form.bin` (V13/V14) | ✅ | оставить; неразложенный markup `0/form` — это узел V15 |
 | `src/external_table_writer.py` | писатели строк, `INSERT … RETURNING id`, `_adapt` | ✅ | оставить; помнить: текстовые колонки проходят через `strip()` |
 | `src/external_db.py` | подключение к `ckb_1c_configurations`, `transaction()` | ✅ | оставить, это общая точка подключения |
-| `src/external_processor_loader.py` | вариант «внешняя обработка» | 🚫 | в загрузке не участвует (заглушка роутера) и ходит в `configurations`; переписать вместе с вариантом 4 |
-| `src/config_tools.py`, `src/config_extra.py`, `src/config_migration.py` | инструменты вне контракта (БД `configurations`) | 🚫 | 🧊 до реализации вариантов «конфигурация»/«расширение» |
-| `src/config_tools_1c_configurations.py` | пустой файл-заготовка (0 байт) | 🧹 | **удалить**: файл под задачу заводить только с кодом |
+| `src/external_processor_loader.py` | вариант «внешняя обработка» | 🚫 | 🗑 **удалён 14.10.2026**: ходил в `configurations`, в загрузке не участвовал (заглушка роутера). Вариант 4 пишется заново на `src/external_db.py` |
+| `src/config_tools.py`, `src/config_extra.py`, `src/config_migration.py` | инструменты вне контракта (БД `configurations`) | 🚫 | 🗑 **удалены 14.10.2026**; `validate_project.py` больше их не проверяет, вместо этого проверяет, что ни один модуль снова не подключается к базе `configurations` |
+| `src/config_aliases.py`, `src/config_snippets_manager.py` | прежняя версия алиасов и сниппетов (БД `configurations`, таблицы которых нет) | 🚫 | 🗑 **удалены 14.10.2026**: реализация обогащения — `src/enrichment_aliases.py`, `src/enrichment_snippets.py`, `src/enrichment_generator.py` (V17) |
+| `src/config_change_tracker.py`, `src/config_export_manager.py` | отслеживание изменений и реверс-инжиниринг (БД `configurations`, таблицы `configuration`/`configuration_objects`/`config_export_log`) | 🚫 | 🗑 **удалены 14.10.2026**: в текущей схеме нет объектов, изменяемых в базе, выгружать в XML нечего. Узел V18 начинается с чистого листа |
+| `src/config_tools_1c_configurations.py` | пустой файл-заготовка (0 байт) | 🧹 | 🗑 удалён (файл под задачу заводят только с кодом) |
+| `src/server_configurations_new_tools.py`, `src/server_configurations_new_tools_v2.py` | обрывки прежнего сервера в `src/` | 🚫 | 🗑 **удалены 14.10.2026**: не импортировались нигде, второй ещё и не разбирался синтаксически |
+| `src/schema_snippets.sql` | прежняя схема сниппетов (`config_snippets`/`dependencies` с `config_id`) | 🚫 | 🗑 **удалён 14.10.2026**: схема обогащения — `src/ddl_enrichment.sql` (шаг 1b), генератор `src/generate_ddl.py` |
+| `src/update_strategy.py`, `src/find_bad_snippets.py`, `src/mcp_tools_loader_backup.py`, `src/pdf_parser_new.py` | разовые скрипты и пустой файл (2 байта) | 🧹 | 🗑 **удалены 14.10.2026** |
+| `src/enrichment_generator.py` | генерация обогащения + карточка объекта (`describe_object`) | ✅ | оставить (V17) |
+| `src/enrichment_aliases.py`, `src/enrichment_snippets.py` | алиасы, сниппеты, зависимости, links documentation, сводка | ✅ | оставить (V17); свёртка дублей зависимостей — по стабильному ключу цели |
 
 ## 4. Постоянные проверки (ядро анализа, всё остаётся в репозитории)
+
+Замер 13.10.2026. 14.10.2026 добавлены: `validate_enrichment_flow.py` (сквозной сценарий
+обогащения V17) и `tools/check_mcp_tool_wiring.py` (проводка + состав контракта инструментов,
+встроен в `validate_project.py`). Счётчики `_cmp_ddl.py` на 14.10.2026: 281 колонка,
+59 индексов, 34 ограничения, 4 витрины — расхождений нет, rc=0.
 
 | Файл | Что проверяет | Статус 13.10.2026 |
 |---|---|---|
@@ -52,7 +64,7 @@
 | `validate_load_flow.py` | четыре исхода точки входа, дубликат, `force` | ✅ rc=0 |
 | `validate_external_children.py` | содержимое детей (V12/V13/V14), каскад, откат, сироты | ✅ rc=0 |
 | `_v13_mcp_layer.py` | тонкие обёртки MCP без stdio: load → duplicate → force → delete | ✅ |
-| `_cmp_ddl.py` | шаги 1+2 установки против живой схемы (212 колонок, 43 индекса, 29 ограничений, 2 витрины) | ✅ rc=0 |
+| `_cmp_ddl.py` | шаги 1+1b+2 установки против живой схемы (после V17: 281 колонка, 59 индексов, 34 ограничения, 4 витрины) | ✅ rc=0 |
 | `validate_form_bin_decode.py` | `Form.bin`: байты модуля, инварианты V14, сохранение текста модуля | ✅ |
 | `tools/restore_reference_pair.py` | восстановить эталонную пару после чистящих БД валидаторов | ✅ |
 
@@ -130,5 +142,15 @@ psql -v ON_ERROR_STOP=1 -f check_external_report_search.sql      # находи�
 3. Инструменты enrichment/export не чинятся «вхолостую»: их таблицы появятся вместе с планом
    обогащения ([CONFIGURATIONS_ENRICHMENT_PLAN.md](../CONFIGURATIONS_ENRICHMENT_PLAN.md)),
    иначе правки нечем проверить.
+4. **Новое (замер 13.10.2026):** у enrichment/export поломка наступает раньше БД — вызов инструмента
+   падает на `NameError`, потому что сгенерированный файл не импортирует функции из `src/`. Пока это
+   не исправлено, любой «живой» тест enrichment даёт ложный диагноз: ошибка выглядит как проблема
+   БД, хотя до обращения к БД дело не доходит. Предлагаемый постоянный контроль — статическая
+   проверка связности «инструмент → функция `src/`» через `ast` (пробник: `C:\TMP\mcp_probe.py`,
+   вывод: core 0/21 нерешённых имён, enrichment 17/17, export 6/6), оформить как
+   `tools/check_mcp_tool_wiring.py` и вызывать из `validate_project.py`. Дешёвый промежуточный шаг
+   до V17 — добавить в `server_configurations_enrichment.py`/`server_configurations_export.py`
+   блок импортов с алиасами (`from config_aliases import list_aliases as _list_aliases`, …), чтобы
+   инструменты начали хотя бы корректно сообщать об отсутствующих таблицах.
 
 

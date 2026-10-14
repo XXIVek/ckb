@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Разбор подкаталогов выгрузки внешнего объекта: Forms/, Templates/, Ext/*.bsl.
 
-Норматив: docs/config-scenarios/FLOWCHART_1c-configurations-core.md (узлы V13, V14).
+Норматив: docs/config-scenarios/FLOWCHART_1c-configurations-core.md (узлы V13, V14, V15).
 Точка входа: parse_external_subdirs(base_path, report_uuid, ...) - см. docstring функции.
 
 Правила:
@@ -15,6 +15,12 @@
     в form_ext.ext (правило R9: в bsl_modules модуль формы не дублируется). Если v8unpack
     недоступен или контейнер не распаковывается - ext остаётся пустым, это предупреждение,
     а не ошибка; ext_bin сохраняется всегда;
+  * V15: состав ordinary-формы берётся из 0/form того же контейнера и пишется в ТЕ ЖЕ колонки
+    form_ext (items/attributes/events/commands/auto_command_bar), что и разбор Form.xml для
+    управляемой формы: новых колонок в DDL нет, витрины v_form_elements/v_form_events общие.
+    Полный elem.json v8unpack не сохраняется - источник истины ext_bin. Отказ разбора
+    (нет v8unpack, неподдерживаемая версия разметки, пустая разметка) - предупреждение,
+    колонки остаются пустыми, загрузка продолжается. Контейнер распакуется ОДИН раз на форму;
   * CustomSettingsFolder вида "3:02023637-..." uuid НЕ является и по R3 не проверяется;
   * имена форм/макетов из корневого XML (refs) служат только сверкой: расхождение -
     предупреждение, а не откат; uuid формы/макета берётся ИСКЛЮЧИТЕЛЬНО из файла
@@ -36,6 +42,7 @@ from external_meta_parser import (
     _text,
     _type_info,
 )
+from external_form_decoder import decode_layout
 
 # Порог сохранения текстового содержимого (модуль формы, содержимое макета, код BSL).
 MAX_TEXT_CHARS = 1_000_000
@@ -83,10 +90,13 @@ TEMPLATES_DIR_NAME = "Templates"
 EXT_DIR_NAME = "Ext"
 MODULE_DIR_NAME = "Form"
 
-# V14: у обычной формы (FormType=Ordinary) модуля Ext/Form/Module.bsl нет — он лежит внутри
-# Form.bin (контейнер 1С с файлами 0/form и 0/module). Модуль извлекается в form_ext.ext.
+# V14/V15: у обычной формы (FormType=Ordinary) нет ни Ext/Form/Module.bsl, ни Form.xml -
+# содержимое лежит внутри Form.bin (контейнер 1С с файлами 0/module и 0/form).
+# 0/module -> form_ext.ext (узел V14), 0/form -> form_ext.items/attributes/events/commands/
+# auto_command_bar (узел V15). Контейнер распакуется ОДИН раз на форму.
 # v8unpack — ОПЦИОНАЛЬНАЯ зависимость (tools/requirements.txt): без неё поведение узла V13
-# сохраняется (ext пустой, ext_bin полный), но предупреждение формулируется честно.
+# сохраняется (ext пустой, jsonb-колонки пустые, ext_bin полный), но предупреждения
+# формулируются честно и загрузка не прерывается.
 CONTAINER_MODULE_NAME = "module"
 CONTAINER_LAYOUT_NAME = "form"
 
@@ -131,14 +141,16 @@ def _container_files(blob):
         return None, f"контейнер Form.bin не распаковывается: {exc}"
 
 
-def _store_container_form_module(form_ext, name, warnings):
+def _store_container_form_module(form_ext, name, warnings, container=None):
     """V14: текст модуля обычной формы берётся из 0/module внутри form_ext.ext_bin.
 
     Пишет form_ext.ext / ext_truncated; ext_size и ext_path не меняются — источником
     остаётся Forms/<Имя>/Ext/Form.bin (инвариант: ext_size = octet_length(ext_bin)).
+    container — уже готовый (_container_files(...)) результат распаковки: он общий с узлом
+    V15 (0/form), повторной распаковки контейнера на ту же форму нет.
     Возвращает True, если модуль сохранён. В bsl_modules модуль формы не дублируется (R9).
     """
-    files, reason = _container_files(form_ext.get("ext_bin"))
+    files, reason = _container_files(form_ext.get("ext_bin")) if container is None else container
     if files is None:
         warnings.append(f"Форма '{name}' выгружена в бинарном виде "
                         f"(Forms/{name}/Ext/Form.bin): модуль формы не извлечён — {reason}. "
@@ -160,6 +172,42 @@ def _store_container_form_module(form_ext, name, warnings):
         warnings.append(f"Модуль формы '{name}' длиннее порога {MAX_TEXT_CHARS} символов: "
                         "содержимое обрезано, ext_truncated = true.")
     return True
+
+
+def _apply_container_form_layout(form_ext, name, form_uuid, container, warnings):
+    """V15: состав ordinary-формы из 0/form внутри form_ext.ext_bin -> колонки form_ext.
+
+    Заполняет ТЕ ЖЕ колонки (items / attributes / events / commands / auto_command_bar), что
+    и разбор Form.xml для управляемой формы (V13): новых колонок в DDL нет, витрины
+    v_form_elements / v_form_events и SQL-анализ остаются общими для обеих разновидностей.
+    Полный elem.json v8unpack в БД не идёт — источник истины form_ext.ext_bin, из него
+    0/form воспроизводится байт-в-байт (проверка — tools/decode_form_layout.py --round-trip).
+
+    container — общий результат _container_files(...) для этой формы (V14 + V15).
+    Возвращает ({items, attributes, events, commands, layout_version}, None) при успехе и
+    (None, причина) при отказе: отказ НЕ прерывает загрузку (v8unpack опционален).
+    """
+    files, reason = container
+    if files is None:
+        return None, reason
+    layout = files.get(CONTAINER_LAYOUT_NAME)
+    if layout is None:
+        return None, "в контейнере Form.bin нет файла 0/form — разметка элементов формы отсутствует"
+    decoded = decode_layout(layout, name, form_uuid)
+    if not decoded.get("success"):
+        return None, decoded.get("reason") or "разметка 0/form не разобрана"
+    columns = decoded["columns"]
+    form_ext["items"] = columns["items"]
+    form_ext["attributes"] = columns["attributes"]
+    form_ext["events"] = columns["events"]
+    form_ext["commands"] = columns["commands"]
+    if columns["auto_command_bar"]:
+        form_ext["auto_command_bar"] = columns["auto_command_bar"]
+    for warning in decoded.get("warnings") or []:
+        warnings.append(f"Разметка формы '{name}': {warning}.")
+    counts = dict(decoded["counts"])
+    counts["layout_version"] = decoded.get("layout_version")
+    return counts, None
 
 
 
@@ -433,6 +481,9 @@ def _read_form(xml_path, forms_dir, parent_uuid, parent_type, ref_names, warning
 
     form_xml = _find_file(ext_dir, "Form.xml")
     form_bin = _find_file(ext_dir, "Form.bin")
+    # V15: распаковка Form.bin выполняется ОДИН раз на форму и переиспользуется для
+    # 0/module (модуль, V14) и 0/form (состав элементов, V15).
+    container = None
     if form_xml is not None:
         form_ext["ext_format"] = "xml"
         try:
@@ -463,11 +514,29 @@ def _read_form(xml_path, forms_dir, parent_uuid, parent_type, ref_names, warning
         form_ext["ext_format"] = "bin"
         form_ext["ext_bin"] = data
         form_ext["ext_size"] = len(data) if data is not None else None
+        container = _container_files(data)
         warnings.append(f"Форма '{name}' выгружена в бинарном виде "
-                        f"(Forms/{name}/Ext/Form.bin): свойства формы и её состав "
-                        f"(form_ext.items/attributes/events/commands и скаляры) не разобраны — "
-                        "это узел V15; двоичное содержимое формы сохранено в form_ext.ext_bin "
-                        "целиком и воспроизводится из него байт-в-байт.")
+                        f"(Forms/{name}/Ext/Form.bin): скалярные свойства формы "
+                        "(command_bar_location, report_result, details_data, report_form_type, "
+                        "auto_show_state, custom_settings_folder, report_result_view_mode, "
+                        "view_mode_application_on_set_report_result) из Form.bin не разбираются; "
+                        "двоичное содержимое формы сохранено в form_ext.ext_bin целиком "
+                        "и воспроизводится из него байт-в-байт.")
+        layout_counts, layout_reason = _apply_container_form_layout(
+            form_ext, name, uuid, container, warnings)
+        if layout_counts:
+            warnings.append(
+                f"Состав формы '{name}' разложен из 0/form контейнера Form.bin "
+                f"(версия разметки {layout_counts['layout_version']}): items "
+                f"{layout_counts['items']}, attributes {layout_counts['attributes']}, events "
+                f"{layout_counts['events']}, commands {layout_counts['commands']} — колонки "
+                "form_ext заполнены так же, как для управляемой формы "
+                "(элементы формы доступны через витрину v_form_elements).")
+        else:
+            warnings.append(
+                f"Состав формы '{name}' (form_ext.items/attributes/events/commands) не разложен: "
+                f"{layout_reason}. Колонки остаются пустыми; содержимое Form.bin сохранено в "
+                "form_ext.ext_bin и будет разложено, когда разбор станет доступен.")
     else:
         form_ext["ext_format"] = "none"
         warnings.append(f"В каталоге Forms/{name}/Ext нет ни Form.xml, ни Form.bin: "
@@ -489,7 +558,7 @@ def _read_form(xml_path, forms_dir, parent_uuid, parent_type, ref_names, warning
     elif form_ext["ext_format"] == "bin":
         # V14: у обычной формы файла Ext/Form/Module.bsl в выгрузке нет — её модуль лежит
         # внутри Form.bin (0/module). Говорить «модуля нет» некорректно (дефект п. 15 правил).
-        if _store_container_form_module(form_ext, name, warnings):
+        if _store_container_form_module(form_ext, name, warnings, container):
             # Отдельная строка о том, что модуль всё-таки сохранён: без неё предупреждение
             # о бинарной форме читается как «модуля в БД нет» (проверено на Test2_Otchet).
             warnings.append(f"Модуль формы '{name}' извлечён из 0/module контейнера Form.bin "

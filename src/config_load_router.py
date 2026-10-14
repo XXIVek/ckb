@@ -204,6 +204,13 @@ def _existing_card(existing, table):
         f"  Дата загрузки: {existing.get('created_at', '')}",
         f"  Связанные данные: BSL-модулей {existing.get('bsl_modules_count', 0)}",
     ]
+    # узел V20: привязка к конфигурации — данные оператора; показываем её в карточке
+    # дубликата, чтобы оператор знал, что при force=True она будет перенесена, а не потеряна.
+    if existing.get("configuration_id"):
+        lines.append(f"  Привязка к конфигурации: configuration_id={existing['configuration_id']} "
+                     f"(заявлена оператором, будет перенесена при force=True)")
+    else:
+        lines.append("  Привязка к конфигурации: не заявлена (NULL — это не «универсальный»)")
     # V13: все счётчики дочерних данных одной строкой (формы, их описания, макеты).
     parts = [f"{label} {existing[key]}" for key, label in (
         ("attributes_count", "реквизитов"),
@@ -240,6 +247,11 @@ def format_load_result(result):
                 f"♻️ Удалена предыдущая запись ID={replaced.get('old_id')} "
                 f"(BSL-модулей удалено: {replaced.get('bsl_modules_deleted', 0)})"
             )
+            # узел V20: привязка к конфигурации — данные оператора, а не выгрузки; то, что она
+            # перенесена, должно быть видно в карточке перезагрузки.
+            if replaced.get("configuration_id"):
+                lines.append(f"   Привязка к конфигурации перенесена: "
+                             f"configuration_id={replaced['configuration_id']}")
         # V13: полные счётчики сохранённых дочерних данных (узел V13 норматива).
         written = {
             "attributes": result.get("attributes_written"),

@@ -9,8 +9,12 @@ bsl_modules после реальной загрузки в ckb_1c_configuration
 
 Проверяются: загрузка 4 тестовых каталогов и точные счётчики в БД; содержимое
 (модуль формы в form_ext.ext, текст макета в templates.ext, двоичная форма в
-form_ext.ext_bin); повторная загрузка (duplicate, счётчики не меняются, дублей нет);
-перезагрузка force=True (дочерние данные заменяются целиком, дублей нет); ошибки R3 -
+form_ext.ext_bin); состав ordinary-формы из 0/form контейнера Form.bin в колонках
+form_ext.items/attributes/events/commands/auto_command_bar и его находимость через
+v_form_elements / v_form_events (V15), деградация без v8unpack и детерминированность
+разбора; повторная загрузка (duplicate, счётчики не меняются, дублей нет);
+перезагрузка force=True (дочерние данные заменяются целиком, дублей нет, ordinary-состав
+разлагается заново); ошибки R3 -
 Attribute без uuid и форма с пустым uuid (в БД не остаётся ничего); отсутствие
 каталогов Forms//Templates//Ext/ (не ошибка, счётчики нулевые); удаление по uuid и по
 report_id без сирот. Тестовые записи удаляются из БД после прогона.
@@ -31,6 +35,7 @@ import psycopg2  # noqa: E402
 from config_load_router import load_catalog, format_load_result  # noqa: E402
 from external_db import db_config  # noqa: E402
 from external_report_loader import delete_external_object, read_external_meta  # noqa: E402
+from external_subdir_parser import parse_external_subdirs  # noqa: E402
 
 BASE = Path(r"C:\1C_LLM\LoadDoc")
 # (каталог, attributes, tabular_sections, forms, form_ext, templates, bsl_modules)
@@ -162,6 +167,81 @@ tpl_doc = query(f"SELECT COUNT(*) FROM templates WHERE parent_uuid = '{u2}'::uui
                 "AND ext IS NOT NULL AND ext_root_tag = 'document'")
 check("Test2: текст макета разобран, ext_root_tag=document", tpl_doc == 1, f"(строк={tpl_doc})")
 
+# V15: состав ordinary-формы берётся из 0/form того же контейнера Form.bin и пишется в ТЕ ЖЕ
+# колонки form_ext (items/attributes/events/commands/auto_command_bar), что и разбор Form.xml
+# у управляемой формы. Эталон Test2_Otchet (форма «Отчет», версия разметки 27): items 10
+# (страница + 9 элементов), attributes 4 (источники данных), events 1 (ПередОткрытием),
+# commands 1 (ДействияФормыОтчетСформировать), auto_command_bar — панель «ДействияФормы».
+ordinary_composition = query(
+    f"SELECT COUNT(*) FROM form_ext WHERE parent_uuid = '{u2}'::uuid "
+    "AND jsonb_typeof(items) = 'array' AND jsonb_array_length(items) = 10 "
+    "AND jsonb_array_length(attributes) = 4 AND jsonb_array_length(events) = 1 "
+    "AND jsonb_array_length(commands) = 1 "
+    "AND auto_command_bar ->> 'name' = 'ДействияФормы'")
+check("Test2: состав ordinary-формы разложен из 0/form в колонки form_ext (V15)",
+      ordinary_composition == 1, f"(строк={ordinary_composition})")
+ordinary_elements = query(
+    f"SELECT COUNT(*) FROM v_form_elements WHERE report_uuid = '{u2}'::uuid "
+    "AND element_kind IN ('Page','Field','TableField','ListField','Label','CommandPanel') "
+    "AND element_name IS NOT NULL AND element_path IS NOT NULL")
+check("Test2: элементы ordinary-формы доступны через v_form_elements (V15)",
+      ordinary_elements == 10, f"(строк={ordinary_elements})")
+ordinary_sources = query(
+    f"SELECT COUNT(DISTINCT data_source) FROM v_form_elements WHERE report_uuid = '{u2}'::uuid "
+    "AND data_source IN ('Организация','ДатаОтчета','ПолеСписка1')")
+check("Test2: привязки элементов к источникам данных разложены (V15)",
+      ordinary_sources == 3, f"(источников={ordinary_sources})")
+ordinary_caption = query(
+    f"SELECT COUNT(*) FROM v_form_elements WHERE report_uuid = '{u2}'::uuid "
+    "AND element_name = 'НадписьОрганизация' AND caption_ru = 'Учреждение'")
+check("Test2: подпись элемента ordinary-формы разложена (V15)",
+      ordinary_caption == 1, f"(строк={ordinary_caption})")
+ordinary_event = query(
+    f"SELECT COUNT(*) FROM v_form_events WHERE report_uuid = '{u2}'::uuid "
+    "AND event_name = 'ПередОткрытием'")
+check("Test2: событие ordinary-формы видно через v_form_events (V15)",
+      ordinary_event == 1, f"(строк={ordinary_event})")
+
+# V15: v8unpack — зависимость ОПЦИОНАЛЬНАЯ. Проверка деградации выполняется офлайн
+# (без записи в БД): импорт v8unpack блокируется заглушкой None в sys.modules, после чего
+# разбор подкаталогов обязан вернуть успех, ext_bin, предупреждение с указанием причины и
+# ПУСТЫЕ items/attributes/events/commands. Затем импорт восстанавливается, и тот же каталог
+# обязан разложиться полностью — это же проверка детерминированности разбора.
+object_dir = next((p for p in (BASE / "Test2_Otchet").iterdir() if p.is_dir()), None)
+V8UNPACK_MODULES = ("v8unpack", "v8unpack.container_reader", "v8unpack.helper",
+                    "v8unpack.MetaDataObject", "v8unpack.MetaDataObject.Form",
+                    "v8unpack.MetaDataObject.Form.FormCore",
+                    "v8unpack.MetaDataObject.Form.FormElements26",
+                    "v8unpack.MetaDataObject.Form.FormElements27",
+                    "v8unpack.MetaDataObject.Form.FormElements27.FormElements27")
+saved_modules = {name: sys.modules.get(name) for name in V8UNPACK_MODULES}
+for name in V8UNPACK_MODULES:
+    sys.modules[name] = None
+try:
+    degraded = parse_external_subdirs(str(object_dir), u2, object_name="СреднийВозрастОС",
+                                     source_path=str(BASE / "Test2_Otchet"))
+finally:
+    for name, module in saved_modules.items():
+        if module is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = module
+degraded_ext = (degraded.get("form_ext") or [{}])[0]
+degraded_ok = (degraded.get("success") and degraded.get("forms")
+               and degraded_ext.get("ext_bin") and not degraded_ext.get("ext")
+               and not degraded_ext.get("items") and not degraded_ext.get("attributes")
+               and any("v8unpack" in w for w in degraded.get("warnings") or []))
+check("V15: без v8unpack загрузка продолжается: ext_bin сохранён, состав формы пустой, "
+      "предупреждение с причиной", degraded_ok,
+      f"(items={len(degraded_ext.get('items') or [])}, "
+      f"ext_bin={len(degraded_ext.get('ext_bin') or b'')})")
+again = parse_external_subdirs(str(object_dir), u2, object_name="СреднийВозрастОС",
+                              source_path=str(BASE / "Test2_Otchet"))
+again_ext = (again.get("form_ext") or [{}])[0]
+check("V15: после восстановления v8unpack тот же каталог разложен полностью "
+      "(детерминированность разбора)", len(again_ext.get("items") or []) == 10,
+      f"(items={len(again_ext.get('items') or [])})")
+
 print()
 print("=" * 78)
 print("3. Повторная загрузка без force: duplicate, счётчики не меняются, дублей нет")
@@ -192,6 +272,21 @@ ok = (result.get("status") == "reloaded" and got == (36, 3, 1, 1, 1, 1)
 check(f"Test1_Otchet force=True: status={result.get('status')}, в БД {got}, "
       f"всего строк attributes={total_attrs}", ok)
 print(format_load_result(result))
+
+# V15: force=True для ordinary-формы — состав разлагается заново из ext_bin того же
+# каталога: количество элементов не меняется, дублей form_ext нет (иначе повторный
+# разбор накапливал бы элементы).
+result2 = load_catalog(str(BASE / "Test2_Otchet"), force=True)
+ordinary_after_force = query(
+    f"SELECT COUNT(*) FROM form_ext WHERE parent_uuid = '{u2}'::uuid "
+    "AND jsonb_typeof(items) = 'array' AND jsonb_array_length(items) = 10 "
+    "AND jsonb_array_length(attributes) = 4 AND jsonb_array_length(events) = 1 "
+    "AND jsonb_array_length(commands) = 1")
+dup_ext2 = query(f"SELECT COUNT(*) FROM (SELECT form_uuid FROM form_ext WHERE parent_uuid = "
+                 f"'{u2}'::uuid GROUP BY form_uuid HAVING COUNT(*) > 1) d")
+check(f"Test2_Otchet force=True: status={result2.get('status')}, ordinary-состав разложен "
+      f"заново (строк с items=10: {ordinary_after_force}), дублей form_ext={dup_ext2}",
+      result2.get("status") == "reloaded" and ordinary_after_force == 1 and dup_ext2 == 0)
 
 print()
 print("=" * 78)

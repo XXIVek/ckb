@@ -321,9 +321,13 @@ def find_external_object(uuid_val, obj_type="external_report"):
         "REPLACE(COALESCE(t.name, ''), '|', ' ')",
         "COALESCE(t.uuid::text, '')",
         "COALESCE(t.created_at::text, '')",
+        # узел V20: привязка к конфигурации заявлена оператором и из выгрузки не
+        # восстанавливается, поэтому её читаем здесь же — force=True переносит её на
+        # новую строку. Колонка есть в обеих таблицах (external_report, external_processing).
+        "COALESCE(t.configuration_id::text, '')",
         f"(SELECT COUNT(*) FROM bsl_modules b WHERE b.{bsl_column} = t.id)",
     ]
-    keys = ["id", "name", "uuid", "created_at", "bsl_modules_count"]
+    keys = ["id", "name", "uuid", "created_at", "configuration_id", "bsl_modules_count"]
 
     if info["has_children"]:
         for child_table, key in (
@@ -357,6 +361,12 @@ def find_external_object(uuid_val, obj_type="external_report"):
                 found[key] = 0
         else:
             found[key] = value or ""
+    # узел V20: пустая привязка — это None, а не 0. Различать «оператор ничего не заявлял»
+    # (NULL) и конкретный id строки заголовка критично: 0 в configurations не бывает.
+    try:
+        found["configuration_id"] = int(found.get("configuration_id") or 0) or None
+    except (TypeError, ValueError):
+        found["configuration_id"] = None
     found["object_type"] = obj_type
     return found
 
@@ -429,6 +439,40 @@ def delete_external_object(obj_id=None, uuid_val=None, obj_type="external_report
                 f"SELECT COUNT(*) FROM {child_table} WHERE parent_uuid = '{obj_uuid}'::uuid")
             children_deleted[child_table] = (
                 counted[0]["result"] if isinstance(counted, list) and counted else 0)
+
+    # V17: строки обогащения (config_aliases, config_snippets, config_snippet_dependencies,
+    # config_cross_references) НЕ имеют FK на объект выгрузки - каскада нет, удаляем явно по
+    # parent_uuid. Зависимости сниппетов формально ушли бы каскадом по FK
+    # snippet_id -> config_snippets(id), но у таблицы нет колонки parent_uuid, поэтому они
+    # считаются и удаляются через JOIN с config_snippets - иначе карточка удаления была бы
+    # неполной, а сироты по parent_uuid не проверялись бы вовсе.
+    if obj_uuid:
+        counted = _run_psql(
+            f"SELECT COUNT(*) FROM config_snippet_dependencies d "
+            f"JOIN config_snippets s ON s.id = d.snippet_id "
+            f"WHERE s.parent_uuid = '{obj_uuid}'::uuid")
+        deps_count = counted[0]["result"] if isinstance(counted, list) and counted else 0
+        if deps_count:
+            gone = _run_psql(
+                f"DELETE FROM config_snippet_dependencies d "
+                f"USING config_snippets s WHERE s.id = d.snippet_id "
+                f"AND s.parent_uuid = '{obj_uuid}'::uuid")
+            if isinstance(gone, dict) and "error" in gone:
+                return {"success": False,
+                        "error": f"Не удалось удалить зависимости сниппетов: {gone['error']}"}
+        children_deleted["config_snippet_dependencies"] = deps_count
+
+        for child_table in ("config_aliases", "config_snippets", "config_cross_references"):
+            counted = _run_psql(
+                f"SELECT COUNT(*) FROM {child_table} WHERE parent_uuid = '{obj_uuid}'::uuid")
+            count = counted[0]["result"] if isinstance(counted, list) and counted else 0
+            if count:
+                gone = _run_psql(
+                    f"DELETE FROM {child_table} WHERE parent_uuid = '{obj_uuid}'::uuid")
+                if isinstance(gone, dict) and "error" in gone:
+                    return {"success": False,
+                            "error": f"Не удалось удалить связанные строки {child_table}: {gone['error']}"}
+            children_deleted[child_table] = count
 
     del_res = _run_psql(f"DELETE FROM {table} WHERE id = {obj_id}")
     if isinstance(del_res, dict) and "error" in del_res:
@@ -575,6 +619,12 @@ def register_external_report(source_path, replace=None, force=None, xml_path=Non
             "old_name": existing.get("name", ""),
             "bsl_modules_deleted": removed.get("bsl_modules_deleted", 0),
         }
+        # узел V20 (решение оператора 14.10.2026): привязка к конфигурации — данные оператора,
+        # а не выгрузки 1С, и обратно из XML они не восстанавливаются. Старая строка снята,
+        # поэтому прежнее значение переносится на новую. Автоматического вывода привязки нет.
+        if existing.get("configuration_id"):
+            report_row["configuration_id"] = existing["configuration_id"]
+            replaced["configuration_id"] = existing["configuration_id"]
 
     # V13: содержимое подкаталогов каталога объекта (Forms/, Templates/, Ext/). Каталог
     # объекта - папка с тем же именем, что и корневой XML (V10). Разбор выполняется ДО

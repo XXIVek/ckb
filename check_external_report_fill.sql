@@ -3,8 +3,13 @@
 -- psql продолжает с кодом возврата 0 и часть проверок молча не выполняется):
 --   $env:PGCLIENTENCODING='UTF8'; psql -v ON_ERROR_STOP=1 -U postgres -h localhost -d ckb_1c_configurations -P pager=off -f check_external_report_fill.sql -o _v13_fill_out.txt
 -- Вывод в файл (-o) обязателен: конвейер PowerShell перекодирует кириллицу.
--- Ожидаемые значения соответствуют эталону Test1_Otchet (uuid a6db7252-5cfd-4e33-8e28-66e8f1a74a46):
--- реквизитов объекта 3 + колонок табличных частей 33 = 36 строк в attributes, 3 строки в tabular_sections.
+-- Ожидаемые значения соответствуют эталонной паре выгрузок:
+--   Test1_Otchet (uuid a6db7252-5cfd-4e33-8e28-66e8f1a74a46, управляемая форма) —
+--     реквизитов объекта 3 + колонок табличных частей 33 = 36 строк в attributes,
+--     3 строки в tabular_sections, форма из Form.xml (V13/V14.1);
+--   Test2_Otchet (uuid d364e104-e1ef-49e7-8163-d2ab726aaa96, ОБЫЧНАЯ форма «Отчет») —
+--     модуль из 0/module (V14) и состав из 0/form (V15): items 10, attributes 4, events 1,
+--     commands 1, auto_command_bar «ДействияФормы».
 
 \pset footer off
 \pset pager off
@@ -227,20 +232,51 @@ WHERE b.parent_uuid IN (SELECT parent_uuid FROM form_ext WHERE ext_format = 'bin
   AND (b.module_type = 'FormModule'
        OR lower(replace(b.file_path, chr(92), '/')) LIKE '%/form/module.bsl%'
        OR b.code LIKE '%ДействияФормыОтчетСформировать%');
--- Пустые массивы jsonb («[]») — НЕ наполнение: узел V15 разложит layout Form.bin в items.
-SELECT 'ordinary-форм с пустыми items/events (Ожидание V15: 1) = ' || count(*)
+-- V15: состав ordinary-формы разложен загрузчиком из 0/form контейнера Form.bin в те же
+-- колонки, что и разбор Form.xml. Пустые items/attributes/events/commands — ДЕФЕКТ разбора
+-- (при отсутствии v8unpack загрузка даёт предупреждение, и тогда такие нули объяснимы:
+-- см. карточку загрузки).
+-- jsonb_array_length падает на не-массиве, поэтому тип проверяется через CASE, а не OR.
+SELECT 'ordinary-форм с пустыми items (ДЕФЕКТ V15: состав не разложен) = ' || count(*)
 FROM form_ext fe JOIN forms f ON f.id = fe.form_id
 WHERE f.form_type = 'Ordinary'
-  AND (fe.items IS NULL OR jsonb_array_length(fe.items) = 0)
-  AND (fe.events IS NULL OR jsonb_array_length(fe.events) = 0);
+  AND CASE WHEN jsonb_typeof(fe.items) = 'array'
+           THEN jsonb_array_length(fe.items) = 0 ELSE true END;
+SELECT 'ordinary-форм с заполненными attributes/events/commands и auto_command_bar '
+       || '(Ожидание V15: 1) = ' || count(*)
+FROM form_ext fe JOIN forms f ON f.id = fe.form_id
+WHERE f.form_type = 'Ordinary'
+  AND jsonb_typeof(fe.attributes) = 'array' AND jsonb_array_length(fe.attributes) > 0
+  AND jsonb_typeof(fe.events) = 'array' AND jsonb_array_length(fe.events) > 0
+  AND jsonb_typeof(fe.commands) = 'array' AND jsonb_array_length(fe.commands) > 0
+  AND jsonb_typeof(fe.auto_command_bar) = 'object'
+  AND (fe.auto_command_bar ->> 'name') IS NOT NULL;
 
 SELECT '=== 18. Состав форм через витрины анализа (migrate_v14_form_analysis_views.sql) ===' AS section;
 SELECT report_name, form_name, COALESCE(form_type, '-') AS form_type,
        count(*) AS elements, count(data_source) AS with_data_source,
        count(caption_ru) AS with_caption
 FROM v_form_elements GROUP BY 1, 2, 3 ORDER BY 1, 2, 3;
-SELECT 'элементов ordinary-формы через v_form_elements (Ожидание V15: >0) = ' || count(*)
+SELECT 'элементов ordinary-формы через v_form_elements (Ожидание V15: 10) = ' || count(*)
 FROM v_form_elements WHERE form_type = 'Ordinary';
+-- Эталон V15 для Test2_Otchet (обычная форма «Отчет», версия разметки 0/form = 27):
+-- 10 элементов (страница + 9 элементов), из них 3 привязаны к источникам данных формы,
+-- у 4 есть подпись (надписи), типы разложены у всех; событие формы — 1 (ПередОткрытием).
+SELECT 'ordinary-элементов с типом (Ожидание V15: 10) = ' || count(*)
+FROM v_form_elements WHERE form_type = 'Ordinary' AND element_kind IS NOT NULL;
+SELECT 'ordinary-элементов с источником данных (Ожидание V15: 3) = ' || count(*)
+FROM v_form_elements WHERE form_type = 'Ordinary' AND data_source IS NOT NULL;
+SELECT 'ordinary-элементов с подписью (Ожидание V15: 4) = ' || count(*)
+FROM v_form_elements WHERE form_type = 'Ordinary' AND caption_ru IS NOT NULL;
+SELECT 'событий ordinary-формы через v_form_events (Ожидание V15: 1) = ' || count(*)
+FROM v_form_events WHERE form_type = 'Ordinary';
+-- Имена и подписи элементов ordinary-формы — те же колонки витрины, что и у Managed:
+-- расхождения ключей (kind/type, datapath/data_source, title/captions) закрыты COALESCE.
+SELECT concat('form=', form_name, ' path=', COALESCE(element_path, '-'),
+              ' kind=', COALESCE(element_kind, '-'),
+              ' data_source=', COALESCE(data_source, '-'),
+              ' caption=', COALESCE(caption_ru, '-'))
+FROM v_form_elements WHERE form_type = 'Ordinary' ORDER BY ordinal;
 SELECT concat('obj=', ve.report_name, ' form=', ve.form_name, ' event=', ve.event_name,
               ' handler=', COALESCE(ve.handler_name, '-'),
               ' обработчик в тексте модуля=',
@@ -253,8 +289,10 @@ ORDER BY 1;
 SELECT '=== 19. Скалярные свойства содержимого формы (V14.1) ===' AS section;
 -- Свойства берутся из КОРНЯ Form.xml (в XML содержимого формы нет обёртки <Properties>, в
 -- отличие от XML метаданных). У управляемой формы отчёта они заданы в выгрузке, поэтому
--- пустые колонки — дефект разбора. У ordinary-формы (Form.bin) свойства не разбираются —
--- это ожидаемые NULL до узла V15. У формы внешней обработки ReportFormType и свойства
+-- пустые колонки — дефект разбора. У ordinary-формы (Form.bin) скалярные свойства не
+-- разбираются — это ожидаемые NULL: узел V15 разложил состав элементов
+-- (items/attributes/events/commands/auto_command_bar), скаляры из Form.bin в него не входили.
+-- У формы внешней обработки ReportFormType и свойства
 -- результата отчёта могут отсутствовать законно (проверка считаем только для Managed+xml).
 SELECT concat('obj=', e.name, ' form=', fe.name, ' формат=', COALESCE(fe.ext_format, '-'),
               ' command_bar_location=', COALESCE(fe.command_bar_location, '<NULL>'),
@@ -275,4 +313,98 @@ WHERE f.form_type = 'Managed' AND fe.ext_format = 'xml' AND fe.report_form_type 
 SELECT 'управляемых форм с заполненными report_result и report_form_type (Ожидание V14.1: 1) = ' || count(*)
 FROM form_ext fe JOIN forms f ON f.id = fe.form_id
 WHERE f.form_type = 'Managed' AND fe.report_result IS NOT NULL AND fe.report_form_type IS NOT NULL;
+
+
+SELECT '=== 20. Обогащение V17: счётчики по объекту (витрина против прямого подсчёта) ===' AS section;
+-- Витрина v_config_enrichment обязана сходиться с прямым подсчётом по тем же таблицам:
+-- расхождение значит, что в витрине потеряно условие (origin, active, JOIN к сниппету).
+SELECT concat('obj=', v.report_name, ' aliases=', v.aliases_total, ' manual=', v.aliases_manual,
+              ' на_цели_сниппеты=', v.aliases_snippet, ' snippets=', v.snippets,
+              ' deps=', v.snippet_dependencies, ' doc_links=', v.doc_links)
+FROM v_config_enrichment v ORDER BY 1;
+SELECT 'расхождений витрины с прямым подсчётом (должно быть 0) = ' || count(*)
+FROM v_config_enrichment v
+CROSS JOIN LATERAL (
+    SELECT (SELECT count(*) FROM config_aliases a
+             WHERE a.parent_uuid = v.report_uuid) AS aliases,
+           (SELECT count(*) FROM config_snippets s
+             WHERE s.parent_uuid = v.report_uuid) AS snippets,
+           (SELECT count(*) FROM config_snippet_dependencies d
+              JOIN config_snippets s ON s.id = d.snippet_id
+             WHERE s.parent_uuid = v.report_uuid) AS deps,
+           (SELECT count(*) FROM config_cross_references x
+             WHERE x.parent_uuid = v.report_uuid) AS links
+) c
+WHERE v.aliases_total <> c.aliases OR v.snippets <> c.snippets
+   OR v.snippet_dependencies <> c.deps OR v.doc_links <> c.links;
+
+SELECT '=== 21. Обогащение V17: сироты (должно быть 0) ===' AS section;
+-- FK в подсистеме один: зависимость -> сниппет (ON DELETE CASCADE). Остальные связи
+-- полиморфные по parent_uuid, поэтому сироты ловятся только запросом (правило E3 плана).
+SELECT 'алиасов без родителя в external_report = ' || count(*) FROM config_aliases a
+WHERE NOT EXISTS (SELECT 1 FROM external_report e WHERE e.uuid = a.parent_uuid);
+SELECT 'сниппетов без родителя в external_report = ' || count(*) FROM config_snippets s
+WHERE NOT EXISTS (SELECT 1 FROM external_report e WHERE e.uuid = s.parent_uuid);
+SELECT 'связей documentation без родителя в external_report = ' || count(*)
+FROM config_cross_references x
+WHERE NOT EXISTS (SELECT 1 FROM external_report e WHERE e.uuid = x.parent_uuid);
+SELECT 'зависимостей без сниппета (FK это исключает, проверяем на всякий случай) = ' || count(*)
+FROM config_snippet_dependencies d
+WHERE NOT EXISTS (SELECT 1 FROM config_snippets s WHERE s.id = d.snippet_id);
+SELECT 'алиасов на несуществующий сниппет (target_snippet_id) = ' || count(*) FROM config_aliases a
+WHERE a.target_snippet_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM config_snippets s WHERE s.id = a.target_snippet_id);
+
+
+SELECT '=== 22. Обогащение V17: цели разрешимы в сохранённом содержимом (битых = 0) ===' AS section;
+-- Словарь целей = ТО ЖЕ, что строит генератор (docs/CONFIGURATIONS_ENRICHMENT_PLAN.md, раздел 3):
+-- uuid строк выгрузки, module:<id bsl_modules>, module:form:<uuid формы>,
+-- form_item:<uuid формы>:<имя элемента>, snippet:<id сниппета>.
+WITH content_targets(target_uuid) AS (
+    SELECT uuid::text FROM external_report
+    UNION ALL SELECT uuid::text FROM attributes
+    UNION ALL SELECT uuid::text FROM tabular_sections
+    UNION ALL SELECT uuid::text FROM forms
+    UNION ALL SELECT uuid::text FROM templates
+    UNION ALL SELECT 'module:' || id::text FROM bsl_modules
+    UNION ALL SELECT 'module:form:' || form_uuid::text FROM form_ext WHERE ext IS NOT NULL
+    UNION ALL SELECT 'snippet:' || id::text FROM config_snippets
+    UNION ALL SELECT 'form_item:' || fe.form_uuid::text || ':' || (item ->> 'name')
+        FROM form_ext fe
+        CROSS JOIN LATERAL jsonb_array_elements(
+            CASE WHEN jsonb_typeof(fe.items) = 'array' THEN fe.items ELSE '[]'::jsonb END
+        ) AS item
+        WHERE item ->> 'name' IS NOT NULL
+)
+SELECT 'неразрешимых целей: алиасов=' ||
+       (SELECT count(*) FROM config_aliases a
+         WHERE a.active AND a.target_key IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM content_targets c WHERE c.target_uuid = a.target_key)) ||
+       ', зависимостей=' ||
+       (SELECT count(*) FROM config_snippet_dependencies d
+         WHERE NOT EXISTS (SELECT 1 FROM content_targets c WHERE c.target_uuid = d.target_uuid)) ||
+       ' (должно быть 0 и 0)';
+SELECT 'зависимостей с пустым target_uuid (резолв обязателен, должно быть 0) = ' || count(*)
+FROM config_snippet_dependencies d WHERE d.target_uuid IS NULL;
+
+
+SELECT '=== 23. Обогащение V17: происхождение и дубли (manual и generated не смешиваются) ===' AS section;
+-- Перегенерация снимает ТОЛЬКО origin='generated' и is_verified=false; ручные данные обязаны
+-- выживать (сама проверка выживания — validate_enrichment_flow.py, здесь — инварианты схемы).
+SELECT 'алиасов с неизвестным origin (должно быть 0) = ' || count(*) FROM config_aliases
+WHERE origin NOT IN ('generated', 'manual');
+SELECT 'ручных сниппетов, помеченных generated (должно быть 0) = ' || count(*)
+FROM config_snippets WHERE is_verified AND source_kind = 'generated';
+SELECT 'дублей активного алиаса (alias_norm, target_key) = ' || count(*) FROM (
+    SELECT alias_norm, target_key FROM config_aliases WHERE active
+    GROUP BY 1, 2 HAVING count(*) > 1) d;
+SELECT 'дублей сниппета (parent_uuid, source_kind, question) = ' || count(*) FROM (
+    SELECT parent_uuid, source_kind, question FROM config_snippets
+    GROUP BY 1, 2, 3 HAVING count(*) > 1) d;
+SELECT 'дублей зависимости (snippet_id, dependency_type, target_type, target_name) = ' || count(*)
+FROM (
+    SELECT snippet_id, dependency_type, target_type, target_name FROM config_snippet_dependencies
+    GROUP BY 1, 2, 3, 4 HAVING count(*) > 1) d;
+SELECT 'связей documentation с недопустимым local_doc_kind (должно быть 0) = ' || count(*)
+FROM config_cross_references WHERE local_doc_kind NOT IN ('group', 'snippet');
 

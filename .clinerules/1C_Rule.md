@@ -4,7 +4,22 @@
 
 ### назначение правил:
 
-- 1C_Rule.md - общие правила для работы с проектом (инструкции по использованию MCP, запуску различных команд и скриптов), прочая общая информация.
+- `1C_Rule.md` — общие правила для работы с проектом (инструкции по использованию MCP, запуску
+  различных команд и скриптов), прочая общая информация.
+- `1c-knowledge-base_Rule.md` — MCP `1c-knowledge-base`: база `local_doc`, поиск и загрузка
+  документации.
+- `1c-configurations-core_Rule.md` — MCP `1c-configurations-core`: контракт загрузки выгрузок,
+  схема `ckb_1c_configurations`, порядок создания БД, известные дефекты.
+- `1c-configurations-enrichment_Rule.md` — MCP `1c-configurations-enrichment`: схема обогащения
+  (`config_*`), 18 инструментов контракта, генерация, карточка объекта, состав макета-СКД,
+  привязка внешнего объекта к конфигурации (узлы V20/V20.1).
+- `1c-configurations-export_Rule.md` — MCP `1c-configurations-export`: статус сценария экспорта
+  (не реализован, узел V18), единственный инструмент `export_readiness_tool()`.
+
+Нормативы поведения (не файлы правил): `docs/config-scenarios/FLOWCHART_1c-configurations-core.md`
+(загрузка), `docs/CONFIGURATIONS_ENRICHMENT_PLAN.md` (обогащение V17). Правила и нормативы
+обязаны совпадать с кодом; расхождения ловят `validate_project.py`,
+`tools/check_mcp_tool_wiring.py`, `_cmp_ddl.py`.
 
 ## Роль
 
@@ -36,92 +51,120 @@
 
 ---
 
-### ⚙️ Шаг 2: Работа с конфигурациями 1С (MCP `1c-configurations-core`)
+### ⚙️ Шаг 2: Загрузка выгрузок 1С (MCP `1c-configurations-core`)
 
-**Когда использовать:** При работе с объектами конкретных конфигураций (БГУ2, ТSD и др.), поиске по BSL-коду конфигурации, получении структуры объектов.
+**Когда использовать:** загрузить каталог выгрузки (внешний отчёт, внешняя обработка, конфигурация,
+расширение) в базу `ckb_1c_configurations`, подтвердить перезагрузку дубликата, удалить загруженный
+объект. **Смотреть содержимое объекта средствами core-MCP нельзя** — инструменты просмотра удалены:
+для этого служат MCP `1c-configurations-enrichment` (карточка объекта, поиск по алиасам, сниппеты)
+и SQL-сверки `check_external_report_*.sql`.
 
 | Сценарий | Инструмент | Описание |
 |----------|-----------|----------|
-| Список конфигураций | `list_configurations_tool(status?)` | Получить список всех загруженных конфигураций |
-| Информация о конфигурации | `get_configuration_tool(config_id)` | Детальная информация по ID |
-| Найти по имени/UUID | `find_config_by_name_uuid_tool(name_or_uuid)` | Поиск конфигурации |
-| **Загрузка каталога (единственная точка входа)** | `load_1c_catalog_tool(source_path, force=False)` | Сервер сам определяет тип каталога и грузит; заменяет `register_*` |
-| Поиск объектов | `search_config_objects_tool(query, config_id?)` | Поиск по имени/описанию объектов конфигурации |
-| Структура объекта | `get_object_structure_tool(config_id, object_name)` | Получить реквизиты, формы объекта |
-| Список объектов по типу | `list_config_objects_tool(config_id, object_type?)` | Catalog, Document, Register и др. |
-| Поиск по BSL-коду | `search_bsl_code_tool(query, config_id?)` | Полнотекстовый поиск в модулях |
-| Получить код модуля | `get_bsl_module_code_tool(config_id, module_name?)` | Полный код BSL-модулей |
-| Значения перечислений | `get_enum_values_tool(config_id, enum_name?)` | Получить все значения Enum |
-| Прочитать XML/JSON | `read_config_file_tool(config_id, file_path?)` | Файлы конфигурации |
-| Пакетная индексация | `batch_index_from_dump_tool(config_id, type_filter?)` | Загрузка из ConfigDumpInfo.xml |
-| Удаление внешнего объекта | `delete_external_report_tool(source_path \| uuid \| report_id, object_type?)` | Удаляет запись внешнего объекта и его BSL-модули |
+| Правила загрузки (Шаг 0) | `get_load_config_rules_tool()` | compact-правила `LOAD_RULES_Config.md` |
+| **Загрузка каталога (единственная точка входа)** | `load_1c_catalog_tool(source_path, force=False)` | тип каталога определяется самим сервером по файлам корневого каталога |
+| Удаление внешнего объекта | `delete_external_report_tool(source_path \| uuid \| report_id, object_type?)` | снимает запись, детей и обогащение |
+| Привязать внешний объект к конфигурации (узлы V20, V20.1) | `set_object_configuration_tool(uuid \| source_path, configuration_id)` — инструмент enrichment-MCP (контракт 17 → 18); **показывает** привязку карточка `config_enrichment_stats_tool(uuid=…, card=True)`, обратный перечень отдаёт тот же вызов без uuid | привязку заявляет только оператор; `NULL` = «привязка не заявлена», а не «универсальный»; `configuration_id=None` — снять; несуществующий id отклоняется инструментом; внешнего ключа в схеме нет, битая ссылка называется прямо и требует перепривязки; `force=True` переносит значение |
 
-> ⚠️ **Контракт загрузки — только три инструмента:** `get_load_config_rules_tool()`,
-> `load_1c_catalog_tool(source_path, force=False)`, `delete_external_report_tool(...)`.
-> Отдельный анализ перед загрузкой не нужен: точка входа определяет тип каталога сама
-> (`analyze_config_load_tool` — только диагностика). Остальные инструменты сервера
-> `1c-configurations-core` — вне контракта, будут удалены или перенесены.
+> ⚠️ **Контракт — ровно эти три инструмента** (`register_external_report_tool` и
+> `analyze_config_load_tool` убраны: анализ выполняется внутри точки входа). 18 внеконтрактных
+> инструментов (`list_configurations_tool`, `get_configuration_tool`, `find_config_by_name_uuid_tool`,
+> `search_config_objects_tool`, `list_config_objects_tool`, `get_object_structure_tool`,
+> `search_bsl_code_tool`, `get_bsl_module_code_tool`, `list_bsl_modules_tool`,
+> `read_config_file_tool`, `get_enum_values_tool`, `batch_index_from_dump_tool`,
+> `count_objects_by_config_tool`, `delete_objects_by_config_tool`, `update_configuration_status_tool`,
+> `delete_config_tool`) **удалены 14.10.2026** — они обращались к несуществующей БД
+> `configurations` и к отсутствующим таблицам. Состав инструментов проверяется AST-сверкой
+> `python tools/check_mcp_tool_wiring.py`.
 > Норматив поведения: `docs/config-scenarios/FLOWCHART_1c-configurations-core.md`.
+>
+> 📌 **Узлы V20 + V20.1 (14.10.2026): привязка внешнего объекта к конфигурации.** В `external_report`
+> есть колонка `configuration_id` — **id строки заголовка** конфигурации (`configurations.id`).
+> Внешний ключ **снят узлом V20.1** в тот же день: `configurations` — справочная таблица, нужная
+> только при проверке данных отчёта, а ключ блокировал бы удаление или пересоздание заголовка;
+> индекс `idx_external_report_configuration_id` сохранён (обратный поиск привязок и битых ссылок).
+> Привязку **заявляет только оператор**: из выгрузки 1С значение не выводится, автоматической
+> классификации («универсальный / параметризуемый / привязанный») нет. Состояний ровно три:
+> `NULL` — «привязка **не заявлена**» (никогда не читается как «отчёт универсальный» — такого
+> состояния в модели нет); id + живая строка заголовка — «привязано»; id без строки заголовка —
+> «битая ссылка, требуется перепривязка» (название состояния даёт карточка, сводка и
+> предупреждение генерации). Ставит и снимает привязку `set_object_configuration_tool`
+> (enrichment-MCP, контракт 17 → 18): несуществующий id отклоняется, битой ссылки инструмент не
+> создаёт. `force=True` значение **переносит** (правило R11 норматива).
+> Подробности: п. 20–21 `.clinerules/1c-configurations-core_Rule.md`, раздел 12
+> `docs/CONFIGURATIONS_ENRICHMENT_PLAN.md`, проверки `python tools/check_v20_config_link.py`,
+> фаза `phase_configuration_link` в `validate_enrichment_flow.py`, раздел `15f`
+> `check_external_report_inventory.sql`.
 
-**Типы объектов (object_type):**
+**Варианты каталога** (правило R1, признаки — только файлы корневого каталога):
 
-- `configuration` — полная конфигурация 1С
-- `extension` — расширение конфигурации
-- `external_processor` — внешняя обработка
-- `external_report` — внешний отчет
+| Вариант | Статус |
+|---|---|
+| `external_report` — внешний отчёт | ✅ реализован (включая обогащение V17) |
+| `configuration`, `extension`, `external_processor` | ❌ возвращают «сценарий не реализован» |
 
 ---
 
-### 🔄 Шаг 3: Обогащение данных конфигураций (MCP `1c-configurations-enrichment`)
+### 🔄 Шаг 3: Анализ и обогащение объектов выгрузки (MCP `1c-configurations-enrichment`)
+
+**Когда использовать:** посмотреть, что представляет собой загруженный внешний отчёт и что делает его
+код; найти объект по русскому синониму, имени реквизита, элемента формы, имени процедуры; создать
+или снять алиас/сниппет/ссылку на документацию. Полные правила —
+`.clinerules/1c-configurations-enrichment_Rule.md` (контракт — 18 инструментов).
 
 | Сценарий | Инструмент | Описание |
 |----------|-----------|----------|
-| **Управление алиасами:** | | |
-| Добавить алиас | `add_config_alias_tool(config_id, alias_name, target_type, target_name, ...)` | Создать синоним для объекта |
-| Список алиасов | `list_config_aliases_tool(configuration_id?, target_type?)` | Получить алиасы с фильтрацией |
-| Разрешить алиас | `get_alias_target_tool(alias_name)` | Получить цель по имени алиаса |
-| Поиск по алиасу | `search_config_by_alias_tool(query)` | Полнотекстовый поиск целей |
-| Удалить алиас | `delete_config_alias_tool(alias_id)` | Soft-delete (active = false) |
-| **Управление сниппетами:** | | |
-| Добавить сниппет | `add_config_snippet_tool(config_id, question, answer, ...)` | Добавить вопрос-ответ к конфигурации |
-| Список сниппетов | `list_config_snippets_tool(config_id?)` | Получить сниппеты конфигурации |
-| Поиск по сниппетам | `search_config_snippets_tool(query, config_id?)` | Полнотекстовый поиск |
-| Статистика сниппетов | `get_config_snippet_stats_tool(config_id)` | Метрики по сниппетам |
-| Удалить сниппет | `delete_config_snippet_tool(snippet_id)` | Hard-delete с CASCADE |
-| **Связи и зависимости:** | | |
-| Связать документацию | `register_cross_reference_tool(...)` | Связать элемент документации с объектом |
-| Получить связи | `get_cross_references_tool(local_doc_element_id)` | Все связи элемента |
-| Зависимости сниппетов | `add_snippet_dependency_tool(snippet_id, ...)` | Привязка сниппета к объекту |
-| Обновить зависимости | `update_dependent_snippets_tool(config_id, ...)` | При переименовании объекта |
+| **Карточка объекта:** | | |
+| Свойства, состав, что делает код | `config_enrichment_stats_tool(uuid?, limit=20, card=True)` | без `uuid` — сводка по всем объектам (в т. ч. раздел «ПРИВЯЗКИ К КОНФИГУРАЦИИ»: заголовки и число привязанных объектов, счётчики состояний); с `uuid` — карточка: свойства, синоним, реквизиты с типами, ТЧ, формы и их состав, макеты, модули, сниппеты, состояние привязки |
+| **Привязка к конфигурации (узлы V20/V20.1):** | | |
+| Заявить или снять привязку | `set_object_configuration_tool(uuid?, source_path?, configuration_id?)` | `configuration_id` — id строки заголовка `configurations.id` (НЕ uuid метаданных 1С); `None` — снять; несуществующий или нечисловой id отклоняется, привязка не меняется; возвращает «было/стало», имя и версию заголовка и число привязанных объектов |
+| **Состав макета-СКД (узел B):** | | |
+| Состав конкретного макета | `get_config_template_tool(uuid?, source_path?, name?, include_query=False, max_bytes=2000)` | наборы данных и их поля, связи, параметры, вычисляемые поля, итоги, варианты настроек и вывод — из сохранённого `templates.ext`; текст запроса только при `include_query=True`; карточка объекта (`card=True`) отдаёт тот же состав и счётчики `dcs_*` |
+
 | **Генерация:** | | |
-| Авто-алиасы | `generate_aliases_for_object_tool(config_id, target_type, target_name, ...)` | Создать алиасы из имени объекта |
-| Получить сниппеты объекта | `get_snippets_for_object_tool(config_id, target_type, target_name)` | Сниппеты по объекту |
+| Пересобрать алиасы и сниппеты | `generate_config_enrichment_tool(uuid?, source_path?)` | источник — сохранённое содержимое БД, конфигуратор не открывается |
+| **Алиасы:** | | |
+| Найти алиас по началу/середине | `search_config_aliases_tool(query, uuid?, target_type?, limit?)` | так работает поиск по алиасам |
+| Разрешить алиас точно | `resolve_config_alias_tool(alias)` | отдаёт цели (объект, реквизит, форма, элемент, макет, модуль, сниппет) |
+| Список алиасов объекта | `list_config_aliases_tool(uuid?, target_type?, origin?, limit?, include_inactive?)` | `origin`: `generated` / `manual` |
+| Добавить ручной алиас | `add_config_aliases_tool(aliases, uuid?, source_path?, target_type?, target_name?, ...)` | там, где термина нет в выгрузке (русские формулировки, аббревиатуры) |
+| Снять алиас | `delete_config_alias_tool(alias_id, hard=False)` | по умолчанию мягкое снятие (`active=false`) |
+| **Сниппеты:** | | |
+| Полный код + зависимости + алиасы | `get_config_snippet_tool(snippet_id)` | карточка сниппета |
+| Список сниппетов (без кода целиком) | `list_config_snippets_tool(uuid?, source_kind?, limit?, only_verified?)` | код бывает десятки КБ |
+| Полнотекстовый поиск по сниппетам | `search_config_snippets_tool(query, uuid?, limit?)` | ищет и вопрос, и код |
+| Что известно про конкретную цель | `get_config_snippets_for_object_tool(uuid?, source_path?, target_type, target_name)` | перед тем, как писать новый сниппет |
+| Добавить ручной сниппет | `add_config_snippet_tool(question, answer, uuid?, source_path?, dependencies?, ...)` | `is_verified=true`, обязан сослаться на сохранённую цель |
+| Удалить сниппет | `delete_config_snippet_tool(snippet_id)` | снимает и его алиасы, зависимости, ссылки |
+| **Связи с документацией:** | | |
+| Поставить указатель `local_doc` → цель | `add_config_cross_reference_tool(uuid?, local_doc_kind, local_doc_id, target_type?, ...)` | битый id не сохраняется |
+| Прочитать связи | `get_config_cross_references_tool(uuid? \| local_doc_id, limit?)` | с проверкой указателя в `local_doc` |
+| Снять связь | `delete_config_cross_reference_tool(reference_id)` | |
+
+> ⚠️ Внешние объекты адресуются **`uuid` или `source_path` каталога выгрузки**, а не `config_id`
+> (таблица `configurations` для enrichment не используется). Старые инструменты с `config_id`
+> (`add_config_alias_tool`, `get_alias_target_tool`, `search_config_by_alias_tool`,
+> `get_config_snippet_stats_tool`, `register_cross_reference_tool`, `add_snippet_dependency_tool`,
+> `update_dependent_snippets_tool`, `generate_aliases_for_object_tool`,
+> `get_snippets_for_object_tool`) удалены вместе с мёртвым кодом `src/config_aliases.py`,
+> `src/config_snippets_manager.py`, `src/config_tools.py`.
 
 ---
 
 ### 📤 Шаг 4: Экспорт изменений конфигурации (MCP `1c-configurations-export`)
 
-**Когда использовать:** После изменения объектов в БД для выгрузки изменений обратно в файлы.
+**Статус: сценарий не реализован** (узел V18). В живой схеме нет таблицы объектов конфигурации с их
+XML и нет отслеживания изменённых объектов, поэтому выгружать в файлы нечего. Чтобы MCP не
+обещал лишнего, в сервере оставлен один честный инструмент:
 
 | Сценарий | Инструмент | Описание |
 |----------|-----------|----------|
-| **Отслеживание изменений:** | | |
-| Отметить изменение | `mark_object_modified_tool(config_id, target_type, target_name, modified?)` | Флаг изменённого объекта |
-| Снять флаг | `clear_modified_flag_tool(config_id, target_type, target_name)` | После успешного экспорта |
-| Список изменённых | `get_modified_objects_tool(config_id)` | Все модифицированные объекты |
-| Подсчитать изменения | `count_modified_objects_tool(config_id)` | Количество по типам |
-| **Экспорт:** | | |
-| Экспортировать | `export_config_changes_tool(config_id, target_path?)` | Выгрузка в файлы (только изменённые!) |
-| Журнал экспорта | `get_export_log_tool(config_id?, limit?)` | История экспортов |
+| Готовность экспорта | `export_readiness_tool()` | показывает, каких таблиц не хватает и сколько объектов в базе; вместо шести неработающих инструментов |
 
-**Стандартный цикл экспорта:**
-
-```text
-1. mark_object_modified_tool() — после каждого изменения объекта
-2. count_modified_objects_tool() — проверить объём изменений
-3. export_config_changes_tool() — выгрузить в файлы
-4. clear_modified_flag_tool() — снять флаги после успешного экспорта
-```
+Удалены: `mark_object_modified_tool`, `clear_modified_flag_tool`, `get_modified_objects_tool`,
+`count_modified_objects_tool`, `export_config_changes_tool`, `get_export_log_tool` — их таблица
+`modified_objects` в схеме отсутствует. Что потребуется для V18: таблица объектов конфигурации с их
+XML, флаги изменённых объектов, сборка XML по схеме и сравнение с выгрузкой.
 
 ---
 
@@ -135,23 +178,38 @@
 │     ├─ search_docs_tool("ключевые слова")
 │     └─ get_doc_tool(doc_id) — если нужна полная группа
 │
-├─ Вопрос об объекте конкретной конфигурации?
-│  └─→ MCP `1c-configurations-core`
-│     ├─ find_config_by_name_uuid_tool() — найти конфигурацию
-│     ├─ search_config_objects_tool("объект") — найти объект
-│     ├─ get_object_structure_tool() — получить структуру
-│     └─ search_bsl_code_tool("код") — поиск в BSL-модулях
+├─ Нужно загрузить / перезагрузить / удалить каталог выгрузки?
+│  └─→ MCP `1c-configurations-core` (контракт — 3 инструмента)
+│     ├─ get_load_config_rules_tool()          — Шаг 0, правила загрузки
+│     ├─ load_1c_catalog_tool(source_path, force=False)
+│     │     └─ ⚠️ уже загружено → СПРОСИТЬ оператора (перезаписать / удалить / отменить).
+│     │        force=True без вопроса — только по явной команде «замени конфигурацию»
+│     └─ delete_external_report_tool(...)
 │
-├─ Нужно создать алиас / сниппет для конфигурации?
-│  └─→ MCP `1c-configurations-enrichment`
-│     ├─ add_config_alias_tool()
-│     └─ add_config_snippet_tool()
+├─ Вопрос о содержимом загруженного объекта (свойства, реквизиты, формы, код)?
+│  └─→ MCP `1c-configurations-enrichment` (контракт — 18 инструментов)
+│     ├─ config_enrichment_stats_tool(uuid=…, card=True) — карточка объекта
+│     ├─ get_config_template_tool(uuid=…, name=…) — состав макета-СКД (узел B)
+│     ├─ search_config_aliases_tool / resolve_config_alias_tool — поиск по терминам
+│     ├─ search_config_snippets_tool / get_config_snippet_tool — код объекта
+│     ├─ set_object_configuration_tool(uuid=…, configuration_id=…) — заявить/снять привязку
+│     │     (V20.1); где битые ссылки и что привязано к заголовку — тот же
+│     │     config_enrichment_stats_tool() без uuid
+│     └─ generate_config_enrichment_tool(uuid=…) — если обогащения нет или оно устарело
 │
-└─ Изменили объект в БД и нужно выгрузить?
-   └─→ MCP `1c-configurations-export`
-      ├─ mark_object_modified_tool()
-      ├─ export_config_changes_tool()
-      └─ clear_modified_flag_tool()
+├─ Привязка к конфигурации: битая ссылка или её нет вовсе?
+│  └─→ состояние даёт карточка (`configuration_state`) и сводка без uuid:
+│      NULL = «не заявлена» (НЕ «универсальный»), id без заголовка = «битая, требуется
+│      перепривязка» → set_object_configuration_tool(uuid=…, configuration_id=<id>)
+│      или снятие (configuration_id=None). Внешнего ключа в схеме нет осознанно
+│
+├─ Нулевые счётчики enrichment при непустых счётчиках загрузки?
+│  └─→ сначала проверить саму загрузку (validate_external_children.py),
+│      потом генерировать, а не закрывать карточку нулями
+│
+└─ Нужен экспорт изменений в файлы?
+   └─→ MCP `1c-configurations-export` → export_readiness_tool()
+      (сценарий не реализован, узел V18 — см. docs/CONFIGURATIONS_ENRICHMENT_PLAN.md)
 ```
 
 ---
@@ -160,10 +218,30 @@
 
 1. **ВСЕГДА начинай с `1c-knowledge-base`** — только если информации нет, переходи к файлам
 2. **Исходники вне проекта:** `C:\1C_LLM\LoadDoc\` — документация и конфигурации
-3. **Все MCP-инструменты работают через server.py / server_configurations.py** — не напрямую через mcp_tools.py
+3. **Все MCP-инструменты работают через `server.py`, `server_configurations_core.py`, `server_configurations_enrichment.py`, `server_configurations_export.py`** — не напрямую через mcp_tools.py; состав инструментов каждого сервера зафиксирован в `tools/check_mcp_tool_wiring.py`
 4. **psql.exe запускается правильно:** `$env:PGPASSWORD='Sta090860'; C:\Postgres\bin\psql.exe` с флагами `-tA -P footer=off`  
 5. **Никогда не запрашивать подтверждение** на продолжение вывода — команды выполняются автоматически
 6. **Фильтровать вывод:** использовать LIMIT, WHERE в SQL или [:10], head в Python
+7. **Дубликат — спрашивать, а не решать самому.** Получив `⚠️ уже загружено`, AI-ассистент
+   останавливается и спрашивает оператора; `force=True` без вопроса допустим только по явной
+   команде «замени конфигурацию» / «перезагрузи» (правило R5, `LOAD_RULES_Config.md`)
+8. **Никаких обращений мимо MCP при анализе содержимого объекта.** Не допускается `psql.exe`,
+   `information_schema`, чтение файлов выгрузки ради ответа оператору — для этого есть
+   инструменты контракта (`config_enrichment_stats_tool(card=True)`,
+   `list_config_aliases_tool`, `list_config_snippets_tool`, `get_config_snippet_tool`).
+   Прямой SQL и разбор файлов остаются только в скриптах-валидаторах и SQL-сверках проекта
+9. **Обогащение завершается полностью, без напоминания:** после
+   `generate_config_enrichment_tool` обязательно добавить ручные алиасы
+   (`add_config_aliases_tool`) и указатели на документацию
+   (`add_config_cross_reference_tool` по группам из `search_docs_tool`); `doc_links = 0`
+   в карточке — признак незавершённой работы, а не повод предлагать это оператору.
+   Указатели ставятся **по критериям T1–T3** (T1 — якорь на конкретный фрагмент: `Template`,
+   `Module`, `Form`, сниппет; T2 — только неочевидное поведение и дефекты; T3 — не дублировать
+   типовое для любого отчёта СКД, общие ссылки на языковой API по умолчанию не ставятся).
+   Якорь обязан переживать перегенерацию: id авто-сниппетов меняются при каждом
+   `generate_config_enrichment_tool`, поэтому ссылка на авто-сниппет гибнет — якорь берут на
+   цель по имени (`Template`/`Form`/`Module`/`Attribute`) или на ручной `is_verified=true`.
+   Полные формулировки — правило 9 `.clinerules/1c-configurations-enrichment_Rule.md`
 
 ---
 
@@ -188,7 +266,9 @@ $env:PGPASSWORD='Sta090860'; C:\Postgres\bin\psql.exe -tA -P footer=off
 ## ВАЖНЫЕ ПРАВИЛА
 
 - Исходники документации (`C:\1C_LLM\LoadDoc\`) хранятся **вне проекта**
-- Все MCP-инструменты работают через server.py / server_configurations.py — не напрямую через mcp_tools.py
+- Все MCP-инструменты работают через `server.py` / `server_configurations_core.py` / `server_configurations_enrichment.py` / `server_configurations_export.py` — не напрямую через mcp_tools.py
+- Правки Python-кода MCP-сервера требуют его перезапуска (`python server_configurations_core.py` и т. д.); правки документации перезапуска не требуют
+- После правок серверов запускать `python tools/check_mcp_tool_wiring.py` (состав инструментов и разрешимость имён)
 
 ---
 
@@ -221,7 +301,7 @@ C:\1C_LLM\ckb\.clinerules\1c-knowledge-base_Rule.md
 
 ---
 
-### 2. Редактирование кода MCP `1c-configurations-core` (server_configurations.py)
+### 2. Редактирование кода MCP `1c-configurations-core` (server_configurations_core.py)
 
 **Перед началом редактирования файлов MCP `1c-configurations-core`:**
 
@@ -233,20 +313,24 @@ C:\1C_LLM\ckb\.clinerules\1c-configurations-core_Rule.md
 
 **Что нужно знать из файла правил:**
 
-- Структура базы данных `Configurations` (configuration, configuration_objects, bsl_modules)
-- Типы объектов и стратегии их загрузки
-- Алгоритм работы с конфигурациями
-- Критические правила работы с UUID и внешними обработками
+- Структура базы данных `ckb_1c_configurations` (`external_report`, `attributes`,
+  `tabular_sections`, `forms`, `form_ext`, `templates`, `bsl_modules`), витрины
+  `v_form_elements`, `v_form_events`
+- Контракт загрузки: три инструмента, четыре исхода, правило R1 (тип по файлам корневого каталога)
+- Порядок создания БД «с нуля»: шаг 1 `src/ddl_external_report.sql` → шаг 1b
+  `src/ddl_enrichment.sql` → шаг 2 `create_1c_configurations_db.sql`
+- Критические правила работы с UUID (R3), транзакционностью загрузки и удалением детей
 
 **После ознакомления:**
 
-1. Убедитесь, что понимаете механизм индексации объектов
-2. Проверьте соответствие описанных таблиц реальному состоянию БД
-3. Только после этого приступайте к редактированию кода
+1. Убедитесь, что понимаете механизм разбора выгрузки (`src/external_*_parser.py`)
+2. Проверьте соответствие описанных таблиц реальному состоянию БД (`_cmp_ddl.py`)
+3. Помните: `server_configurations_core.py` ведётся **вручную**, генератора больше нет
+4. Только после этого приступайте к редактированию кода
 
 ---
 
-### 3. Редактирование кода MCP `1c-configurations-enrichment` (server_configurations.py)
+### 3. Редактирование кода MCP `1c-configurations-enrichment` (server_configurations_enrichment.py)
 
 **Перед началом редактирования файлов MCP `1c-configurations-enrichment`:**
 
@@ -258,20 +342,27 @@ C:\1C_LLM\ckb\.clinerules\1c-configurations-enrichment_Rule.md
 
 **Что нужно знать из файла правил:**
 
-- Структура обогащения (config_aliases, config_snippets, dependencies)
-- Управление алиасами и сниппетами конфигураций
-- Механизм связей между документацией и объектами
-- Критические правила удаления алиасов и сниппетов
+- Структура обогащения `ckb_1c_configurations`: `config_aliases`, `config_snippets`,
+  `config_snippet_dependencies`, `config_cross_references`, витрины `v_config_alias_targets`,
+  `v_config_enrichment`
+- Словарь `target_type` (`ExternalReport`, `Attribute`, `TabularSection`, `TabularSectionColumn`,
+  `Form`, `FormItem`, `Template`, `Module`, `ConfigSnippet`) и стабильные ключи `target_uuid`
+- Генерация: один вызов на объект, одна транзакция, авто-строки (`origin='generated'`)
+  отделяются от ручных (`origin='manual'`, `is_verified=true`)
+- Карточка объекта (`config_enrichment_stats_tool(uuid=…, card=True)`) — только чтение
+- Правила удаления: алиас — мягкое снятие, сниппет — hard с его алиасами/зависимостями/ссылками,
+  enrichment чистится и при удалении самого объекта
 
 **После ознакомления:**
 
-1. Убедитесь, что понимаете механизм генерации алиасов
-2. Проверьте соответствие описанных таблиц реальному состоянию БД
+1. Убедитесь, что понимаете механизм генерации алиасов (`src/enrichment_generator.py`)
+2. Проверьте соответствие описанных таблиц реальному состоянию БД (`_cmp_ddl.py`, разделы 20–23
+   `check_external_report_fill.sql`)
 3. Только после этого приступайте к редактированию кода
 
 ---
 
-### 4. Редактирование кода MCP `1c-configurations-export` (server_configurations.py)
+### 4. Редактирование кода MCP `1c-configurations-export` (server_configurations_export.py)
 
 **Перед началом редактирования файлов MCP `1c-configurations-export`:**
 
@@ -283,15 +374,19 @@ C:\1C_LLM\ckb\.clinerules\1c-configurations-export_Rule.md
 
 **Что нужно знать из файла правил:**
 
-- Структура отслеживания изменений (modified_objects, export_log)
-- Стандартный цикл экспорта и управления флагами
-- Механизм реверс-инжиниринга конфигураций
-- Критические правила работы с флагами изменённых объектов
+- Сценарий экспорта **не реализован** (узел V18): в схеме нет объектов, изменяемых в базе,
+  и нет таблиц `configuration_objects`, `modified_objects`, `config_export_log`
+- Контракт сервера — один инструмент `export_readiness_tool()` (диагностика готовности)
+- Что требуется для появления экспорта: таблица объектов конфигурации с их XML, отслеживание
+  изменений, сборка XML по схеме и сравнение с выгрузкой
+- Штатный рабочий цикл сегодня: правки в файлах выгрузки → повторная загрузка
+  `load_1c_catalog_tool(..., force=True)`
 
 **После ознакомления:**
 
-1. Убедитесь, что понимаете механизм отслеживания изменений
-2. Проверьте соответствие описанных таблиц реальному состоянию БД
+1. Убедитесь, что не возвращаете удалённые инструменты цикла (mark/count/export/clear)
+2. Проверьте готовность живым `export_readiness_tool()` и составом через
+   `python tools/check_mcp_tool_wiring.py`
 3. Только после этого приступайте к редактированию кода
 
 ---

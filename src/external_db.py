@@ -20,22 +20,23 @@ import psycopg2.extras  # noqa: F401  (нужен писателям: execute_va
 DB_NAME = "ckb_1c_configurations"
 
 
-def db_config():
-    """Параметры подключения к ckb_1c_configurations (значения по умолчанию - рабочие)."""
+def db_config(dbname=None):
+    """Параметры подключения (dbname по умолчанию - ckb_1c_configurations; значения - рабочие)."""
     return {
         "host": os.environ.get("PGHOST", "localhost"),
         "port": int(os.environ.get("PGPORT", "5432")),
-        "dbname": DB_NAME,
+        "dbname": dbname or DB_NAME,
         "user": os.environ.get("PGUSER", "postgres"),
         "password": os.environ.get("PGPASSWORD", "Sta090860"),
     }
 
 
-def connect():
+def connect(dbname=None):
     """Открыть соединение с автосоставлением транзакций (autocommit = False)."""
-    conn = psycopg2.connect(**db_config())
+    conn = psycopg2.connect(**db_config(dbname))
     conn.autocommit = False
     return conn
+
 
 
 @contextmanager

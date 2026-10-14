@@ -3,10 +3,14 @@
 -- внешние обработки, модули BSL. Спецификации cc-1c-skills, формат метаданных 2.17.
 -- ============================================
 --
--- СОЗДАНИЕ БАЗЫ «С НУЛЯ» — ровно два шага после CREATE DATABASE (порядок фиксирован):
+-- СОЗДАНИЕ БАЗЫ «С НУЛЯ» — ровно три шага после CREATE DATABASE (порядок фиксирован):
 --   1) psql -v ON_ERROR_STOP=1 -d ckb_1c_configurations -f src/ddl_external_report.sql
 --        external_report + attributes, tabular_sections, forms, form_ext, templates
 --        + витрины анализа v_form_elements / v_form_events.
+--   1b) psql -v ON_ERROR_STOP=1 -d ckb_1c_configurations -f src/ddl_enrichment.sql
+--        config_aliases, config_snippets, config_snippet_dependencies, config_cross_references
+--        + витрины v_enrichment_targets / v_enrichment_objects (узел V17). FK шага 1b смотрят
+--        в таблицы шага 1, поэтому порядок 1 -> 1b -> 2 обязателен.
 --   2) psql -v ON_ERROR_STOP=1 -d ckb_1c_configurations -f create_1c_configurations_db.sql
 --        configurations, config_extensions, external_processing, bsl_modules (этот файл).
 --
@@ -26,6 +30,13 @@
 --     (известный дефект п.10 правил .clinerules — очистка модулей выполняется явно).
 --     Если FK будет добавлен, менять нужно и этот файл, и живую БД миграцией; расхождение
 --     поймает _cmp_ddl.py.
+--   * FK external_report.configuration_id -> configurations(id) НЕ объявляется (узел V20.1,
+--     14.10.2026): узел V20 добавлял его защищённым DO-блоком в двух местах, сейчас он снят.
+--     Конфигурация — справочная система, нужная только при проверке данных отчёта; FK мешал
+--     вести сам справочник (удалить заголовок, пока есть привязки, нельзя) и давал ошибку в
+--     момент записи, а не при анализе объекта. Битый id отклоняет set_object_configuration_tool
+--     (enrichment-MCP), потерянная ссылка обнаруживается при чтении — карточка и сводка.
+--     Для живой БД с уже созданным FK — migrate_v21_drop_configuration_fk.sql.
 --   * FK configurations.app_module_id/session_module_id/data_proc_module_id/ext_conn_module_id
 --     на bsl_modules не объявляются: ссылки взаимные (bsl_modules.configuration_id ->
 --     configurations), порядок CREATE TABLE их не разводит, в живой БД таких FK нет.
@@ -144,4 +155,27 @@ CREATE INDEX IF NOT EXISTS idx_bsl_modules_parent_uuid ON bsl_modules(parent_uui
 CREATE INDEX IF NOT EXISTS idx_bsl_modules_module_type ON bsl_modules(module_type);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_bsl_modules_parent_file
     ON bsl_modules(parent_uuid, file_path) WHERE parent_uuid IS NOT NULL;
+
+-- --------------------------------------------
+-- УЗЕЛ V20 (14.10.2026): привязка внешнего объекта к конфигурации, заявленная оператором.
+-- external_report.configuration_id — id строки заголовка конфигурации (configurations.id).
+-- NULL = привязка НЕ заявлена; это не утверждение «отчёт универсальный». Значение ставит
+-- только оператор: в выгрузке 1С ссылки на конфигурацию нет, автоматического вывода нет.
+-- Колонка и индекс создаются шагом 1 (src/generate_ddl.py).
+--
+-- УЗЕЛ V20.1 (14.10.2026, решение оператора): FK external_report.configuration_id ->
+-- configurations(id) СНЯТ. Изначально он объявлялся защищённым DO-блоком в двух местах
+-- (здесь и в src/generate_ddl.py), потому что таблицы создаются разными шагами установки.
+-- От FK отказались осознанно: конфигурация — справочная система, которая нужна только при
+-- проверке данных отчёта; ни загрузка, ни обогащение, ни карточка для своей работы в неё не
+-- обращаются. FK блокировал бы удаление или пересоздание заголовка, пока к нему есть привязки,
+-- а ошибка приходила бы сырым сообщением psycopg2 в момент записи через psql, а не строкой с
+-- указанием действия. Работают другие механизмы (тот же контракт, что у
+-- config_cross_references.local_doc_id): битый id отклоняет set_object_configuration_tool
+-- (enrichment-MCP), а потерявшая заголовок ссылка обнаруживается при чтении — карточка объекта
+-- и сводка различают «не заявлена» / «привязано» / «битая, требуется перепривязка».
+-- Индекс по configuration_id оставлен: перепривязка ищется обратным запросом.
+-- Для живой БД, где FK уже создан, — migrate_v21_drop_configuration_fk.sql.
+-- --------------------------------------------
+
 

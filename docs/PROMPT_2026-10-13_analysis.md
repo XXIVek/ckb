@@ -1,5 +1,18 @@
 # Промт сессии 13.10.2026 — SQL-анализ загруженных отчётов, ревизия инструментов, стратегия enrichment-MCP
 
+> ⚠️ **Исторический документ (зафиксировано 14.10.2026).** Текст ниже — постановка задачи сессии
+> 13.10.2026 и её промежуточные итоги. Часть утверждений к 14.10.2026 устарела и исправлена не будет,
+> чтобы не терять историю решений: таблицы обогащения (`config_aliases`, `config_snippets`,
+> `config_snippet_dependencies`, `config_cross_references`) **созданы** (узел V17), внеконтрактные
+> инструменты core-MCP и export-MCP **удалены**, `generate_servers.py` удалён,
+> `src/config_tools.py` / `src/config_aliases.py` / `src/config_snippets_manager.py` удалены,
+> карточка объекта реализована (узел V17.7). Актуальные правила:
+> `.clinerules/1c-configurations-enrichment_Rule.md`,
+> `.clinerules/1c-configurations-core_Rule.md`; актуальный план:
+> `docs/CONFIGURATIONS_ENRICHMENT_PLAN.md`. Вставлять в новое контекстное окно этот текст целиком
+> больше не нужно — вместо этого читайте файлы правил.
+
+
 > Файл-заготовка: `docs/PROMPT_2026-10-13_analysis.md`. Вставлять в новое контекстное окно целиком.
 
 ## Краткая версия (если весь текст вставлять неудобно)
@@ -21,11 +34,21 @@ load_1c_catalog_tool; БД конфигураций — ckb_1c_configurations, �
 Решение по доработке (узлы V14+V15): при загрузке обычной формы сразу писать в form_ext два значения,
 чтобы при анализе не распаковывать Bin каждый раз — (1) состав элементов формы, (2) модуль формы.
 Новые колонки не нужны: в form_ext уже есть items/events/attributes/commands jsonb и ext text; для
-Ordinary они пустуют. V14 = модуль из ext_bin в ext + честное предупреждение; V15 = разложить layout
+Ordinary они пустовали. V14 = модуль из ext_bin в ext + честное предупреждение; V15 = разложить layout
 в items/attributes/events; V16 (отдельно) = обратная сборка Form.bin.
 
-СДЕЛАНО 13.10.2026 (не перепроверять): V14 реализован и проверен офлайн + живым
-load_1c_catalog_tool — form_ext.ext содержит модуль из Form.bin побайтово после снятия BOM и
+СДЕЛАНО 13.10.2026 (не перепроверять): V14 и V15 реализованы и проверены офлайн
+(validate_external_children.py, _v13_mcp_layer.py, validate_form_bin_decode.py, tools/decode_form_layout.py,
+три SQL-сверки — код возврата 0). V15: src/external_form_decoder.py::decode_layout (FormElements26/27)
+раскладывает 0/form в те же колонки form_ext — items 10, attributes 4, events 1, commands 1,
+auto_command_bar.name=ДействияФормы для Test2_Otchet; через v_form_elements 10 элементов (3 с источником
+данных, 4 с подписью), через v_form_events 1 событие; round-trip 0/form побайтово. v8unpack остаётся
+опциональной (graceful degradation проверена), в корень проекта не переносится. Не закрываются узлом
+V15: скалярные свойства и заголовок ordinary-формы (колонок нет), обратная сборка Form.bin (V16).
+Живой вызов через MCP-сервер V15 **подтверждён после перезапуска `python server_configurations_core.py`
+(13.10.2026)**: карточка `force=True` содержит строки «Состав формы … разложен из 0/form … items 10,
+attributes 4, events 1, commands 1» и «Модуль формы … извлечён из 0/module … (V14): 7639 символов».
+Ранее (V14): form_ext.ext содержит модуль из Form.bin побайтово после снятия BOM и
 обрамляющей пустоты; ext_size = octet_length(ext_bin) (размер контейнера, не нормализованного
 текста), ext_truncated=false, ext_path указывает на Form.bin. Предупреждение переформулировано
 («элементы формы не разложены — узел V15»). Витрины v_form_elements / v_form_events добавлены в
@@ -43,16 +66,20 @@ _create_tables_only.sql удалён; _cmp_ddl.py сверяет всю схем
    распаковки», слепые зоны, новые секции check_external_report_fill.sql / варианты
    check_external_report_search.sql, черновик витрин v_form_elements / v_form_events).
    ЧАСТИЧНО СДЕЛАНО: загрузки есть, витрины есть, секции 17-20 и check_external_report_inventory.sql
-   есть. Осталось: отчёт-инвентарь текстом + список слепых зон + варианты поиска 12+ (элементы
-   формы, подписи, источники данных) — после V15.
+   есть; после V15 добавлены секции 17-18 ожиданий V15 в check_external_report_fill.sql, разделы 7/10-10e/11
+   в check_external_report_inventory.sql и варианты поиска 12-16 в check_external_report_search.sql
+   (элементы формы, подписи, источники данных, обработчики событий, FTS по составу). Отчёт-инвентарь
+   текстом и список слепых зон — ANALYSIS_2026-10-13_content_inventory.md (после V15 пустой состав
+   ordinary-формы из слепых зон снят, остаются скалярные свойства и заголовок ordinary-формы).
 2. Ревизия инструментов анализа (список и статусы — в разделе 5 файла-промта).
 3. Обсудить стратегию MCP 1c-configurations-enrichment (таблиц config_aliases/config_snippets/
    dependencies отсутствуют в обеих БД, код ходит в несуществующую БД configurations — раздел 6).
 
-Ничего не удалять из БД без явного решения: эталоны report_id=164 (Test1_Otchet,
-СравнениеУСНИ90_2, 36/3/1/1/1/1) и report_id=165 (Test2_Otchet, СреднийВозрастОС, 0/0/1/1/1/1).
+Ничего не удалять из БД без явного решения: эталоны report_id=233 (Test1_Otchet,
+СравнениеУСНИ90_2, 36/3/1/1/1/1) и report_id=235 (Test2_Otchet, СреднийВозрастОС, 0/0/1/1/1/1 —
+создан живой загрузкой через MCP после перезапуска сервера).
 После `validate_load_flow.py --with-load` БД пустеет — эталоны нужно загрузить заново и записать
-новые id (это и есть причина смены 135 → 164/165).
+новые id (история смен: 135 → 164/165 → 233/234 → 233/235).
 ```
 
 ## 0. Роль и обязательные правила
@@ -83,13 +110,17 @@ MCP-серверы загрузки конфигураций). Перед люб
 Состояние БД на 13.10.2026 (проверено запросами):
 
 ```text
-external_report = 2   Test1_Otchet → report_id=164 (СравнениеУСНИ90_2, attrs 36, ts 3, forms 1,
+external_report = 2   Test1_Otchet → report_id=233 (СравнениеУСНИ90_2, attrs 36, ts 3, forms 1,
                       form_ext 1, templates 1, bsl 1)  — управляемая форма
-                      Test2_Otchet → report_id=165 (СреднийВозрастОС, attrs 0, ts 0, forms 1,
-                      form_ext 1, templates 1, bsl 1)  — обычная форма (Ordinary)
+                      Test2_Otchet → report_id=235 (СреднийВозрастОС, attrs 0, ts 0, forms 1,
+                      form_ext 1, templates 1, bsl 1)  — обычная форма (Ordinary); запись 235 создана
+                      живой загрузкой через MCP после перезапуска сервера (предыдущая 234 удалена force)
 form_ext: у Managed заполнены items/events/attributes/commands/auto_command_bar + ext (Form.xml);
-          у Ordinary заполнены ext (модуль, V14), ext_bin, ext_size, ext_path; items/events/
-          attributes/commands/auto_command_bar — пустые jsonb-массивы [] (не NULL!) — ожидание V15
+          у Ordinary после V14 заполнены ext (модуль), ext_bin, ext_size, ext_path, а после V15 —
+          те же jsonb-колонки, что и у Managed: items 10, attributes 4, events 1, commands 1,
+          auto_command_bar.name=ДействияФормы (замер живой загрузки ID=235: length(ext)=7591,
+          octet_length(ext_bin)=24549; Test1_Otchet id=233). Пустой массив ≠ NULL:
+          признак разобранной формы jsonb_array_length(items) > 0
 configurations = 0 строк (таблица существует в ckb_1c_configurations, но пуста)
 схема: установка «с нуля» = шаг 1 src/ddl_external_report.sql, шаг 2 create_1c_configurations_db.sql;
        _cmp_ddl.py — 212 колонок, 43 индекса, 29 ограничений, 2 витрины: расхождений нет
@@ -237,8 +268,8 @@ MCP-сервера после правок Python (`python server_configurations
 Загружать больше нечего — оба эталона в БД (сверить счётчики запросом 1 из этого раздела):
 
 ```text
-report_id=164  Test1_Otchet → СравнениеУСНИ90_2   attrs 36, ts 3, forms 1, form_ext 1, templates 1, bsl 1
-report_id=165  Test2_Otchet → СреднийВозрастОС     attrs 0,  ts 0, forms 1, form_ext 1, templates 1, bsl 1
+report_id=233  Test1_Otchet → СравнениеУСНИ90_2   attrs 36, ts 3, forms 1, form_ext 1, templates 1, bsl 1
+report_id=235  Test2_Otchet → СреднийВозрастОС     attrs 0,  ts 0, forms 1, form_ext 1, templates 1, bsl 1
 если после регресса (`validate_load_flow.py --with-load`) БД пуста — загрузить заново через
 load_1c_catalog_tool(source_path='C:\1C_LLM\LoadDoc\Test1_Otchet') и …\Test2_Otchet, новые id
 записать сюда и в раздел 1; повторная загрузка того же каталога без force → `⚠️ уже загружено`.
@@ -345,10 +376,11 @@ C:\Postgres\bin\psql.exe -v ON_ERROR_STOP=1 -U postgres -h localhost -d ckb_1c_c
   правил). `count_objects_by_config_tool()` падает с TypeError (п. 7).
 - `generate_servers.py` берёт тела инструментов из устаревшего `server_configurations.py` и теряет
   инструменты контракта + импорты `src/` — `server_configurations_core.py` менять только вручную.
-- `requirements.txt` в корне нет; `v8unpack` описан только в `tools/requirements.txt`. Для V15 он
-  становится **рантайм-зависимостью загрузчика** — нужно явное решение: обязательная зависимость
-  (и тогда корневой `requirements.txt`) или опциональная с graceful fallback (по умолчанию —
-  опциональная, поведение V13 сохраняется).
+- `requirements.txt` в корне нет; `v8unpack` описан только в `tools/requirements.txt`. С V14/V15 она
+  используется загрузчиком, но **решение зафиксировано 13.10.2026: зависимость остаётся опциональной**,
+  graceful деградация обязательна (без библиотеки `form_ext.ext` и jsonb-колонки ordinary-формы пустые,
+  в карточке предупреждение, загрузка продолжается, отказ отсутствует). В корневой `requirements.txt`
+  не переносить до отдельного решения.
 - Схема: FK на `bsl_modules.report_id` отсутствует (п. 10), глобальный `UNIQUE (uuid)` у
   `attributes`/`tabular_sections` блокирует варианты «конфигурация»/«расширение» (п. 13),
   `forms`/`templates` уже полиморфные `UNIQUE (parent_uuid, uuid)` (V13).
@@ -437,9 +469,9 @@ cd C:\1C_LLM\ckb; python server_configurations_core.py
 - `v8unpack` вызывать только с `deflate=False` (иначе `invalid block type`); CLI `-E` не использовать.
 - Пакетный `psql` без `-v ON_ERROR_STOP=1` возвращает 0 при ошибке в середине файла — часть проверок
   молча не выполняется. Литерал `'\'` в SQL склеивает команды.
-- Не трогать эталонные записи `report_id=164` (Test1_Otchet) и `report_id=165` (Test2_Otchet) без
-  явного решения; при полной очистке БД — `delete_external_report_tool(report_id=164)` и
-  `…(report_id=165)` и финальная проверка счётчиков/сирот = 0. После очистительного регресса
+- Не трогать эталонные записи `report_id=233` (Test1_Otchet) и `report_id=235` (Test2_Otchet) без
+  явного решения; при полной очистке БД — `delete_external_report_tool(report_id=233)` и
+  `…(report_id=235)` и финальная проверка счётчиков/сирот = 0. После очистительного регресса
   (`validate_load_flow.py --with-load`) эталоны загружаются заново, id меняются — зафиксировать
   новые id в этом файле и в `.clinerules/1c-configurations-core_Rule.md`.
 

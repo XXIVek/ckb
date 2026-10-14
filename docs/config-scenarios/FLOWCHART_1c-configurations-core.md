@@ -45,6 +45,7 @@
 | **R8** | Успех → карточка результата: ID, UUID, имя, тип, счётчики, предупреждения |
 | **R9** | Разделение содержимого подкаталогов (узел V13): описание формы → `forms` + `form_ext`; **модуль формы** (`Forms/<Имя>/Ext/Form/Module.bsl`) → `form_ext.ext`, а **не** в `bsl_modules`; бинарная форма → `form_ext.ext_bin`; содержимое макета (`Templates/<Имя>/Ext/Template.xml` / `Template.bin`) → `templates.ext` / `templates.ext_bin`; модули объекта и менеджера (`Ext/*.bsl`) → `bsl_modules`. Записать модуль формы ещё и в `bsl_modules` — дефект |
 | **R10** | Дочерние строки форм и макетов уникальны **в пределах родителя**: `UNIQUE (parent_uuid, uuid)` + отдельный индекс по `uuid`; модули внешнего объекта — частичный уникальный индекс `bsl_modules(parent_uuid, file_path) WHERE parent_uuid IS NOT NULL`. Глобальный `UNIQUE (uuid)` для этих таблиц — дефект (блокирует вариант «расширение») |
+| **R11** | `configuration_id` (привязка к строке заголовка конфигурации, узел V20) — **данные оператора**, а не выгрузки: загрузчик не выводит её из XML, не догадывается о ней и не сбрасывает. `force=True` переносит значение на новую строку; карточка дубликата показывает привязку, карточка перезагрузки — строку о переносе. `NULL` = «привязка не заявлена», состояния «универсальный» в модели нет, и в ответах инструментов его быть не может |
 
 Сканирование на этапах R1/R6 — **только файлы корневого каталога, без подкаталогов** (их там
 несколько: `Configuration.xml`, `ConfigDumpInfo.xml`, XML внешнего объекта). Разбор содержимого
@@ -144,17 +145,18 @@ flowchart TD
     V12 -.-> V13
     V14[V14 обычная форма FormBin: модуль из 0/module контейнера в form_ext.ext через v8unpack - реализовано]
     V13 -.-> V14
-    V15[V15 обычная форма: разметка 0/form в form_ext items events attributes commands - не реализовано]
+    V15[V15 обычная форма: разметка 0/form в form_ext items events attributes commands через external_form_decoder - реализовано]
     V14 -.-> V15
     VX1[VX1 формы и макеты конфигурации и расширения - узлы вариантов 1 2 4, заглушка]
     V13 -.-> VX1
     classDef deferred stroke-dasharray: 5 5;
-    class V15,VX1 deferred;
+    class VX1 deferred;
 ```
 
 **Нумерация узлов (с 13.10.2026).** `V1–V13` — реализованный тракт внешнего отчёта.
-`V14–V16` — тракт **обычных форм**: V14 (модуль из `Form.bin`) реализован, V15 (разметка `0/form` →
-`form_ext.items`/`events`/`attributes`/`commands`) и V16 (обратная сборка `Form.bin`) отложены.
+`V14–V16` — тракт **обычных форм**: V14 (модуль из `Form.bin`) и V15 (разметка `0/form` →
+`form_ext.items`/`events`/`attributes`/`commands`/`auto_command_bar`) реализованы 13.10.2026,
+V16 (обратная сборка `Form.bin`) отложен.
 Узел дочерних данных вариантов 1, 2, 4 обозначен **VX1** — раньше в схеме он назывался `V14`,
 нумерация изменена, чтобы roadmap обычных форм не спорил с заглушкой. В текстах правил и промтов
 12–13.10.2026 «V14/V15/V16» означают именно тракт обычных форм.
@@ -195,7 +197,7 @@ flowchart TD
 | `Forms/<Имя>.xml` (файл регистрации) | `forms`: `uuid` (из атрибута `uuid` этого файла), `name`, `form_type`, `synonym`, `comment`, `use_purposes`, `parent_type` | пустой или кривой `uuid` — ошибка по R3, откат |
 | `Forms/<Имя>/Ext/Form.xml` | `form_ext` — одна строка на форму: `form_id` (FK → `forms(id)` ON DELETE CASCADE), `form_uuid`, `parent_uuid`, скалярные свойства (`command_bar_location`, `report_result`, `details_data`, `report_form_type`, `auto_show_state`, `custom_settings_folder`, `*_view_mode`), перечни `auto_command_bar`, `events`, `attributes`, `commands`, `items` — jsonb | скалярные свойства читаются из **корня** `Form.xml`: обёртки `<Properties>` в файле содержимого формы нет, в отличие от XML метаданных (узел V14.1, 13.10.2026 — до правки эти колонки оставались NULL); нет каталога `Ext` у формы — только предупреждение |
 | `Forms/<Имя>/Ext/Form/Module.bsl` | `form_ext.ext` + `ext_size`, `ext_format='bsl'`, `ext_path`, `ext_truncated` | **в `bsl_modules` модуль формы не пишется** (R9) |
-| `Forms/<Имя>/Ext/Form.bin` | `form_ext.ext_bin`, `ext_format='bin'`; **с узла V14** дополнительно `form_ext.ext` (текст модуля `0/module`), `ext_size`, `ext_path` | **обычная форма** (`forms.form_type='Ordinary'`): свойства формы не разобраны — предупреждение «модуль и элементы внутри Form.bin»; модуль извлекается из контейнера, элементы — нет (см. «Обычные формы» ниже, узел V15 отложен) |
+| `Forms/<Имя>/Ext/Form.bin` | `form_ext.ext_bin`, `ext_format='bin'`; **с узла V14** дополнительно `form_ext.ext` (текст модуля `0/module`), `ext_size`, `ext_path`; **с узла V15** — `form_ext.items`/`attributes`/`events`/`commands`/`auto_command_bar` из разметки `0/form` | **обычная форма** (`forms.form_type='Ordinary'`): модуль и состав элементов извлекаются из контейнера одним его распаковыванием (`_container_files` → `_store_container_form_module` + `_apply_container_form_layout` → `src/external_form_decoder.py`); скалярные свойства ordinary-формы и её заголовок в БД не пишутся (нет `Form.xml`, колонки нет) — предупреждение «скалярные свойства и заголовок ordinary-формы не сохраняются»; сбой разбора разметки — предупреждение, состав остаётся пустым, загрузка идёт дальше (см. «Обычные формы» ниже) |
 | `Templates/<Имя>.xml` | `templates`: `uuid`, `name`, `template_type`, `synonym`, `comment`, `parent_type` | |
 | `Templates/<Имя>/Ext/Template.xml` | `templates.ext`, `ext_root_tag` (`DataCompositionSchema` и т. п.), `ext_format='xml'`, `ext_size`, `ext_path` | |
 | `Templates/<Имя>/Ext/Template.bin` | `templates.ext_bin`, `ext_format='bin'` | |
@@ -225,7 +227,8 @@ flowchart TD
   `Managed` с `Form.xml` — дефект разбора; проверки — раздел 19 `check_external_report_fill.sql`
   и «Test1: скалярные свойства формы разобраны из Form.xml в form_ext (V14.1)» в
   `validate_external_children.py`. У ordinary-формы (`ext_format='bin'`) эти свойства не
-  заполняются и станут доступны только с узлом V15.
+  заполняются: `Form.xml` для ordinary не выгружается, а отдельной колонки под скаляры из `0/form`
+  нет — узел V15 их не затрагивал (решение по DDL не принято).
 
 
 
@@ -302,15 +305,58 @@ CRLF превращаются в LF; модуль из `Form.bin` декодир
 осознанная (текст не переписывается), но SQL-поиск по строкам обязан это учитывать:
 `split_part`/`regexp_split_to_array` — по `[[:space:]]+` или `E'\\r?\\n'`, а не по `chr(10)`.
 
-**v8unpack — опциональная зависимость.** При её отсутствии поведение остаётся как в V13 (`ext` пуст,
-`ext_bin` заполнен) и в карточке появляется предупреждение «v8unpack не установлен…». Рантайм-
-зависимость core-сервера не вводится; для V15 она потребуется как обязательная для разложения
-разметки (или как деградация с предупреждением — решение на V15).
+**v8unpack — опциональная зависимость (решение зафиксировано узлом V15).** При её отсутствии
+поведение остаётся как в V13 (`ext` пуст, `ext_bin` заполнен, состав формы не разложен) и в карточке
+появляется предупреждение «v8unpack не установлен…». Рантайм-зависимость core-сервера не вводится,
+в корневой `requirements.txt` пакет не переносится — он остаётся только в `tools/requirements.txt`
+(`v8unpack>=1.2.0`). Тот же отказ с той же деградацией — при неподдерживаемой версии разметки или
+её повреждении.
 
 **Проверка:** `python validate_form_bin_decode.py --file <Form.bin> --uuid <uuid> --form Отчет`
-(код возврата 0, секция «ПРОВЕРКА V14») — сверяет `ext` из БД с модулем контейнера по байтам после
-нормализации и проверяет инварианты таблицы выше. SQL-эквивалент — разделы 15 и 17–20
-`check_external_report_fill.sql`, инвентарь — `check_external_report_inventory.sql`.
+(код возврата 0, секции «ПРОВЕРКА V14» и «ПРОВЕРКА V15») — сверяет `ext` из БД с модулем контейнера
+по байтам после нормализации, проверяет инварианты таблицы выше, сверяет офлайн-разбор `0/form` с
+содержимым `form_ext.items`/`attributes`/`events`/`commands` и строками витрин и проверяет round-trip
+разметки. SQL-эквивалент — разделы 15 и 17–20 `check_external_report_fill.sql`,
+поиск по составу — `check_external_report_search.sql` (ПОИСК 12–16), инвентарь —
+`check_external_report_inventory.sql`.
+
+#### Реализовано (узел V15, 13.10.2026): разметка `0/form` разложена в те же колонки `form_ext`
+
+Цель узла — чтобы SQL-анализ был единым для `Ordinary` и `Managed`: новые колонки не вводились,
+заполняются те же `form_ext.items` / `attributes` / `events` / `commands` / `auto_command_bar`.
+
+Реализация:
+
+| Файл | Что делает |
+|---|---|
+| `src/external_form_decoder.py` (новый) | `decode_layout(layout_bytes, form_name, form_uuid)` — обёртка над `v8unpack.MetaDataObject.Form.FormElements26/27` (класс выбирается по версии из первого элемента `0/form`; у эталонной выгрузки — `27`), контракт: `success`/`reason`, `columns` (`items`, `attributes`, `events`, `commands`, `auto_command_bar`), `caption`, `layout_version`, `counts`, `warnings`. Исключений не бросает: любой сбой → `success=False` с причиной. Вспомогательные `_Stub` (атрибуты, которые `FormElements27` читает и пишет: `options`, `props`, `elements_tree`, `elements_data`, `props_index`, `params`, `commands`, `header`), `_as_jsonable` (снимает `bytes`/`set`/`dict_keys`, остающееся отдаёт строкой), `_brief_raw` (краткое описание `raw` вместо полного `elem.json`) |
+| `src/external_subdir_parser.py` | `_apply_container_form_layout` — вызов декодера из `_read_form` при `ext_format='bin'`; контейнер распакуется **один раз на форму** (`_container_files`) и переиспользуется для `0/module` (V14) и `0/form` (V15): `_store_container_form_module` принимает уже распакованный контейнер. Контракт `form_ext` дополняется **после** установки скаляров V14.1 — иначе `items=None` затёр бы `[]` из `Form.xml` |
+| карточка результата | отдельная строка «Состав формы … разложен из 0/form (версия разметки N): items …, attributes …, events …, commands …»; при сбое — предупреждение с причиной и «состав формы не разложен», загрузка продолжается |
+
+Ключи `items` для ordinary: `path` (например `Страница1/Организация`), `name`, `page`, `type`
+(имена из `FormItemTypes`: `CommandPanel`, `Field`, `Label`, `ListField`, `Page`, `TableField`),
+а также `data_source` (атрибут формы, к которому привязан элемент) и `captions` — только при наличии;
+служебные `id` и краткое описание `raw` сохраняются, полный `elem.json` (63 КБ против 10.6 КБ
+разметки) — нет: источник истины `form_ext.ext_bin`, из него `0/form` воспроизводится побайтово.
+
+Эталон `Test2_Otchet` (форма `Отчет`): `items` 10 (страница + 9 элементов), `attributes` 4
+(`Организация`, `ДатаОтчета`, `ВнешнийОтчетОбъект`, `ПолеСписка1`), `events` 1 (`ПередОткрытием`),
+`commands` 1 (`ДействияФормыОтчетСформировать`), `auto_command_bar.name` = `ДействияФормы`;
+через `v_form_elements` — 10 элементов, из них 10 с типом, 3 с источником данных, 4 с подписью;
+через `v_form_events` — 1 событие. Витрины нормализуют ключи Managed (`kind`/`datapath`/`title`) и
+Ordinary (`type`/`data_source`/`captions`) через `COALESCE`, поэтому запросы к ним не менялись.
+
+**Что узлом V15 не закрывается:** скалярные свойства ordinary-формы и её заголовок — для ordinary
+`Form.xml` не выгружается, а отдельной колонки под эти значения нет (решение DDL — за рамками узла;
+декодер заголовок читает и отдаёт в контракте `caption`, но в БД он не пишется). Обратная сборка
+`Form.bin` из `items`/`ext` — узел V16.
+
+**Проверки узла V15:** `validate_external_children.py` (наполнение, витрины, «без `v8unpack`
+загрузка продолжается: `ext_bin` сохранён, состав пустой, предупреждение с причиной»,
+«после восстановления `v8unpack` тот же каталог разложен полностью» — детерминированность,
+`force=True` без дублей `form_ext`); `validate_form_bin_decode.py` (секция V15 + round-trip через
+`tools/decode_form_layout.check_round_trip`); офлайн-разбор подкаталогов —
+`python C:\TMP\_t2_probe_subdirs.py`; разбор одной разметки — `python tools/decode_form_layout.py`.
 
 ### Поля записи `external_report` (узел V8)
 
@@ -323,6 +369,7 @@ CRLF превращаются в LF; модуль из `Form.bin` декодир
 | `containedobject_classid`, `containedobject_objectid` | `InternalInfo/ContainedObject/{ClassId,ObjectId}` (элементы `InternalInfo` выгружаются с префиксом `xr:`, поиск по локальным именам тегов) |
 | `generatedtype_name`, `generatedtype_category`, `generatedtype_typeid`, `generatedtype_valueid` | атрибуты и дочерние элементы `InternalInfo/GeneratedType` |
 | `default_form`, `auxiliary_form`, `default_settings_form`, `auxiliary_settings_form`, `default_variant_form`, `variants_storage`, `settings_storage`, `main_data_composition_schema` | одноимённые `Properties/*`, берётся часть после точки |
+| `configuration_id` (узлы V20, V20.1) | **из XML не берётся вовсе**: в выгрузке внешнего объекта ссылки на конфигурацию нет (`containedobject_*` — идентификаторы класса/объекта метаданных, к конфигурации отношения не имеют). Значение — id строки заголовка `configurations.id`, заявленный оператором (`set_object_configuration_tool` в enrichment-MCP). Внешнего ключа в схеме нет (узел V20.1, 14.10.2026): `configurations` — справочная таблица, ключ блокировал бы ведение заголовков; индекс `idx_external_report_configuration_id` сохранён ради обратного поиска. Пустое значение остаётся `NULL` = «привязка не заявлена»; id без строки заголовка = «битая ссылка, требуется перепривязка» (состояние считается JOIN'ом при чтении); при `force=True` прежнее значение переносится (правило R11) |
 
 В таблице `external_report` **нет колонки `version`**, поэтому сравнение версий на узле V5 недоступно:
 случай «тот же UUID, другая версия» (R5) обрабатывается как обычный дубликат.
@@ -396,8 +443,12 @@ CRLF превращаются в LF; модуль из `Form.bin` декодир
 | V12 | `src/external_meta_parser.py` + `src/external_table_writer.py` (`AttributesRowWriter`, `TabularSectionsRowWriter`) | ✅ реквизиты и колонки ТЧ в `attributes`, табличные части в `tabular_sections`. Черновой `_parse_child_objects()` удалён из вызова, функция в файле сохранена до удаления |
 | V13 | `src/external_subdir_parser.py::parse_external_subdirs` + писатели `FormRowWriter`, `FormExtRowWriter`, `TemplateRowWriter`, `BslModuleRowWriter`; схема — `migrate_v13_forms_templates_bsl.sql`, источник DDL — `src/generate_ddl.py` | ✅ `forms` + `form_ext` (описание формы и её модуль), `templates.ext`/`ext_bin` (содержимое макета), `bsl_modules` с `parent_uuid`/`module_type`. Уникальность форм/макетов — в пределах родителя. **V14.1 (13.10.2026):** скалярные свойства формы читаются из корня `Form.xml` по `FORM_CONTENT_FIELDS` (обёртки `<Properties>` в этом файле нет) — до правки колонки `command_bar_location`/`report_result`/`details_data`/`report_form_type`/`auto_show_state`/`custom_settings_folder`/`*_view_mode` оставались NULL (дефект п. 18 правил); проверка — раздел 19 `check_external_report_fill.sql` и `validate_external_children.py` |
 | V14 | `src/external_subdir_parser.py::_container_files` + `_store_container_form_module` (вызов из `_read_form`); проверка — `validate_form_bin_decode.py::verify_v14` | ✅ модуль `0/module` из `ext_bin` пишется в `form_ext.ext` (BOM и обрамляющая пустота снимаются, `ext_size = octet_length(ext_bin)`); v8unpack опционален, без неё — поведение V13 + предупреждение. Витрины анализа — `migrate_v14_form_analysis_views.sql` (`v_form_elements`, `v_form_events`) |
-| V15 | `src/external_form_decoder.py` (обёртка над `v8unpack.MetaDataObject.Form.FormElements27`) — **файла ещё нет** | ❌ не реализован: `0/form` → `form_ext.items`/`events`/`attributes`/`commands` для `Ordinary`. Черновой пробник разложения и побайтовой сборки — вне репозитория (`C:\TMP\v14_probe.py`), см. раздел «Обычные формы» |
+| V15 | `src/external_form_decoder.py::decode_layout` (обёртка над `v8unpack.MetaDataObject.Form.FormElements26/27`) + вызов `src/external_subdir_parser.py::_apply_container_form_layout` из `_read_form`; офлайн-разбор и round-trip — `tools/decode_form_layout.py`; проверки — `validate_external_children.py`, `validate_form_bin_decode.py::verify_v15`, разделы 17–18 `check_external_report_fill.sql`, разделы 27–31 `check_external_report_search.sql`, разделы 7 и 10–13 `check_external_report_inventory.sql` | ✅ `0/form` разложен в **те же** колонки `form_ext`, что и `Form.xml` у `Managed`: `items` (`path`/`name`/`type`/`page`/`data_source`/`captions`), `attributes`, `events`, `commands`, `auto_command_bar`. Эталон `Test2_Otchet`: items 10, attributes 4, events 1, commands 1, `auto_command_bar.name=ДействияФормы`; через витрины 10/10/3/4 и 1 событие. Контейнер распакуется один раз на форму и переиспользуется для `0/module` и `0/form`. v8unpack остаётся **опциональной**: без неё (или при неподдерживаемой/битой разметке) — предупреждение, состав пустой, загрузка идёт дальше. Полный `elem.json` в БД не пишется (источник истины — `ext_bin`). **Не закрывается узлом:** скалярные свойства ordinary-формы и её заголовок (колонок нет, DDL не менялся) |
 | VX1 | заглушки `src/config_load_router.py` (варианты 1, 2, 4) | ❌ формы и макеты конфигурации/расширения; упирается в полиморфизм схемы (п. 13 правил) |
+| V17 (обогат) | `src/enrichment_generator.py::generate_for_object` + писатели `ConfigAliasRowWriter`, `ConfigSnippetRowWriter`, `ConfigSnippetDependencyRowWriter`, `ConfigCrossReferenceRowWriter`; схема — `src/ddl_enrichment.sql` (шаг 1b) / `migrate_v17_enrichment.sql`; очистка при удалении — `src/external_report_loader.py::delete_external_object` | ✅ обогащение внешнего отчёта (алиасы, авто-сниппеты, зависимости, счётчики) вне транзакции загрузки; контракт enrichment-MCP — 16 инструментов, норматив — `docs/CONFIGURATIONS_ENRICHMENT_PLAN.md` |
+| V17.7 (карточка) | `src/enrichment_generator.py::describe_object` + `_describe_sections` + `type_brief`; вывод — `config_enrichment_stats_tool(uuid=…, card=True)`; проверка — `validate_enrichment_flow.py::phase_object_card` | ✅ только чтение, одна транзакция: свойства и назначение отчёта, реквизиты объекта (колонки ТЧ отсечены `NOT EXISTS` по `column_uuids`) с читаемым типом, ТЧ с числом колонок, формы + состав через `v_form_elements`/`v_form_events`, макеты с `ext_root_tag`, модули, перечень сниппетов. Порядок реквизитов — по `attributes.id` (колонки позиции нет) |
+| V20 (привязка к конфигурации) | схема: `src/generate_ddl.py` (колонка + индекс) и `create_1c_configurations_db.sql` / `migrate_v20_configuration_link.sql`; рантайм: `ExternalReportRowWriter`, `find_external_object`, `register_external_report` (перенос при `force=True`), `config_load_router` (карточки дубликата и перезагрузки); карточка — `describe_object` + `_card_identity_lines`; проверка — `tools/check_v20_config_link.py` | ✅ `external_report.configuration_id` = id строки заголовка `configurations.id`, **заявляется только оператором**, из выгрузки не выводится (правило R11); NULL = «привязка не заявлена», состояния «универсальный» нет; `force=True` значение переносит. Автоматическая классификация — вне узла (раздел 12 `docs/CONFIGURATIONS_ENRICHMENT_PLAN.md`) |
+| V20.1 (снять FK, битую ссылку сделать видимой) | схема: `src/generate_ddl.py` + `src/ddl_external_report.sql` и `create_1c_configurations_db.sql` (DO-блоки FK удалены из обоих шагов), `migrate_v20_configuration_link.sql` (FK больше не создаёт) + `migrate_v21_drop_configuration_fk.sql` (`DROP CONSTRAINT IF EXISTS`); рантайм: `src/enrichment_generator.py::{_binding_state_row, set_object_configuration, describe_object, generate_enrichment}`, `src/enrichment_snippets.py::enrichment_stats`, `server_configurations_enrichment.py::{set_object_configuration_tool, _binding_lines, _card_identity_lines}`; SQL — раздел `15f` `check_external_report_inventory.sql`; проверки — `tools/check_v20_config_link.py` (34), фаза `phase_configuration_link` в `validate_enrichment_flow.py` (122 проверки) | ✅ внешний ключ `external_report_configuration_fkey` снят: `configurations` — справочная таблица, нужная при проверке данных отчёта, ключ блокировал бы ведение заголовков. Колонка и индекс `idx_external_report_configuration_id` сохранены. Целостность записи проверяет `set_object_configuration_tool` (несуществующий id отклоняется, битой ссылки не создаёт; `None` — снять), при чтении состояние считается JOIN'ом и называется прямо в трёх местах: карточка (`configuration_state`), сводка без uuid (обратный перечень + счётчики `configuration_not_declared`/`bound`/`dangling`), генерация (предупреждение, состав строится как обычно). Контракт enrichment-MCP: 17 → 18 инструментов |
 
 ### Предупреждение: core-сервер не перегенерировать
 
@@ -412,19 +463,32 @@ CRLF превращаются в LF; модуль из `Form.bin` декодир
 
 ## 8. Вне контракта (не участвуют в загрузке)
 
-Инструменты ниже помечены в коде как вне контракта. Они сохранены на время перехода и будут
-удалены или перенесены; ссылаться на них в сценарии загрузки нельзя.
+**Состояние 14.10.2026: инструменты вне контракта из core-MCP удалены** (дефект п. 11 правил
+закрыт). В `server_configurations_core.py` остались ровно три контрактовых инструмента —
+`get_load_config_rules_tool`, `load_1c_catalog_tool`, `delete_external_report_tool`; это
+проверяется AST-сверкой `python tools/check_mcp_tool_wiring.py` (ошибки «вне EXPECTED_TOOLS»
+были бы видны в rc).
 
-`analyze_config_load_tool` (анализ стал внутренней функцией `detect_load_variant`),
+Удалены: `analyze_config_load_tool` (анализ — внутренняя `detect_load_variant`),
 `list_configurations_tool`, `get_configuration_tool`, `find_config_by_name_uuid_tool`,
 `search_config_objects_tool`, `list_config_objects_tool`, `get_object_structure_tool`,
 `count_objects_by_config_tool`, `delete_objects_by_config_tool`, `update_configuration_status_tool`,
 `delete_config_tool`, `batch_index_from_dump_tool`, `list_bsl_modules_tool`,
-`get_bsl_module_code_tool`, `read_config_file_tool`, `search_bsl_code_tool`, `get_enum_values_tool`.
+`get_bsl_module_code_tool`, `read_config_file_tool`, `search_bsl_code_tool`, `get_enum_values_tool`,
+устаревший псевдоним `register_external_report_tool`. Вместе с ними удалён мёртвый код, который
+не мог работать: `src/config_tools.py`, `src/config_aliases.py`, `src/config_snippets_manager.py`,
+`src/config_tools_1c_configurations.py` (обращались к БД `configurations`, которой на сервере нет)
+и `generate_servers.py` (генератор, теряющий инструменты контракта).
 
-Известная причина неработоспособности большинства из них: `src/config_tools.py` обращается к БД
-`configurations`, которой на сервере нет (есть `ckb_1c_configurations`), и к таблицам
-`configuration_objects`, `object_attributes`, `enum_values`, которых в схеме нет.
+Чем заменены задачи удалённых инструментов:
+
+| Задача | Чем пользоваться |
+|---|---|
+| посмотреть список/состояние загруженных внешних объектов | SQL по `external_report` (счётчики детей — запрос из раздела 10) или `config_enrichment_stats_tool` без `uuid` |
+| найти объект или его реквизит/форму/макет | `search_config_aliases_tool` / `resolve_config_alias_tool` / `search_config_snippets_tool` (enrichment-MCP) либо SQL-сверки `check_external_report_search.sql` |
+| получить структуру объекта и его свойства | `config_enrichment_stats_tool(uuid=…, card=True)` (карточка V17.7) |
+| получить код модуля | `get_config_snippet_tool` (авто-сниппет модуля) или SQL по `bsl_modules.code` |
+| удалить объект | `delete_external_report_tool` (контрактный инструмент) |
 
 ---
 
@@ -447,21 +511,24 @@ CRLF превращаются в LF; модуль из `Form.bin` декодир
    `form_ext.ext_bin` и пишется в `form_ext.ext`, предупреждение говорит про `Form.bin`, а не про
    отсутствующий `Ext/Form/Module.bsl`. v8unpack остаётся **опциональной** зависимостью: без неё
    сохраняется поведение V13 и выдаётся предупреждение. Модуль формы в `bsl_modules` не дублируется.
-6. **Элементы обычной формы (узел V15)** — `0/form` не разложен: `form_ext.items`/`events`/
-   `attributes`/`commands` у `Ordinary` остаются пустыми массивами. План: новый
-   `src/external_form_decoder.py` (обёртка над `FormElements27`, контракт `tree/props/events/
-   commands/attributes/captions/warnings`), вызов из `src/external_subdir_parser.py` в той же
-   транзакции, заполнение тех же колонок, что и для `Managed`, чтобы SQL-анализ был единым. Полный
-   `elem.json` v8unpack (63 КБ против 10.6 КБ разметки) в БД не писать — источник истины `ext_bin`,
-   из него layout воспроизводится байт-в-байт. Обязательна деградация: нет v8unpack / неподдерживаемая
-   версия элементов → `items` остаётся пустым, в карточке предупреждение, загрузка не падает.
+6. **Элементы обычной формы (узел V15)** — **снято узлом V15 (13.10.2026)**: `0/form` разложен
+   декодером `src/external_form_decoder.py::decode_layout` в те же колонки `form_ext`, что и
+   `Form.xml` у `Managed` (`items`/`attributes`/`events`/`commands`/`auto_command_bar`), вызов —
+   `src/external_subdir_parser.py::_apply_container_form_layout` в той же транзакции. Полный
+   `elem.json` v8unpack (63 КБ против 10.6 КБ разметки) в БД не пишется — источник истины `ext_bin`,
+   из него layout воспроизводится байт-в-байт. Деградация реализована: нет v8unpack /
+   неподдерживаемая версия элементов → состав остаётся пустым, в карточке предупреждение, загрузка
+   не падает (проверено офлайн). Осталось за рамками: скалярные свойства ordinary-формы и её
+   заголовок — колонок под них нет, DDL узла V15 не менялся.
 7. **Обратная сборка `Form.bin` (узел V16)** — `items`+`ext` (+ raw-шаблон) → `0/form`+`0/module` →
    `container build` → `Form.bin`, с побайтовой самопроверкой «не меняли → байт-в-байт». Фундамент
    генерации внешних отчётов/обработок с нуля. Для новых разработок предпочтительны управляемые
    формы: они выгружаются как `Form.xml`, и тракт V13 уже раскладывает их полностью.
 
-Реализовано (узел V14, 13.10.2026): модуль обычной формы в `form_ext.ext` (см. раздел
-«Обычные формы» → «Реализовано (узел V14)»); витрины анализа состава форм `v_form_elements`,
+Реализовано (узлы V14+V15, 13.10.2026): модуль обычной формы в `form_ext.ext` и её состав элементов
+в `form_ext.items`/`attributes`/`events`/`commands`/`auto_command_bar` (см. раздел
+«Обычные формы» → «Реализовано (узел V14)» и «Реализовано (узел V15)»); витрины анализа состава форм
+`v_form_elements`,
 `v_form_events` — с 13.10.2026 входят в DDL-источник `src/generate_ddl.py` →
 `src/ddl_external_report.sql` (раздел 7), поэтому создаются и на чистой БД: на них опираются
 `check_external_report_fill.sql` / `check_external_report_search.sql` /
@@ -490,7 +557,7 @@ CRLF превращаются в LF; модуль из `Form.bin` декодир
 | Каталог | Ожидаемый путь | Ожидаемый исход |
 |---|---|---|
 | `Test1_Otchet` | T3 нет → T5 да → вариант 3 | `✅ загружено`: реквизитов 36 (в т.ч. 33 колонки ТЧ), табличных частей 3, форм 1, описаний форм 1, макетов 1, BSL-модулей 1 (`ObjectModule`); модуль формы — в `form_ext.ext`, в `bsl_modules` его нет |
-| `Test2_Otchet` | вариант 3 | `✅ загружено`: 0/0/1/1/1/1 — форма и макет есть, реквизитов и ТЧ нет; форма обычная (`Ordinary`), `form_ext.ext_bin` = `Form.bin`, **`form_ext.ext` = модуль формы (узел V14)**, `form_ext.items`/`events` — пустые массивы (узел V15 не реализован); в карточке предупреждение «модуль извлечён, элементы — нет» |
+| `Test2_Otchet` | вариант 3 | `✅ загружено`: 0/0/1/1/1/1 — форма и макет есть, реквизитов и ТЧ нет; форма обычная (`Ordinary`), `form_ext.ext_bin` = `Form.bin`, **`form_ext.ext` = модуль формы (узел V14)**, **`form_ext.items` 10 / `attributes` 4 / `events` 1 / `commands` 1 / `auto_command_bar.name=ДействияФормы` (узел V15)**; в карточке строка «Состав формы … разложен из 0/form» и предупреждение о том, что скалярные свойства и заголовок ordinary-формы не сохраняются |
 | `Test1_Otchet` повторно | V5 найден, `force=False` | `⚠️ нужна перезагрузка` (счётчики дочерних данных в карточке те же) |
 | `Test1_Otchet` с `force=True` | V5 найден, `force=True` | `♻️ перезагружено`, дублей в `attributes`/`tabular_sections`/`forms`/`form_ext`/`templates`/`bsl_modules` нет |
 | `Test3_Otchet_Null`, `Test4_Otchet_Regress` | вариант 3 | `✅ загружено` со всеми счётчиками 0 (пустой `ChildObjects`, каталогов `Forms/`, `Templates/`, `Ext/` нет) — загрузка НЕ отказывает |
@@ -509,8 +576,8 @@ CRLF превращаются в LF; модуль из `Form.bin` декодир
 
 | Шаг | Файл | Что создаёт |
 |---|---|---|
-| 1 | `src/ddl_external_report.sql` (генерируется `src/generate_ddl.py`) | `external_report` + `attributes`, `tabular_sections`, `forms`, `form_ext`, `templates` + витрины `v_form_elements`, `v_form_events` |
-| 2 | `create_1c_configurations_db.sql` | `configurations`, `config_extensions`, `external_processing`, `bsl_modules` |
+| 1 | `src/ddl_external_report.sql` (генерируется `src/generate_ddl.py`) | `external_report` + `attributes`, `tabular_sections`, `forms`, `form_ext`, `templates` + витрины `v_form_elements`, `v_form_events`; колонка `configuration_id` и индекс по ней (узел V20); внешнего ключа на `configurations` нет — он снят узлом V20.1, для уже созданных БД `migrate_v21_drop_configuration_fk.sql` |
+| 2 | `create_1c_configurations_db.sql` | `configurations`, `config_extensions`, `external_processing`, `bsl_modules`; DO-блок FK `external_report.configuration_id → configurations(id)` из этого шага удалён узлом V20.1 (ссылка на справочную таблицу проверяется инструментом записи, а не схемой) |
 
 Почему ровно так (дефект закрыт 13.10.2026, см. `.clinerules/1c-configurations-core_Rule.md` п. 17):
 в бутстрапе была вторая, устаревшая копия `external_report`, и, применяясь первой, она заглушала
@@ -568,13 +635,18 @@ python validate_form_bin_decode.py --file <путь Form.bin> --uuid <uuid> --fo
                                           # ext_path указывает на Form.bin
 # SQL-сверки: обязателен -v ON_ERROR_STOP=1 (без него psql вернёт 0 при ошибке в середине файла,
 # и часть проверок молча не выполнится). Результаты — в _v*_out.txt (артефакты, в .gitignore).
-psql -f check_external_report_fill.sql      # наполнение по узлам V12/V13/V14, секции 1-20
+psql -f check_external_report_fill.sql      # наполнение по узлам V12/V13/V14/V15, секции 1-19
                                           # (16 = дефект «Ordinary без ext_bin»,
-                                          #  17 = пустые items/events — ожидание V15)
-psql -f check_external_report_search.sql    # поиск по метаданным и содержимому, варианты 1-11
+                                          #  17 = инварианты V14 + пустых items у Ordinary = 0 и
+                                          #      заполненные attributes/events/commands/auto_command_bar = 1,
+                                          #  18 = витрины: ordinary 10 элементов / 3 источника /
+                                          #      4 подписи / 1 событие)
+psql -f check_external_report_search.sql    # поиск по метаданным и содержимому, варианты 1-16
+                                          # (12-16 = элементы ordinary-формы, подписи, источники
+                                          #  данных, события через витрины)
 psql -f check_external_report_inventory.sql # инвентарь «что видно из БД без распаковки»: формы и
                                           # их наполнение, модули BSL и form_ext.ext, витрины,
-                                          # пустые jsonb-массивы (слепые зоны), сироты
+                                          # слепые зоны, сироты
 psql -f migrate_v14_form_analysis_views.sql # витрины для УЖЕ созданной БД (на чистой их создаёт
                                           # шаг 1 установки). CREATE OR REPLACE — повторно безопасно
 ```
@@ -603,6 +675,7 @@ psql -f migrate_v14_form_analysis_views.sql # витрины для УЖЕ со�
 `validate_load_flow.py --with-load`, `validate_external_children.py`, `_v13_mcp_layer.py`,
 `_cmp_ddl.py` (на тот момент: 115 колонок, 28 индексов — расхождений нет) — код возврата 0, сирот 0. После
 регресса эталонные записи загружены заново: `Test1_Otchet` → `id=164`, `Test2_Otchet` → `id=165`
+(историческое состояние; актуальные id — в разделе «Живые вызовы через MCP-сервер» ниже: 233/235)
 (после прогона регресса БД пустеет — см. выше). Живой `load_1c_catalog_tool(Test2_Otchet)` даёт
 `0/0/1/1/1/1` и предупреждение «модуль … извлечён из контейнера Form.bin … элементы формы не
 разложены (узел V15)». `validate_form_bin_decode.py` по форме `Отчет`: контейнер 24 549 байт,
@@ -611,6 +684,53 @@ psql -f migrate_v14_form_analysis_views.sql # витрины для УЖЕ со�
 совпадение с модулем контейнера после снятия BOM и обрамляющей пустоты; `ext_size` = 24 549 =
 `octet_length(ext_bin)`, `ext_truncated=false`, `ext_path` указывает на `Form.bin`. SQL-подтверждение —
 разделы 15, 17–20 `check_external_report_fill.sql` и `check_external_report_inventory.sql`
+(у `Ordinary` непустой `ext`, пустые `items`/`events` — тогда это было ожиданием узла V15).
+
+**Пройдено 13.10.2026 (узел V15, состав ordinary-формы).** Офлайн-слой:
+`validate_external_children.py` — код возврата 0, новые проверки «состав ordinary-формы разложен из
+0/form (items 10, attributes 4, events 1, commands 1)», «элементы доступны через `v_form_elements`
+(10)», «привязки к источникам данных (3)», «подпись элемента (1)», «событие видно через
+`v_form_events` (1)», «без `v8unpack` загрузка продолжается: `ext_bin` сохранён, состав пустой,
+предупреждение с причиной», «после восстановления `v8unpack` тот же каталог разложен полностью
+(детерминированность разбора)», «`force=True` состав разложен заново, дублей `form_ext` нет»;
+`validate_load_flow.py --with-load` — 0; эталонная пара восстановлена `tools/restore_reference_pair.py`
+(актуальный код через `src/config_load_router`; после финального офлайн-прогона: `Test1_Otchet` →
+`id=233` со счётчиками `36/3/1/1/1/1`, `Test2_Otchet` → `id=234` — `0/0/1/1/1/1`);
+`_v13_mcp_layer.py` — 0 (после точечной правки ожиданий: карточка `Test2_Otchet` дополнительно
+содержит строку «Состав формы … разложен из 0/form … items 10, attributes 4, events 1, commands 1»).
+`validate_form_bin_decode.py --file …\Forms\Отчет\Ext\Form.bin --uuid d364e104-… --form Отчет` —
+код возврата 0: секция V14 (байты `ext`), секция V15 (офлайн-разбор `0/form` = счётчики БД
+10/4/1/1, `auto_command_bar.name=ДействияФормы`; строки `v_form_elements` с типами
+`CommandPanel/Field/Label/ListField/Page/TableField`, источниками `ДатаОтчета/Организация/ПолеСписка1`
+и подписями `Учреждение/Дата отчета/Поле списка1:/Выберите счета:`; событие `ПередОткрытием`;
+round-trip `0/form` побайтово 10 623 байта).
+До перезапуска живой вызов через MCP-сервер **показал старый код процесса**: карточка после
+`load_1c_catalog_tool(Test2_Otchet, force=True)` (ID 232) не содержала строки состава формы и
+выдавала прежние предупреждения V13 («свойства формы не разобраны», «нет модуля
+Forms/Отчет/Ext/Form/Module.bsl»), а в БД у этой записи `items` оказался пустым массивом и `ext` —
+NULL. Запись удалена (`delete_external_report_tool(report_id=232)`), эталонная пара восстановлена
+`tools/restore_reference_pair.py` через `src/config_load_router` (актуальный код).
+**Живая проверка узла V15 через MCP пройдена после перезапуска `python server_configurations_core.py`
+(13.10.2026, п. 5 правил):** `get_load_config_rules_tool()` вернул правила V15;
+`load_1c_catalog_tool(Test2_Otchet)` → `⚠️ уже загружено` (ID=234);
+`load_1c_catalog_tool(Test2_Otchet, force=True)` → `♻️ перезагружено`, **новая запись ID=235**,
+«Удалена предыдущая запись ID=234 (BSL-модулей удалено: 1)» + строки «Состав формы 'Отчет' разложен
+из 0/form контейнера Form.bin (версия разметки 27): items 10, attributes 4, events 1, commands 1»,
+«Модуль формы … извлечён из 0/module … (V14): 7639 символов» и предупреждение о скалярных свойствах
+ordinary-формы. В БД у ID=235: `items` 10, `attributes` 4, `events` 1, `commands` 1,
+`auto_command_bar.name=ДействияФормы`, `length(ext)=7591`, `octet_length(ext_bin)=24549`;
+`v_form_elements` Ordinary 10 (10 типов, 3 источника данных, 4 подписи), `v_form_events` Ordinary 1,
+сирот 0. **Эталонная пара сейчас: `Test1_Otchet` → `id=233`, `Test2_Otchet` → `id=235`.**
+SQL-подтверждение: `check_external_report_fill.sql` разделы 17–18 (пустых `items` = 0,
+заполненных `attributes/events/commands/auto_command_bar` = 1, витрины 10/10/3/4 и 1 событие),
+`check_external_report_search.sql` разделы 27–31 (ПОИСК 12–16: ordinary-элементы 10, `Field` = 2,
+подписи = 4, источники данных = 3 со сверкой с реквизитами отчёта, атрибуты формы = 4,
+событие = 1, обработчик `ПередОткрытием` найден в модуле), `check_external_report_inventory.sql`
+разделы 7, 10–13 (состояние ordinary-формы `OK` с `n_items=10, n_attributes=4, n_events=1,
+n_commands=1`; «форм с незаполненным составом = 0»; `v_form_elements` 16 строк = 6 Managed +
+10 Ordinary). Все три файла выполнены с кодом возврата 0.
+Полные выводы — артефакты `_v15_fill_out.txt`, `_v15_search_out.txt`, `_v15_inventory_out.txt`,
+`_v15_mcplayer_out.txt`, `_v15_restore_out.txt`.
 
 **Тем же днём закрыт вопрос согласованности схемы (дефект п. 17 правил).** Проверка «с нуля»
 показала, что чистая установка была нерабочей: `create_1c_configurations_db.sql` падал на
@@ -623,8 +743,16 @@ psql -f migrate_v14_form_analysis_views.sql # витрины для УЖЕ со�
 `_cmp_ddl.py` расширен: строит временную БД обоими шагами и сверяет **всю** схему public —
 212 колонок, 43 индекса/уникальных ограничения, 29 ограничений (PK/UNIQUE/FK), 2 определения
 витрин; расхождений нет, код возврата 0. Смена схемы теперь обязана идти парой
-«миграция + DDL/бутстрап» — иначе сверка падает. Состояние эталонных записей после всех
-прогонов: `Test1_Otchet` → `id=164` (`36/3/1/1/1/1`), `Test2_Otchet` → `id=165` (`0/0/1/1/1/1`).
+«миграция + DDL/бутстрап» — иначе сверка падает. Состояние эталонных записей после тех
+прогонов: `Test1_Otchet` → `id=164` (`36/3/1/1/1/1`), `Test2_Otchet` → `id=165` (`0/0/1/1/1/1`);
+актуальные id после живой загрузки через MCP — `233` и `235` (см. раздел «Живые вызовы»).
+
+> **Узел V17 (14.10.2026):** порядок установки стал трёхшаговым — между ними вставлен шаг 1b
+> `src/ddl_enrichment.sql` (таблицы и витрины обогащения, все FK смотрят в таблицы шага 1).
+> `_cmp_ddl.py` применяет шаги 1 → 1b → 2; счётчики печатает сам скрипт, снимок замера 14.10.2026
+> (после V17 и индекса `uq_config_snippet_deps_stable_target`) — 281 колонка, 59 индексов,
+> 34 ограничения в `pg_constraint`, 4 витрины, расхождений нет (rc=0). Схема и сценарий обогащения —
+> [docs/CONFIGURATIONS_ENRICHMENT_PLAN.md](../CONFIGURATIONS_ENRICHMENT_PLAN.md).
 
 (у `Ordinary` непустой `ext`, пустые `items`/`events` — ожидание V15).
 
@@ -681,9 +809,9 @@ $env:PGPASSWORD='Sta090860'; $env:PGCLIENTENCODING='UTF8'; C:\Postgres\bin\psql.
 
 | Файл | Что проверяет |
 |---|---|
-| `check_external_report_fill.sql` | разделы 1–9 — целостность и заполнение V12 (`attributes`, `tabular_sections`, `column_uuids`, jsonb); 10–14 — V13 (счётчики `forms`/`form_ext`/`templates`/`bsl_modules`, размещение модулей по R9, содержимое макетов, сироты и дубли в пределах родителя по R10); **15** — содержимое модулей и макетов (в т. ч. число объявлений процедур/функций и наличие `Экспорт`); **16** — типы форм и заполненность содержимого (у `Ordinary` непустой `ext`, V14); **17** — инварианты V14 (`ext_size = octet_length(ext_bin)`, путь на `Form.bin`); **18** — витрины `v_form_elements`/`v_form_events`; **19** — скалярные свойства содержимого формы (V14.1) |
+| `check_external_report_fill.sql` | разделы 1–9 — целостность и заполнение V12 (`attributes`, `tabular_sections`, `column_uuids`, jsonb); 10–14 — V13 (счётчики `forms`/`form_ext`/`templates`/`bsl_modules`, размещение модулей по R9, содержимое макетов, сироты и дубли в пределах родителя по R10); **15** — содержимое модулей и макетов (в т. ч. число объявлений процедур/функций и наличие `Экспорт`); **16** — типы форм и заполненность содержимого (у `Ordinary` непустой `ext`, V14); **17** — инварианты V14 (`ext_size = octet_length(ext_bin)`, путь на `Form.bin`) и ожидания V15 (пустых `items` у `Ordinary` = 0, заполненных `attributes`/`events`/`commands`/`auto_command_bar` = 1); **18** — витрины `v_form_elements`/`v_form_events` по обоим типам форм (для ordinary-эталона: 10 элементов, 10 с типом, 3 с источником данных, 4 с подписью, 1 событие); **19** — скалярные свойства содержимого формы (V14.1). Тип jsonb проверяется через `jsonb_typeof` в `CASE` — `jsonb_array_length()` на не-массиве падает и обрывает скрипт |
 | `check_external_report_search.sql` | разделы 1–9 — поиск V12 (имя, синоним, реквизит, тип, колонка ТЧ, BSL, FTS, квалификаторы); 10–15 — контекст (реквизиты объекта, ТЧ и её колонки по `column_uuids`, типы, квалификаторы, модули); 16–25 — «ПОИСК 1–11»: имя, русский синоним, реквизит/колонка во всех объектах, отбор по типу, ТЧ по имени колонки и обратная связь колонки с ТЧ через `jsonb @>`, текст всех модулей (включая ordinary-модуль V14), FTS по имени и синониму, квалификаторы, содержимое макета и модуля формы; 27–31 — «ПОИСК 12–16»: элемент формы по имени и типу, по подписи (`caption`), по источнику данных со сверкой с реквизитами отчёта, обработчик события и его наличие в тексте модуля, FTS по составу элементов (заготовка алиасов V17); 99 — итоговые счётчики по всем дочерним таблицам. Раздел 31 документирует ограничение FTS (форма `'слово*'` теряет оператор `*`, хвост идентификатора не ищется) и обходной путь через `position()` |
-| `check_external_report_inventory.sql` | отчёт-инвентарь «что видно из БД без распаковки `Form.bin`», разделы 0–14: карточка объекта, реквизиты/ТЧ (9c–9e — каст `attributes.type::jsonb`, сводка типов, стандартные реквизиты ТЧ), формы и их наполнение, модули с типами и числом объявлений, витрины, макеты с `template_type`/`ext_root_tag` и различимостью содержимого (14), заполненность второстепенных колонок с пояснением «пусто по источнику» или «не разобрано» (12), атрибуты и команды формы (13), слепые зоны (11), целостность (сироты/дубли). Источник отчёта [ANALYSIS_2026-10-13_content_inventory.md](ANALYSIS_2026-10-13_content_inventory.md); ревизия инструментов — [TOOLS_REVISION_2026-10-13.md](TOOLS_REVISION_2026-10-13.md); стратегия обогащения — [CONFIGURATIONS_ENRICHMENT_PLAN.md](../CONFIGURATIONS_ENRICHMENT_PLAN.md) |
+| `check_external_report_inventory.sql` | отчёт-инвентарь «что видно из БД без распаковки `Form.bin`», разделы 0–14: карточка объекта, реквизиты/ТЧ (9c–9e — каст `attributes.type::jsonb`, сводка типов, стандартные реквизиты ТЧ), **7** — классификация состояния ordinary-форм (после V14/V15 ожидается `OK` со счётчиками `n_items`/`n_attributes`/`n_events`/`n_commands` = 10/4/1/1 для `Test2_Otchet`), формы и их наполнение, модули с типами и числом объявлений, витрины по обоим типам форм (10–10e), макеты с `template_type`/`ext_root_tag` и различимостью содержимого (14), заполненность второстепенных колонок с пояснением «пусто по источнику» или «не разобрано» (12), атрибуты и команды формы (13), слепые зоны (11 — после V15 пустой состав больше не слепая зона, остаются скалярные свойства и заголовок ordinary-формы), целостность (сироты/дубли). Источник отчёта [ANALYSIS_2026-10-13_content_inventory.md](ANALYSIS_2026-10-13_content_inventory.md); ревизия инструментов — [TOOLS_REVISION_2026-10-13.md](TOOLS_REVISION_2026-10-13.md); стратегия обогащения — [CONFIGURATIONS_ENRICHMENT_PLAN.md](../CONFIGURATIONS_ENRICHMENT_PLAN.md) |
 
 ```powershell
 $env:PGCLIENTENCODING='UTF8'; $env:PGPASSWORD='Sta090860'
@@ -722,7 +850,7 @@ C:\Postgres\bin\psql.exe -v ON_ERROR_STOP=1 ... `
 | счётчики по объекту | `attributes` 36 = 3 реквизита объекта + 33 колонки ТЧ, `tabular_sections` 3 (3/13/17 колонок), `forms` 1, `form_ext` 1, `templates` 1, `bsl_modules` 1 (только `ObjectModule`) |
 | размещение модулей (R9) | модуль формы (16 538 симв.) — в `form_ext.ext` (`ext_format='xml'`, `ext_size` 29 297 — размер файла); в `bsl_modules` строк с `module_type='FormModule'` 0, текста модуля формы в `bsl_modules` 0 |
 | свойства формы (V13) | `items` — 6 элементов с разбором (`kind`/`name`/`datapath`/`title`), `events` 1, `commands` 1, `attributes` 3, `auto_command_bar` — 3 ключа; `datapath` полей `InputField` находятся в `attributes` отчёта |
-| бинарная (`Ordinary`) форма (`Test2_Otchet`) | `ext_format='bin'`, `ext_bin` = `Form.bin` (24 549 байт), **`ext` = модуль формы (13 124 байта после нормализации, узел V14)**, `ext_size` = `octet_length(ext_bin)`; jsonb-колонки — **пустые контейнеры** (`items`/`events`/`commands`/`attributes` = `[]`, `auto_command_bar` = `{}`), а не NULL → признак разобранной формы `jsonb_array_length(items) > 0`, а не `items IS NOT NULL` (заполнение `items` — узел V15) |
+| бинарная (`Ordinary`) форма (`Test2_Otchet`) | `ext_format='bin'`, `ext_bin` = `Form.bin` (24 549 байт), **`ext` = модуль формы (13 124 байта после нормализации, узел V14)**, `ext_size` = `octet_length(ext_bin)`; **с узла V15 jsonb-колонки заполнены так же, как у управляемой формы: `items` 10, `attributes` 4, `events` 1, `commands` 1, `auto_command_bar.name` = `ДействияФормы`** (пустой массив ≠ NULL — признак разобранной формы `jsonb_array_length(items) > 0`, а не `items IS NOT NULL`). Не заполняются: скалярные свойства ordinary-формы и её заголовок (колонок нет) |
 | макеты (V13) | `templates.ext` + `ext_root_tag` (`DataCompositionSchema` у макета отчёта, `document` у бинарно-XML-макета `Отчет`), `ext_size` 39 848 / 18 870, `ext_truncated=false` |
 | ссылки `column_uuids` | все колонки находятся в `attributes`, битых ссылок 0, `parent_uuid` = uuid объекта (не ТЧ) |
 | дубликаты, сироты | 0 во всех таблицах, в том числе дубли `forms`/`templates` в пределах родителя, дубли `form_ext` на форму, `bsl_modules` по `(parent_uuid, file_path)`; `form_ext.form_uuid`/`parent_uuid` совпадают с `forms` |
