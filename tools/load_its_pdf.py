@@ -29,10 +29,15 @@ def main():
     ap.add_argument('--category', default='its', help='тег категории (its | platform | methodology)')
     ap.add_argument('--limit', type=int, default=None, help='максимум сниппетов на файл')
     ap.add_argument('--dry-run', action='store_true', help='только разбор, без записи')
+    ap.add_argument('--no-whole-file', action='store_true',
+                    help='не создавать сниппеты из файлов без нумерованных разделов '
+                         '(Введение, приложения): по умолчанию такие файлы упаковываются целиком')
     args = ap.parse_args()
 
+    whole_file = not args.no_whole_file
     if args.file:
-        stats = load_pdf(args.file, category=args.category, limit=args.limit, dry_run=args.dry_run)
+        stats = load_pdf(args.file, category=args.category, limit=args.limit,
+                         dry_run=args.dry_run, whole_file=whole_file)
         print('ИТОГ:', stats)
         return 0
 
@@ -41,9 +46,10 @@ def main():
         ap.error('нужно указать --file, --only <подстрока> или --all')
 
     results = load_directory(args.dir, category=args.category, limit_per_file=args.limit,
-                             only=only, dry_run=args.dry_run)
+                             only=only, dry_run=args.dry_run, whole_file=whole_file)
     total = {k: sum(r[k] for r in results) for k in
-             ('pages', 'sections_found', 'snippets_added', 'snippets_skipped', 'aliases_added')}
+             ('pages', 'sections_found', 'whole_file_blocks', 'snippets_added',
+              'snippets_skipped', 'aliases_added')}
     print('=' * 70)
     print('ФАЙЛОВ: %d  ИТОГ: %s' % (len(results), total))
     return 0
