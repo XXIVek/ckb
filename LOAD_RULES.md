@@ -49,18 +49,27 @@
 ### Шаг 1: Анализ источника данных
 
 - **Одиночный HTML-файл** → `load_single_html_tool(filepath, category)` (BSL-документация)
-- **Директория с HTML/PDF/Markdown** → `load_doc_tool(path, category)` (BSL-документация)
+- **Директория с HTML** → `load_doc_tool(path, category)` (BSL-документация). PDF и Markdown этот
+  инструмент **не** берёт: `load_files` фильтрует строки строго по `.html`
+- **PDF руководства разработчика (главы, приложения)** → CLI `tools/load_its_pdf.py`
+  (реализация `src/its_pdf_loader.py`), см. раздел «PDF руководства разработчика» ниже
 - **Структура BSL (objects/ + tables/)** → `load_bsl_tool(path)` (категория всегда bsl)
+- **DOCX** → извлечь текст `_docx_extract.py` и разобрать вручную через `add_snippet_tool()`
 - **Прямой текст (вопрос-ответ)** → `add_snippet_tool()` — с groups_id для BSL, без для HTML/PDF/Markdown
 
 ### Шаг 2: Определение категории
+
+Категория записывается **в `tags` сниппета** (колонки category у `knowledge_snippets` нет) и в
+`tags` алиасов; `doc_categories` — справочник допустимых значений (`its`, `language`,
+`methodology`, `platform`). Фильтр `category=` в поиске не работает (см. «Алгоритм поиска»),
+поэтому категория служит признаком происхождения, а не способом выборки.
 
 | Путь / Контекст | Категория | Сценарий |
 |----------------|-----------|----------|
 | `/html/BSL/` | `language,bsl` | A (группы + сниппеты) |
 | `/html/platform/` | `platform` | B (сниппеты без групп) |
-| PDF с документацией платформы | `platform` | B (сниппеты без групп) |
-| Markdown-инструкция | определяется по контексту | B (сниппеты без групп) |
+| `/pdf/` — главы «1С:Предприятие 8.3.27. Документация» (руководство разработчика ИТС) | `its` | B (сниппеты без групп), `tools/load_its_pdf.py` |
+| Markdown-инструкция, правила программирования | `methodology` | B (сниппеты без групп) |
 
 ### Шаг 3: Загрузка
 
@@ -105,7 +114,8 @@ add_snippet_tool(
 |-----------|-----------|
 | `load_bsl_tool(path)` | Загрузка полной структуры BSL (objects/ + tables/) |
 | `load_single_html_tool(filepath, category)` | Загрузка одиночного HTML-файла (BSL) |
-| `load_doc_tool(path, category)` | Загрузка документов из директории (.html, .pdf, .md) |
+| `load_doc_tool(path, category)` | Загрузка директории: **только `.html`** (`.pdf`/`.md` не берёт — строка правил обещала их ошибочно, исправлено 15.10.2026) |
+| `tools/load_its_pdf.py` (CLI, не MCP) | PDF руководства разработчика → сценарий B (`groups_id = NULL`); реализация `src/its_pdf_loader.py`, идемпотентно по `source_url` |
 | `add_snippet_tool(question, answer, source_url?, tags?, confidence?, groups_id?)` | Добавить вопрос-ответ с кодом (**groups_id = NULL** для HTML/FAQ/Markdown) |
 
 ### Поиск и получение данных
@@ -135,6 +145,22 @@ add_snippet_tool(
 3. **Full-text поиск по groups (rank 1.0):** Ищет по `name || pagetitle`. **heading НЕ участвует!**
 4. **Full-text поиск по snippets (rank 0.5):** Ищет по `question || answer`
 5. **Результаты сортируются по rank DESC**, limit применяется в конце.
+
+> ⚠️ **Параметр `category` в живой реализации не применяется** (замер 15.10.2026):
+> `src/mcp_tools_api.py::search_docs(query, category=None, limit=20)` принимает `category`, но ни
+> один запрос его не использует — фильтр есть только в мёртвом `src/search.py`, который работает с
+> таблицами `docs` / `doc_fragments` (их в живой схеме нет). Поэтому
+> `search_docs_tool(query, category='methodology')` ищет ровно то же, что и без `category`:
+> пустой ответ означает «термина нет в базе», а не «в категории пусто». `list_categories_tool()`
+> тоже считает счётчики по `groups` без учёта категории — четыре категории показывают одинаковое
+> число. Не делать вывод о покрытии категории по её фильтру.
+>
+> ⚠️ **Что реально покрывает `groups`:** имена групп — англоязычные технические идентификаторы с
+> числовыми суффиксами (`DataCompositionTemplateComposer`, `Parameters1301`, `OpenFile2831`).
+> Русские имена методов в `groups` и `alias_targets` отсутствуют: `search_docs_tool("ПометитьУдаление")`
+> не находит ничего, `SELECT … WHERE description ILIKE '%ПометитьУдаление%'` — 0 строк. Это пробел
+> покрытия исходников BSL, а не дефект поиска; русские формулировки приходится добавлять алиасами
+> (`add_aliases_tool`) или брать из загруженного руководства разработчика (сценарий B, узел V27).
 
 ## Скрипт загрузки BSL v2
 
@@ -167,8 +193,50 @@ versionInfo = из <p class="V8SH_versionInfo">
 |-----------|-----------|--------|
 | PDF со скриншотами | ❌ **НЕТ** | Текст со скриншотов = мёртвый контент без контекста, таблицы и диаграммы не конвертируются |
 | DOC/DOCX со скриншотами | ❌ **НЕТ** | Изображения теряют форматирование, примеры кода на картинках бесполезны |
-| Текстовый PDF (справочники, методички) | ⚠️ Осторожно | Можно грузить чанками с confidence < 0.7 и меткой источника |
+| **Текстовый PDF руководства разработчика (главы 1…39, приложения)** | ✅ **ДА** | Замер 15.10.2026 на 53 файлах `C:\1C_LLM\LoadDoc\pdf` (59.8 МБ, 1936 стр.): кириллица, номера и заголовки разделов (`10.3.4. Язык выражений…`) и блоки кода извлекаются без искажений; 1214 разделов → 1211 сниппетов, 7604 алиаса, 180 с на весь каталог |
 | DOC/DOCX с примерами кода | ✅ **ДА** | Полезный структурированный контент с примерами BSL-кода |
+
+### PDF руководства разработчика: чем грузить (узел V27, 15.10.2026)
+
+`load_doc_tool` PDF **не загружает**: `src/mcp_tools_loader.py::load_files` берёт только `.html`.
+Старый путь `src/pdf_parser.py` → `src/pdf_loader.py` к живой схеме неприменим: он пишет в таблицы
+`docs`, `doc_fragments`, `search_aliases`, которых в `local_doc` нет (живые таблицы — `groups`,
+`knowledge_snippets`, `alias_targets`, `doc_categories`, `doc_tags`, `snippet_audit_log`).
+
+Рабочий путь — `src/its_pdf_loader.py` + CLI `tools/load_its_pdf.py` (сценарий B: раздел = один
+`knowledge_snippets` c `groups_id = NULL` + алиасы прямо к `snippets_id`):
+
+```text
+python tools/load_its_pdf.py --only "Глава 10" --dry-run   # разбор без записи (проверка качества)
+python tools/load_its_pdf.py --only "Глава 10" --limit 40  # один файл, ограничением
+python tools/load_its_pdf.py --all --category its          # весь каталог (замер: 180 с)
+```
+
+Правила загрузчика (объявлены в коде, не в схеме):
+
+* границы разделов — по номерам `N.N…` из текста страниц; строки оглавления (номер страницы на
+  конце) и «Копировать в буфер обмена» отбрасываются;
+* `source_url` = `<путь к PDF>#p<стр. начала>-<стр. конца>`; повторный прогон того же диапазона
+  **не создаёт дублей** (срез по `source_url`) — поэтому второй прогон каталога даёт
+  `snippets_added: 0, snippets_skipped: 54`;
+* разделы короче `MIN_SECTION_CHARS` = 400 символов не сохраняются; `answer` не длиннее
+  `MAX_ANSWER` = 6000 символов, усечение помечено явной строкой;
+* `tags` содержат категорию (`its` / `platform` / `methodology`) — иначе тема не отличима от BSL;
+  `is_verified = false`, `confidence = 0.8`;
+* алиасы раздела: точный номер (1.2), полный заголовок (1.0), значимые слова (0.9), биграммы (1.1)
+  — те же веса, что у генератора `local_doc`.
+
+Проверка наполнения и находимости (обязательна после загрузки):
+
+```sql
+SELECT count(*) FROM knowledge_snippets WHERE 'pdf' = ANY(tags);
+SELECT count(*) FROM alias_targets WHERE snippets_id IS NOT NULL AND 'pdf' = ANY(tags);
+SELECT count(*) FROM alias_targets WHERE snippets_id IS NULL AND groups_id IS NULL;  -- сироты: 0
+SELECT count(DISTINCT source_url) FROM knowledge_snippets WHERE 'pdf' = ANY(tags);  -- = числу сниппетов
+```
+
+Живые находки через MCP (подтверждены 15.10.2026): `search_docs_tool("Псевдонимы полей в списке
+выборки")` → `5725` (глава 8), `search_docs_tool("Агрегатные функции")` → `4656` (глава 10).
 
 ### Правило принятия решения:
 

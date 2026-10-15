@@ -65,8 +65,13 @@ MCP сервер `1c-knowledge-base` (server.py) — это система уп�
 |-----------|-----------|------------|
 | `load_bsl_tool(path)` | path: string | Загрузка полной структуры BSL (objects/ + tables/) |
 | `load_single_html_tool(filepath, category)` | filepath: string, category: string | Загрузка одиночного HTML-файла (BSL) |
-| `load_doc_tool(path, category)` | path: string, category: string | Загрузка документов из директории (.html, .pdf, .md) |
+| `load_doc_tool(path, category)` | path: string, category: string | Загрузка директории: **только `.html`** (`load_files` фильтрует по суффиксу). PDF и Markdown не берёт — это расхождение с LOAD_RULES, где инструмент описан как «.html, .pdf, .md»; исправлено в LOAD_RULES 15.10.2026 |
+| `tools/load_its_pdf.py` (CLI, вне MCP) | `--dir`, `--file`, `--only`, `--all`, `--category`, `--limit`, `--dry-run` | **PDF руководства разработчика** → сценарий B: один раздел = один сниппет + алиасы. Реализация `src/its_pdf_loader.py`; идемпотентно по `source_url` |
 | `add_snippet_tool(question, answer, ...)` | question, answer обязательные; source_url?, tags?, confidence?, groups_id? опциональные | Добавить вопрос-ответ с кодом |
+
+> ⚠️ Старые `src/pdf_parser.py` → `src/pdf_loader.py` к живой схеме **неприменимы**: они пишут в
+> `docs`, `doc_fragments`, `search_aliases`, которых в `local_doc` нет. Не вызывать их и не
+> считать их статистику состоянием базы.
 
 ### Поиск и получение данных
 
@@ -158,8 +163,27 @@ HTML-файл → Группа + Сниппет (с groups_id)
 1. **groups_id = NULL для HTML/FAQ/Markdown:** При добавлении сниппетов из не-BSL источников НЕ передавайте groups_id
 2. **Алиасы на snippets vs groups:** Алиасы, привязанные напрямую к snippets_id, имеют приоритет rank=3.0 над групповыми (rank=2.0)
 3. **description содержит ВЕСЬ body HTML** — это может быть большой объём данных
-4. **Статус БД:** groups: ~25 495, snippets: ~1 640, aliases: ~200 225 (замер 14.10.2026,
-   `get_db_state_tool()` — верить ему, а не этой строке)
+4. **Статус БД:** groups: 25 495, snippets: 2 861 (из них 1 211 — разделы руководства
+   разработчика из PDF с тегом `pdf`/`its`, 1 496 — BSL с `groups_id`, 1 654 — BSL-сниппеты и
+   ручные), aliases: 208 065 (замер 15.10.2026, `get_db_state_tool()` — верить ему, а не этой
+   строке). Разбивка по происхождению: `SELECT tags, count(*) FROM knowledge_snippets GROUP BY
+   tags ORDER BY count(*) DESC`.
+5. **Пробелы покрытия, которые нельзя читать как «документации нет»:**
+   - **`category=` в `search_docs_tool` не фильтрует** (`src/mcp_tools_api.py::search_docs`
+     принимает параметр, но не использует; фильтр есть только в мёртвом `src/search.py` с
+     таблицами `docs`/`doc_fragments`). Пустой ответ с категорией = термина нет в базе;
+   - **`list_categories_tool()` считает по `groups` без учёта категории** — все четыре категории
+     показывают одинаковое число, это не признак пустой категории;
+   - **`groups` покрывает BSL-документацию англоязычными идентификаторами с числовыми
+     суффиксами** (`DataCompositionTemplateComposer`, `Parameters1301`); русских имён методов в
+     `groups`/`alias_targets` нет (`ПометитьУдаление` — 0 строк нигде). Русские формулировки
+     дают алиасы (`add_aliases_tool`) или ищутся по загруженному руководству разработчика;
+   - `pg_trgm` не установлен: середина и хвост идентификатора через FTS не ищутся.
+6. **PDF загружается только `tools/load_its_pdf.py`** (сценарий B, `groups_id = NULL`, теги
+   категории, `source_url` = `<файл>#p<от>-<до>`). Перед записью — `--dry-run`: он показывает
+   найденные разделы и их размеры; разделы короче 400 символов отбрасываются. Повторный прогон
+   не создаёт дублей — это проверяется вторым запуском (`snippets_added: 0,
+   snippets_skipped: N`).
 5. **Автоалиасы ограничены, ручные — нет:** из текста вопроса генерируется **не более 10**
    автоалисов. Термины, которых в вопросе нет (русские формулировки, имена ключей с `/` и без,
    аббревиатуры, английские термины), добавляют `add_aliases_tool(aliases="…", snippets_id=…)`

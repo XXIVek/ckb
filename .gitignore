@@ -72,6 +72,9 @@ _inv_out.txt
 _ibcmd_probe_out.txt
 _ibcmd_work/
 # Извлечённый текст .docx-статьи (раздел 13.5 плана). Сам экстрактор _docx_extract.py трекается:
-# load_doc_tool понимает только .html/.pdf/.md, поэтому извлечение - штатный шаг загрузки.
+# load_doc_tool понимает только .html, поэтому извлечение - штатный шаг загрузки (.docx, .md).
 _docx_*.txt
+# Лог прогона tools/load_its_pdf.py (руководство разработчика, PDF). Сам загрузчик
+# src/its_pdf_loader.py и обёртка tools/load_its_pdf.py трекаются.
+_its_pdf_*.txt
 
