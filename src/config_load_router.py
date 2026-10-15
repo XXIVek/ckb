@@ -352,3 +352,76 @@ def format_load_result(result):
     return "\n".join(lines)
 
 
+
+# ── узел V25: формат ответа «разбор бинарного файла → загрузка» ──────────────────
+#
+# Карточка четырёх исходов остаётся карточкой четырёх исходов: раздел разбора добавляется
+# ОТДЕЛЬНО, потому что «не удалось сконвертировать» и «загрузчик отказал» — два разных ответа,
+# и оператор обязан видеть границу между ними (правило R13, раздел 13.7 норматива).
+
+CONVERSION_HEADER = "─── РАЗБОР БИНАРНОГО ФАЙЛА (ibcmd) ───"
+
+
+def _conversion_lines(conversion):
+    """Строки раздела разбора: чем работали, в каком контексте и что получилось."""
+    lines = [CONVERSION_HEADER]
+    version = conversion.get("ibcmd_version") or "версия не определена"
+    lines.append(f"Инструмент: {conversion.get('ibcmd')} ({version})")
+    ib_state = "создана сейчас" if conversion.get("infobase_created") else "переиспользована"
+    lines.append(f"Информационная база: {conversion.get('db_path')} ({ib_state})")
+
+    facts = conversion.get("type_names") or {}
+    if facts.get("available"):
+        lines.append(
+            "Типы в разборе: имён cfg: — %s, идентификаторов <v8:TypeId> — %s"
+            % (facts.get("cfg_type_names"), facts.get("type_id_elements"))
+        )
+    else:
+        lines.append(f"Типы в разборе: проверить не удалось — {facts.get('reason')}")
+    if conversion.get("config_loaded_now"):
+        took = (conversion.get("timings") or {}).get("config_load")
+        lines.append(f"Конфигурация в ИБ: загружена сейчас ({took}с)")
+    if conversion.get("config_note"):
+        lines.append("⚠️ " + conversion["config_note"])
+
+    lines.append(
+        f"Разобранный XML: {conversion.get('root_xml')}; "
+        f"файлов содержимого: {conversion.get('content_files')}"
+    )
+    timings = ", ".join(f"{name} {value}с"
+                        for name, value in (conversion.get("timings") or {}).items())
+    if timings:
+        lines.append("Время: " + timings)
+    if conversion.get("layout_removed"):
+        lines.append("Каталог разбора: удалён (загрузка выполнена)")
+    elif conversion.get("layout_dir"):
+        lines.append(f"Каталог разбора сохранён: {conversion['layout_dir']}")
+    return lines
+
+
+def format_binary_load_result(result):
+    """Ответ по результату ibcmd_bridge.convert_and_load (узел V25).
+
+    Сначала — итог загрузки (ради него вызов и делался), ниже — чем он обеспечен. Если до
+    загрузки дело не дошло, карточка загрузки не печатается: исхода загрузки не было.
+    """
+    if not isinstance(result, dict):
+        return "❌ Не могу загрузить: мост ibcmd вернул некорректный ответ: " + str(result)
+
+    conversion = result.get("conversion") or {}
+    body = []
+    if result.get("stage") == "load":
+        body.append(format_load_result(result))
+    else:
+        body.append(f"❌ Не могу загрузить: {result.get('error', 'разбор не выполнен')}")
+        if result.get("hint"):
+            body.append(f"   {result['hint']}")
+        # Граница стадии называется словами: при отказе разбора раздела разбора нет (отчёта
+        # просто не существует), и без этой строки ответ неотличим от отказа загрузчика.
+        # Для стадии `load` границу показывает раздел разбора ниже — он выполнен успешно.
+        body.append("Этап отказа: разбор бинарного файла (загрузчик не вызывался)")
+    if conversion:
+        body.append("")
+        body.extend(_conversion_lines(conversion))
+    return "\n".join(line for line in body if line is not None)
+

@@ -62,12 +62,15 @@
 | Сценарий | Инструмент | Описание |
 |----------|-----------|----------|
 | Правила загрузки (Шаг 0) | `get_load_config_rules_tool()` | compact-правила `LOAD_RULES_Config.md` |
-| **Загрузка каталога (единственная точка входа)** | `load_1c_catalog_tool(source_path, force=False)` | тип каталога определяется самим сервером по файлам корневого каталога |
+| **Загрузка каталога (точка входа каталога)** | `load_1c_catalog_tool(source_path, force=False)` | тип каталога определяется самим сервером по файлам корневого каталога |
+| **Загрузка двоичного файла внешнего объекта (узел V25)** | `load_external_object_file_tool(file_path, config_file="", db_path="", work_dir="", force=False, keep_layout=False)` | `.erf` / `.epf` → `ibcmd config --db-path <ИБ> export --file=<файл> <база>` → тот же `load_catalog`. **Пути обязаны быть абсолютными**; рабочая ИБ `_ibcmd_work/ib` переиспользуется; `config_file` — `.cf` для загрузки в ИБ (без него имена `cfg:` не разрешатся — это предупреждение, а не отказ, правило R14); имена параметров — только как в коде |
 | Удаление внешнего объекта | `delete_external_report_tool(source_path \| uuid \| report_id, object_type?)` | снимает запись, детей и обогащение |
 | Привязать внешний объект к конфигурации (узлы V20, V20.1) | `set_object_configuration_tool(uuid \| source_path, configuration_id)` — инструмент enrichment-MCP (контракт 17 → 18); **показывает** привязку карточка `config_enrichment_stats_tool(uuid=…, card=True)`, обратный перечень отдаёт тот же вызов без uuid | привязку заявляет только оператор; `NULL` = «привязка не заявлена», а не «универсальный»; `configuration_id=None` — снять; несуществующий id отклоняется инструментом; внешнего ключа в схеме нет, битая ссылка называется прямо и требует перепривязки; `force=True` переносит значение |
 
-> ⚠️ **Контракт — ровно эти три инструмента** (`register_external_report_tool` и
-> `analyze_config_load_tool` убраны: анализ выполняется внутри точки входа). 18 внеконтрактных
+> ⚠️ **Контракт — четыре инструмента** (три утверждены 12.10.2026: `register_external_report_tool`
+> и `analyze_config_load_tool` убраны, анализ выполняется внутри точки входа; четвёртый —
+> `load_external_object_file_tool`, добавлен узлом V25 15.10.2026 как вторая точка входа, для
+> двоичного файла внешнего объекта). 18 внеконтрактных
 > инструментов (`list_configurations_tool`, `get_configuration_tool`, `find_config_by_name_uuid_tool`,
 > `search_config_objects_tool`, `list_config_objects_tool`, `get_object_structure_tool`,
 > `search_bsl_code_tool`, `get_bsl_module_code_tool`, `list_bsl_modules_tool`,
@@ -103,6 +106,7 @@
 | `external_report` — внешний отчёт | ✅ реализован (включая обогащение V17) |
 | `external_processing` — внешняя обработка | ✅ реализован узлом V22: заголовок пишется в ту же таблицу `external_report` с `object_kind='external_processing'` (правило R12); отдельной таблицы `external_processing` в схеме нет |
 | `configuration`, `extension` | ❌ возвращают «сценарий не реализован» |
+| двоичный файл `*.erf` / `*.epf` (это не каталог) | ✅ реализован узлом V25: `load_external_object_file_tool` конвертирует файл штатной командой `ibcmd config --db-path <ИБ> export --file=<файл> <база>` в каталог разбора, дальше работает то же правило R1 и тот же `load_catalog` |
 
 ---
 
@@ -180,11 +184,16 @@ XML, флаги изменённых объектов, сборка XML по с�
 │     └─ get_doc_tool(doc_id) — если нужна полная группа
 │
 ├─ Нужно загрузить / перезагрузить / удалить каталог выгрузки?
-│  └─→ MCP `1c-configurations-core` (контракт — 3 инструмента)
+│  └─→ MCP `1c-configurations-core` (контракт — 4 инструмента)
 │     ├─ get_load_config_rules_tool()          — Шаг 0, правила загрузки
 │     ├─ load_1c_catalog_tool(source_path, force=False)
 │     │     └─ ⚠️ уже загружено → СПРОСИТЬ оператора (перезаписать / удалить / отменить).
 │     │        force=True без вопроса — только по явной команде «замени конфигурацию»
+│     ├─ load_external_object_file_tool(file_path, config_file="", db_path="", work_dir="",
+│     │        force=False, keep_layout=False)   — узел V25: файл .erf/.epf через ibcmd
+│     │     пути абсолютные; имена параметров — только как в коде; та же точка входа load_catalog
+│     │     после разбора; cfg:-имена типов разрешаются только в ИБ с загруженной конфигурацией
+│     │     (иначе предупреждение, а не отказ — R14); отказ разбора ≠ отказ загрузки (R13)
 │     └─ delete_external_report_tool(...)
 │
 ├─ Вопрос о содержимом загруженного объекта (свойства, реквизиты, формы, код)?

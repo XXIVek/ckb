@@ -49,9 +49,14 @@ DEFAULT_TARGETS = [
 # Узел B (макеты СКД) добавил get_config_template_tool: 16 → 17.
 # Узел V20.2 (привязка к конфигурации) добавил set_object_configuration_tool: 17 → 18 —
 # решение оператора 14.10.2026, тем же решением из схемы снят FK на configurations(id).
+# Узел V25 (бинарные .erf/.epf) добавил load_external_object_file_tool: core 3 → 4.
+# Точка входа загрузки каталога при этом не меняется: новый инструмент только готовит
+# каталог выгрузки и вызывает тот же load_catalog (docs/CONFIGURATIONS_ENRICHMENT_PLAN.md,
+# раздел 13.7).
 EXPECTED_TOOLS = {
     "server_configurations_core.py": [
         "delete_external_report_tool", "get_load_config_rules_tool", "load_1c_catalog_tool",
+        "load_external_object_file_tool",
     ],
     "server_configurations_enrichment.py": [
         "add_config_aliases_tool", "add_config_cross_reference_tool", "add_config_snippet_tool",

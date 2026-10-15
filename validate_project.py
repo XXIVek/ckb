@@ -60,6 +60,11 @@ print("\n[3/7] Checking live loader/enrichment modules...")
 try:
     from config_load_router import load_catalog, format_load_result
     from external_report_loader import delete_external_object, read_external_meta
+    # узел V25: мост к ibcmd проверяется как живой модуль подсистемы загрузки (импорт без
+    # побочных эффектов: ibcmd ищется только в момент вызова).
+    from config_load_router import format_binary_load_result
+    from ibcmd_bridge import (find_ibcmd, ensure_infobase, load_configuration, export_to_layout,
+                              import_from_layout, convert_and_load)
     from enrichment_generator import (generate_enrichment, describe_object, type_brief,
                                      build_object_aliases, build_snippets)
     from enrichment_aliases import (add_config_aliases, search_config_aliases,
@@ -68,13 +73,15 @@ try:
                                     search_config_snippets, delete_config_snippet,
                                     get_snippets_for_object, enrichment_stats)
     print("  ✅ загрузка: config_load_router, external_report_loader")
+    print("  ✅ разбор бинарных .erf/.epf: ibcmd_bridge + format_binary_load_result")
     print("  ✅ обогащение: generator (generate_enrichment, describe_object), aliases, snippets")
 except Exception as e:
     print(f"  ❌ живые модули не импортируются: {e}")
     sys.exit(1)
 
-# 4. Состав инструментов контракта (core 3 / enrichment 16 / export 1) — по разбору шага 2.
+# 4. Состав инструментов контракта (core 4 / enrichment 18 / export 1) — по разбору шага 2.
 #    Лишний инструмент = возврат к неработающим вызовам; недостающий = потерянный контракт.
+#    Числа в итоговой строке печатаются из EXPECTED_TOOLS, а не из этой строки-комментария.
 print("\n[4/7] Checking MCP tool contract (core/enrichment/export)...")
 try:
     from check_mcp_tool_wiring import EXPECTED_TOOLS
@@ -170,7 +177,11 @@ print("VALIDATION SUMMARY")
 print("=" * 70)
 print("✅ server.py (1c-knowledge-base): imports OK")
 print("✅ MCP-проводка серверов конфигураций (core/enrichment/export): нерешённых имён нет")
-print("✅ состав инструментов совпадает с контрактом (core 3, enrichment 16, export 1)")
+_contract = ", ".join(
+    f"{name[len('server_configurations_'):-3]} {len(tools)}"
+    for name, tools in sorted(EXPECTED_TOOLS.items())
+)
+print(f"✅ состав инструментов совпадает с контрактом ({_contract})")
 print("✅ живые модули загрузки (config_load_router, external_report_loader) и обогащения "
       "(generator/aliases/snippets): imports OK")
 print("✅ мёртвый код базы 'configurations' удалён, повторных обращений нет")

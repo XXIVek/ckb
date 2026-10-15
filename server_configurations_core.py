@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""MCP-сервер 1c-configurations-core — РОВНО три инструмента контракта загрузки.
+"""MCP-сервер 1c-configurations-core — РОВНО четыре инструмента контракта загрузки.
 
 Норматив поведения: docs/config-scenarios/FLOWCHART_1c-configurations-core.md.
 
   1. get_load_config_rules_tool()                    - правила загрузки (шаг 0);
-  2. load_1c_catalog_tool(source_path, force=False)  - единая точка входа загрузки;
-  3. delete_external_report_tool(...)                - удаление внешнего объекта.
+  2. load_1c_catalog_tool(source_path, force=False)  - единая точка входа загрузки каталога;
+  3. load_external_object_file_tool(file_path, ...)  - загрузка бинарного .erf/.epf (узел V25):
+     разбор в каталог выгрузки утилитой ibcmd и повтор той же точки входа (2);
+  4. delete_external_report_tool(...)                - удаление внешнего объекта.
 
 Иной логики здесь нет и быть не должно. Раньше в файле лежали ещё 18 инструментов «вне
 контракта» (list_configurations_tool, search_config_objects_tool, list_bsl_modules_tool,
@@ -27,6 +29,10 @@ check_external_report_inventory.sql) и витринами `v_form_elements`/`v_
 Логика загрузки живёт в src/: src/config_load_router.py (узлы T1..T6, маршрутизация, формат
 четырёх исходов) и src/external_report_loader.py (вариант 3 «внешний отчёт»). Здесь только
 тонкие обёртки: разбор аргументов - вызов функции из src/ - форматирование ответа.
+Разбор бинарных .erf/.epf живёт в src/ibcmd_bridge.py (узел V25): там поиск ibcmd, подготовка
+и переиспользование файловой ИБ, загрузка конфигурации, экспорт в каталог выгрузки и вызов
+той же точки входа load_catalog. Формат карточки - config_load_router.format_binary_load_result:
+карточка четырёх исходов плюс отдельный раздел разбора.
 
 ⚠️ Файл ведётся ВРУЧНУЮ. `generate_servers.py` удалён: он терял блок импортов из src/
 (из-за него enrichment/export и упали на NameError). Контроль проводки инструментов:
@@ -38,7 +44,8 @@ src_dir = Path(__file__).parent / 'src'
 sys.path.insert(0, str(src_dir))
 from fastmcp import FastMCP
 from external_report_loader import delete_external_object, read_external_meta
-from config_load_router import load_catalog, format_load_result
+from config_load_router import load_catalog, format_load_result, format_binary_load_result
+from ibcmd_bridge import convert_and_load
 
 mcp = FastMCP("1c-configurations-core")
 
@@ -78,8 +85,10 @@ def load_1c_catalog_tool(source_path: str, force: bool = False):
       ⚠️ уже загружено - нужен ответ оператора: повторить вызов с force=True;
       ❌ не могу загрузить - нет каталога / каталог не подходит / пустой UUID /
          сценарий не реализован / не получен ID записи.
-    Реализован вариант "внешний отчёт"; конфигурация, расширение и внешняя обработка сейчас
-    возвращают ❌ "сценарий не реализован".
+    Реализованы варианты "внешний отчёт" и "внешняя обработка" (узел V22: оба пишут в одну
+    таблицу external_report, вид различает колонка object_kind); конфигурация и расширение
+    возвращают ❌ "сценарий не реализован". Бинарный файл внешнего объекта (.erf/.epf) этим
+    инструментом не загружается: для него служит load_external_object_file_tool (узел V25).
     """
     try:
         return format_load_result(load_catalog(source_path, force=bool(force)))
@@ -88,7 +97,63 @@ def load_1c_catalog_tool(source_path: str, force: bool = False):
 
 
 # =====================================================
-# 3. УДАЛЕНИЕ ВНЕШНЕГО ОБЪЕКТА (контрактный инструмент)
+# 3. ЗАГРУЗКА БИНАРНОГО ФАЙЛА ВНЕШНЕГО ОБЪЕКТА (.erf/.epf, узел V25)
+# =====================================================
+
+@mcp.tool()
+def load_external_object_file_tool(
+    file_path: str,
+    config_file: str = "",
+    db_path: str = "",
+    work_dir: str = "",
+    force: bool = False,
+    keep_layout: bool = False,
+):
+    """Загрузить бинарный файл внешнего объекта: .erf (отчёт) или .epf (обработка).
+
+    Маршрут: ibcmd разбирает скомпилированный файл в каталог выгрузки (тот же layout, что
+    даёт выгрузка из конфигуратора), дальше работает обычная точка входа load_catalog — её
+    четыре исхода и карточка не меняются. Ответ дополняется отдельным разделом разбора:
+    чем работали, в какой информационной базе и разрешились ли имена типов.
+
+    Контекст ibcmd обязателен (замер 15.10.2026, docs/CONFIGURATIONS_ENRICHMENT_PLAN.md,
+    раздел 13): без информационной базы `config export` отказывается работать. Файловая ИБ
+    создаётся один раз и переиспользуется (каталог _ibcmd_work/ib), повторный разбор одного
+    файла — 13-15 с.
+
+    Аргументы:
+      file_path   - путь к .erf или .epf;
+      config_file - путь к .cf конфигурации. Без него типы реквизитов останутся
+                    идентификаторами <v8:TypeId> вместо имён cfg: - об этом говорится прямо.
+                    Загрузка конфигурации в ИБ выполняется один раз (~99 с на полный БП3) и
+                    дальше переиспользуется; `config apply` для имён типов не нужен;
+      db_path     - каталог файловой ИБ (по умолчанию _ibcmd_work/ib). Путь всегда
+                    абсолютный: относительный ibcmd разрешает от каталога данных автономного
+                    сервера, и ИБ теряется;
+      work_dir    - каталог разбора (по умолчанию _ibcmd_work/conv/<отпечаток файла>);
+      force       - подтверждение перезагрузки дубликата (то же правило R5, что и для
+                    каталога: при ⚠️ сначала вопрос оператору);
+      keep_layout - не удалять каталог разбора после успешной загрузки (для разбора).
+
+    Исходы — те же четыре, плюс отдельная граница "разбор не выполнен": код возврата 0 у
+    ibcmd о результате не сообщает (замер: при отсутствующем файле export вернул 0 и ноль
+    файлов), поэтому решение принимается по наличию <база>.xml и каталога <база>/.
+    """
+    try:
+        return format_binary_load_result(convert_and_load(
+            file_path,
+            config_file=config_file or None,
+            db_path=db_path or None,
+            work_dir=work_dir or None,
+            force=bool(force),
+            keep_layout=bool(keep_layout),
+        ))
+    except Exception as e:
+        return f"❌ Не могу загрузить: внутренняя ошибка разбора бинарного файла: {str(e)}"
+
+
+# =====================================================
+# 4. УДАЛЕНИЕ ВНЕШНЕГО ОБЪЕКТА (контрактный инструмент)
 # =====================================================
 
 @mcp.tool()
