@@ -5,6 +5,8 @@
 > она не была реализована и вела к вызовам, которые падали end-to-end. прежнее состояние сохранено
 > в git (файл был в `.clinerules/`).
 > Норматив решений (E1…E6, словари целей, пороги): [docs/CONFIGURATIONS_ENRICHMENT_PLAN.md](../docs/CONFIGURATIONS_ENRICHMENT_PLAN.md).
+> Практика правки уже загруженного объекта (что обязательно сделать до `force=True` — снимок карточки,
+> каталога выгрузки и ручных обогащающих строк): [docs/EXTERNAL_OBJECT_EDIT_PLAN.md](../docs/EXTERNAL_OBJECT_EDIT_PLAN.md).
 > Порядок установки БД и границы владения таблицами — раздел «Порядок создания БД «с нуля»» в
 > `.clinerules/1c-configurations-core_Rule.md` (шаг 1 → шаг 1b → шаг 2).
 
