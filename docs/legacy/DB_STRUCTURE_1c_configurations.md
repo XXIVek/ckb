@@ -230,8 +230,17 @@ VALUES (NULL, ТСД_1С_XXI_Век, ТСД для 1С (XXI Век), Рабоч�
 5. report_templates — макеты (включая СКД)
 
 #### Классы объектов (ClassId):
+
+> ⚠️ **Снимок устарел и ошибочен:** внешней обработке здесь приписан ClassId отчёта. Замер
+> 15.10.2026 (915 XML + сквозной проход 158 925 XML): `ExternalReport` =
+> `e41aff26-25cf-4bb6-b6c1-3f478a75f374`, `ExternalDataProcessor` =
+> `c3831ec8-d8d5-4f93-8a22-f9bfae07327f`; при этом у объектов конфигурации элемента
+> `<xr:ClassId>` в выгрузке нет вовсе. Актуальные значения — `xsd-docs/overview/04-internal-info.md`,
+> полный профиль — якорь `identifier-profile-classid-objectid-typeid-valueid`
+> (MCP `1c-knowledge-base`). Файл оставлен только как история.
+
 - ExternalReport: e41aff26-25cf-4bb6-b6c1-3f478a75f374
-- ExternalDataProcessor: e41aff26-25cf-4bb6-b6c1-3f478a75f374
+- ExternalDataProcessor: e41aff26-25cf-4bb6-b6c1-3f478a75f374  ← неверно, см. предупреждение выше
 
 #### Пространства имён XML:
 - MDClasses: http://v8.1c.ru/8.3/MDClasses (корневой элемент)

@@ -242,9 +242,15 @@ def list_categories_tool():
             name = cat.get('name', 'Без имени')
             doc_count = cat.get('doc_count', 0)
             frag_count = cat.get('fragment_count', 0)
+            alias_count = cat.get('alias_count', 0)
             lines.append(f"  [{code}] {name}")
-            lines.append(f"    Документов: {doc_count}, Фрагментов: {frag_count}")
+            lines.append(f"    Групп справки: {doc_count}, Сниппетов: {frag_count}, Алиасов: {alias_count}")
             lines.append("")
+        lines.append("Счётчики — по тегам цели (groups.tags / knowledge_snippets.tags /")
+        lines.append("alias_targets.tags); сниппет и алиас учитываются и тогда, когда категория")
+        lines.append("стоит на их родительской группе (так устроены BSL-строки). Одна строка")
+        lines.append("может относиться к нескольким категориям, поэтому суммы по категориям")
+        lines.append("больше общего числа строк в базе.")
         return '\n'.join(lines)
     except Exception as e:
         return f"Ошибка при получении категорий: {str(e)}"

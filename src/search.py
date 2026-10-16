@@ -118,11 +118,31 @@ def list_categories():
     conn = database.get_connection()
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        # groups вместо docs (docs удалена)
+        # Категория в живой схеме — значение в text[] tags, поэтому считается по каждому
+        # коду справочника (dc.code = ANY(...)), а не жёстким 'language': прежний запрос
+        # давал одинаковые числа для всех категорий и считал все сниппеты без учёта тега.
+        # Сниппет и алиас относятся к категории и через родительскую группу: у BSL-строк
+        # категория проставлена на группе, а не на самой строке.
         cur.execute("""SELECT dc.code, dc.name, dc.description,
-                        (SELECT COUNT(*) FROM groups g WHERE %s = ANY(g.tags)) AS doc_count,
-                        (SELECT COUNT(*) FROM knowledge_snippets ks) AS fragment_count
-                   FROM doc_categories dc ORDER BY dc.code""", ('language',))
+                        (SELECT COUNT(*) FROM groups g
+                          WHERE dc.code = ANY(COALESCE(g.tags, ARRAY[]::text[]))) AS doc_count,
+                        (SELECT COUNT(*) FROM knowledge_snippets ks
+                          WHERE dc.code = ANY(COALESCE(ks.tags, ARRAY[]::text[]))
+                             OR EXISTS (SELECT 1 FROM groups pg
+                                         WHERE pg.id = ks.groups_id
+                                           AND dc.code = ANY(COALESCE(pg.tags, ARRAY[]::text[])))) AS fragment_count,
+                        (SELECT COUNT(*) FROM alias_targets at
+                          WHERE dc.code = ANY(COALESCE(at.tags, ARRAY[]::text[]))
+                             OR EXISTS (SELECT 1 FROM groups ag
+                                         WHERE ag.id = at.groups_id
+                                           AND dc.code = ANY(COALESCE(ag.tags, ARRAY[]::text[])))
+                             OR EXISTS (SELECT 1 FROM knowledge_snippets ak
+                                         WHERE ak.id = at.snippets_id
+                                           AND (dc.code = ANY(COALESCE(ak.tags, ARRAY[]::text[]))
+                                                OR EXISTS (SELECT 1 FROM groups ag2
+                                                            WHERE ag2.id = ak.groups_id
+                                                              AND dc.code = ANY(COALESCE(ag2.tags, ARRAY[]::text[])))))) AS alias_count
+                   FROM doc_categories dc ORDER BY dc.code""")
         results = cur.fetchall()
         cur.close()
         return [dict(r) for r in results]

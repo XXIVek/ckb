@@ -111,7 +111,13 @@ def add_aliases(aliases, groups_id=None, snippets_id=None):
 
 
 def search_docs(query, category=None, limit=20):
-    """Search across all documentation (groups + snippets + aliases)."""
+    """Search across all documentation (groups + snippets + aliases).
+
+    category — код категории или несколько кодов через запятую. Относится к категории
+    означает: теги цели (groups.tags / knowledge_snippets.tags) пересекаются с
+    запрошенными кодами. Без category поведение не меняется; с category не отдаются
+    строки, у которых такого тега нет (в том числе строки вообще без тегов).
+    """
     pool = _get_pool()
     conn = pool.getconn()
     cur = None
@@ -119,13 +125,33 @@ def search_docs(query, category=None, limit=20):
         cur = conn.cursor()
         results = []
 
+        # Категория: фильтр по тегам ЦЕЛИ (groups.tags / knowledge_snippets.tags).
+        # Один код или несколько через запятую — достаточно пересечения по любому.
+        # Без category поведение не меняется; с category строки без такого тега не отдаются.
+        # Теги проиндексированы GIN: idx_groups_tags, idx_snippets_tags.
+        cat_codes = [c.strip().lower() for c in str(category or '').split(',') if c.strip()]
+        cat_tail = (cat_codes,) if cat_codes else ()
+        cat_pair = (cat_codes, cat_codes) if cat_codes else ()
+        # Группа относится к категории, если код есть в её собственных тегах.
+        # Сниппет — если код есть в его тегах ИЛИ в тегах родительской группы: у
+        # BSL-сниппетов категория стоит на группе, а не на строке сниппета, и фильтр
+        # только по своим тегам отдавал бы группы, молча теряя их сниппеты.
+        g_cat = " AND COALESCE(g.tags, ARRAY[]::text[]) && %s::text[]" if cat_codes else ""
+        ks_cat = (" AND (COALESCE(ks.tags, ARRAY[]::text[]) && %s::text[]"
+                  " OR COALESCE(kg.tags, ARRAY[]::text[]) && %s::text[])") if cat_codes else ""
+        t_cat = " AND COALESCE(tags, ARRAY[]::text[]) && %s::text[]" if cat_codes else ""
+        t_ks_cat = (" AND (COALESCE(tags, ARRAY[]::text[]) && %s::text[]"
+                    " OR EXISTS (SELECT 1 FROM groups gp"
+                    " WHERE gp.id = knowledge_snippets.groups_id"
+                    " AND COALESCE(gp.tags, ARRAY[]::text[]) && %s::text[]))") if cat_codes else ""
+
         # Шаг 1: Поиск по алиасам (приоритет) — точное совпадение (case-insensitive)
         cur.execute("""
             SELECT DISTINCT at.groups_id, 'group' as type, g.name, g.description, g.pagetitle, 2.0 as rank
             FROM alias_targets at
             LEFT JOIN groups g ON at.groups_id = g.id
-            WHERE LOWER(at.alias_name) = %s AND at.groups_id IS NOT NULL
-        """, (query.lower(),))
+            WHERE LOWER(at.alias_name) = %s AND at.groups_id IS NOT NULL""" + g_cat,
+            (query.lower(),) + cat_tail)
         for row in cur.fetchall():
             desc = row[3] if row[3] and isinstance(row[3], str) else ''
             results.append({
@@ -141,8 +167,9 @@ def search_docs(query, category=None, limit=20):
                 ) THEN 3.0 ELSE 2.0 END as rank
             FROM alias_targets at
             LEFT JOIN knowledge_snippets ks ON at.snippets_id = ks.id
-            WHERE LOWER(at.alias_name) = %s AND at.snippets_id IS NOT NULL
-        """, (query.lower(), query.lower()))
+            LEFT JOIN groups kg ON ks.groups_id = kg.id
+            WHERE LOWER(at.alias_name) = %s AND at.snippets_id IS NOT NULL""" + ks_cat,
+            (query.lower(), query.lower()) + cat_pair)
         for row in cur.fetchall():
             desc = row[3] if row[3] and isinstance(row[3], str) else ''
             results.append({
@@ -159,7 +186,10 @@ def search_docs(query, category=None, limit=20):
             extra_snippets = []
             if group_ids:
                 cur.execute(
-                    "SELECT id, question, answer FROM knowledge_snippets WHERE groups_id = ANY(%s) ORDER BY id",
+                    # Категория здесь не нужна: group_ids уже отфильтрованы по категории,
+                    # а собственных тегов категории у сниппетов группы может и не быть.
+                    "SELECT id, question, answer FROM knowledge_snippets WHERE groups_id = ANY(%s)"
+                    " ORDER BY id",
                     (group_ids,))
                 seen_ids = set(int(r['id']) for r in results)
                 for row in cur.fetchall():
@@ -186,16 +216,18 @@ def search_docs(query, category=None, limit=20):
 
         # Шаг 3: Full-text поиск по groups (name + pagetitle + title + description)
         cur.execute(
-            "SELECT id, name, description FROM groups WHERE to_tsvector('russian', name || ' ' || COALESCE(pagetitle, '')) @@ plainto_tsquery('russian', %s) ORDER BY ts_rank(to_tsvector('russian', name || ' ' || COALESCE(pagetitle, '')), plainto_tsquery('russian', %s)) DESC LIMIT %s",
-            (query, query, limit))
+            "SELECT id, name, description FROM groups WHERE to_tsvector('russian', name || ' ' || COALESCE(pagetitle, '')) @@ plainto_tsquery('russian', %s)" + t_cat +
+            " ORDER BY ts_rank(to_tsvector('russian', name || ' ' || COALESCE(pagetitle, '')), plainto_tsquery('russian', %s)) DESC LIMIT %s",
+            (query,) + cat_tail + (query, limit))
         for row in cur.fetchall():
             desc = row[2] if row[2] and isinstance(row[2], str) else ''
             results.append({'id': int(row[0]), 'title': row[1], 'description': desc[:200] if desc else '', 'rank': 1.0, 'type': 'group'})
 
         # Шаг 4: Full-text поиск по snippets (question + answer)
         cur.execute(
-            "SELECT id, question, answer FROM knowledge_snippets WHERE to_tsvector('russian', question || ' ' || COALESCE(answer, '')) @@ plainto_tsquery('russian', %s) ORDER BY ts_rank(to_tsvector('russian', question || ' ' || COALESCE(answer, '')), plainto_tsquery('russian', %s)) DESC LIMIT %s",
-            (query, query, limit))
+            "SELECT id, question, answer FROM knowledge_snippets WHERE to_tsvector('russian', question || ' ' || COALESCE(answer, '')) @@ plainto_tsquery('russian', %s)" + t_ks_cat +
+            " ORDER BY ts_rank(to_tsvector('russian', question || ' ' || COALESCE(answer, '')), plainto_tsquery('russian', %s)) DESC LIMIT %s",
+            (query,) + cat_pair + (query, limit))
         for row in cur.fetchall():
             desc = row[2] if row[2] and isinstance(row[2], str) else ''
             results.append({'id': int(row[0]), 'title': row[1][:200], 'description': desc[:200] if desc else '', 'rank': 0.5, 'type': 'snippet'})

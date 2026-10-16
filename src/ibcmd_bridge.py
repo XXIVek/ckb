@@ -29,6 +29,9 @@
     `.xml` в аргументе даёт `<база>.xml.xml`. Пару `<база>.xml` + `<база>/` загрузчик принимает
     как есть: `base_path = parent(корневого XML)/stem(корневого XML)`
     (src/external_report_loader.py, узел V10) — переименовывать каталог в имя объекта не нужно.
+    У внешнего объекта с пустым содержимым каталог `<база>/` не создаётся вовсе (замер узла
+    V29, 16.10.2026): значимый артефакт разбора — `<база>.xml`, отсутствие каталога —
+    предупреждение, а не отказ.
 
 Слоем ниже этот модуль ничего не знает о БД: загрузку выполняет `config_load_router.load_catalog`
 (его четыре исхода и формат карточки не меняются). Точка входа MCP —
@@ -42,6 +45,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -250,6 +254,14 @@ def export_to_layout(binary_path, out_base, db_path=None, timeout=TIMEOUT_EXPORT
 
     Решение о результате — по существованию файлов, а не по коду возврата (L4: при отсутствующем
     входном файле ibcmd вернул rc=0, «успешно завершено» и ни одного файла).
+
+    Обязательный артефакт — `<база>.xml`; каталог `<база>/` опционален (замер узла V29,
+    16.10.2026: `config export` собранного .epf внешней обработки с пустым содержимым
+    создал `<база>.xml` и НЕ создал `<база>/`, при этом отчёт — «Экспорт конфигурации в
+    XML успешно завершен», rc=0). Требовать каталог у объекта без содержимого — значит
+    отрицать факт успешного разбора; содержимое с каталогом считается как раньше
+    (`content_files` считает файлы каталога), а объект с объявленными, но отсутствующими
+    формами виден не здесь, а в карточке загрузки (её предупреждениями о детях).
     """
     binary_path = os.path.abspath(str(binary_path))
     out_base = os.path.abspath(str(out_base))
@@ -278,19 +290,27 @@ def export_to_layout(binary_path, out_base, db_path=None, timeout=TIMEOUT_EXPORT
 
     root_xml = out_base + ".xml"
     content_dir = out_base
-    missing = [p for p in (root_xml, content_dir) if not os.path.exists(p)]
-    if missing:
+    warnings = []
+    if not os.path.exists(root_xml):
         return _error(
-            "ibcmd завершился (rc=%s), но ожидаемых файлов выгрузки не создал: %s"
-            % (run["rc"], ", ".join(missing)),
+            "ibcmd завершился (rc=%s), но корневой XML выгрузки не создал: %s"
+            % (run["rc"], root_xml),
             run["stderr"] or run["stdout"] or "файлов нет; причину от ibcmd получить не удалось",
         )
-    files = [p for p in Path(content_dir).rglob("*") if p.is_file()]
+    if not os.path.isdir(content_dir):
+        # Пустое содержимое — штатное состояние внешнего объекта (замер V29), не ошибка.
+        content_dir = None
+        warnings.append(
+            "Каталог содержимого %s не создан: у объекта пустое содержимое "
+            "(форм, макетов и модулей в выгрузке нет) — это не ошибка разбора." % out_base
+        )
+
+    files = [p for p in Path(content_dir).rglob("*") if p.is_file()] if content_dir else []
     return {"success": True, "ibcmd": ib["path"], "ibcmd_version": ib["version"],
             "binary": binary_path, "root_xml": root_xml,
             "layout_dir": os.path.dirname(root_xml), "object_dir": content_dir,
             "content_files": len(files), "seconds": run["seconds"], "rc": run["rc"],
-            "type_names": type_name_counts(root_xml)}
+            "warnings": warnings, "type_names": type_name_counts(root_xml)}
 
 
 def import_from_layout(root_xml, out_binary, db_path=None, timeout=TIMEOUT_EXPORT):
@@ -305,7 +325,8 @@ def import_from_layout(root_xml, out_binary, db_path=None, timeout=TIMEOUT_EXPOR
     db_path = os.path.abspath(str(db_path or DEFAULT_DB_PATH))
     if not os.path.isfile(root_xml):
         return _error(f"Корневой XML не найден: {root_xml}",
-                      "Нужен XML внешнего объекта, рядом с ним должен лежать каталог содержимого.")
+                      "Нужен XML внешнего объекта; каталог содержимого рядом обязателен только "
+                      "при непустом содержимом объекта.")
     ib = find_ibcmd()
     if not ib.get("success"):
         return ib
@@ -486,6 +507,7 @@ def _merge_conversion(load_result, ib, binary_path, kind, db_path, prepared, con
                   "config_note": config_note,
                   "root_xml": exported["root_xml"], "content_files": exported["content_files"],
                   "type_names": exported["type_names"], "timings": timings,
+                  "warnings": exported.get("warnings") or [],
                   "layout_removed": cleaned,
                   "layout_dir": None if cleaned else conv_dir}
 

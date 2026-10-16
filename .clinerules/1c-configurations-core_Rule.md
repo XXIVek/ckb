@@ -42,7 +42,7 @@ MCP сервер `1c-configurations-core` (server_configurations_core.py) — э
 | `src/external_table_writer.py` | классы-писатели `ExternalReportRowWriter`, `ExternalProcessingRowWriter`, `AttributesRowWriter`, `TabularSectionsRowWriter`, `FormRowWriter`, `FormExtRowWriter`, `TemplateRowWriter`, `BslModuleRowWriter` (базовый `TableRowWriter`): спецификация колонок, `INSERT … RETURNING id`, пакетный `insert_many` |
 | `src/external_db.py` | подключение к `ckb_1c_configurations` через **psycopg2** и контекст `transaction()` — одна транзакция на загрузку объекта, при ошибке полный откат |
 | `src/external_form_decoder.py` | `decode_layout()` (узел V15) — разметка `0/form` обычной формы → колонки `form_ext` (`items`, `attributes`, `events`, `commands`, `auto_command_bar`). Обёртка над `v8unpack.MetaDataObject.Form.FormElements26/27`: версия берётся из первого элемента разметки; исключений не бросает — любой сбой возвращает `success=False` с причиной. Полный `elem.json` в БД не пишется: источник истины — `form_ext.ext_bin` |
-| `src/ibcmd_bridge.py` (узел V25) | Двоичный файл внешнего объекта (`.erf`/`.epf`) → каталог разбора штатными командами `ibcmd`: `infobase create --db-path <каталог> --create-database --locale=ru`, `config --db-path <ИБ> load <файл.cf>`, `config --db-path <ИБ> export --file=<файл> <база>` (пара `<база>.xml` + каталог `<база>/`), обратная — `config --db-path <ИБ> import <root.xml> --out=<файл>`. `find_ibcmd()` — `PATH`, затем `C:\Program Files\[ (x86)]\1cv8\*\bin\ibcmd.exe` по убыванию версии, версия берётся из `--version` и на сообщения не влияет. `ensure_infobase()` — ИБ создаётся один раз и переиспользуется (`_ibcmd_work/ib`); метка `ckb_ibcmd_state.json` лежит **в каталоге ИБ**, создаётся вместе с ней со значением `config_state=unknown`, а `loaded` проставляется после успешного `config load` либо выводится из фактов разбора. `export_to_layout()` решает по наличию `<база>.xml` + `<база>/`, а не по `rc` (L4); `type_name_counts()` считает в сохранённом XML имена `<v8:Type>cfg:…` и элементы `<v8|xr:TypeId>` — это и есть доказательство разрешения типов (R14); `import_from_layout()` — только по явной команде (узел V25.1). Своего SQL у моста нет: вставка выполняется через `load_catalog`. Каждый `subprocess.run` — с таймаутом (`TIMEOUT_INFOBASE` 300 с, `TIMEOUT_EXPORT` 600 с, `TIMEOUT_LOAD_CONFIG` 3600 с), таймаут — тоже исход, а не исключение |
+| `src/ibcmd_bridge.py` (узел V25) | Двоичный файл внешнего объекта (`.erf`/`.epf`) → каталог разбора штатными командами `ibcmd`: `infobase create --db-path <каталог> --create-database --locale=ru`, `config --db-path <ИБ> load <файл.cf>`, `config --db-path <ИБ> export --file=<файл> <база>` (пара `<база>.xml` + каталог `<база>/`), обратная — `config --db-path <ИБ> import <root.xml> --out=<файл>`. `find_ibcmd()` — `PATH`, затем `C:\Program Files\[ (x86)]\1cv8\*\bin\ibcmd.exe` по убыванию версии, версия берётся из `--version` и на сообщения не влияет. `ensure_infobase()` — ИБ создаётся один раз и переиспользуется (`_ibcmd_work/ib`); метка `ckb_ibcmd_state.json` лежит **в каталоге ИБ**, создаётся вместе с ней со значением `config_state=unknown`, а `loaded` проставляется после успешного `config load` либо выводится из фактов разбора. `export_to_layout()` решает по наличию `<база>.xml`, а не по `rc` (L4); каталог `<база>/` опционален — внешний объект с пустым содержимым его не создаёт (замер узла V29, 16.10.2026), отсутствие каталога отдаётся предупреждением в разделе разбора, а не отказом; `type_name_counts()` считает в сохранённом XML имена `<v8:Type>cfg:…` и элементы `<v8|xr:TypeId>` — это и есть доказательство разрешения типов (R14); `import_from_layout()` — только по явной команде (узел V25.1). Своего SQL у моста нет: вставка выполняется через `load_catalog`. Каждый `subprocess.run` — с таймаутом (`TIMEOUT_INFOBASE` 300 с, `TIMEOUT_EXPORT` 600 с, `TIMEOUT_LOAD_CONFIG` 3600 с), таймаут — тоже исход, а не исключение |
 
 > ⚠️ Зависимости: `psycopg2` — обязательная (в окружении установлена, `requirements.txt` в корне
 > проекта нет). `v8unpack` — **решение зафиксировано 13.10.2026 (узел V15): остаётся
@@ -389,7 +389,9 @@ load_1c_catalog_tool(source_path=..., force=True)   # ♻️ старая зап
 load_external_object_file_tool(file_path=r"C:\1C_LLM\LoadDoc\БП3\СравнениеУСНИ90_2.erf",
                                config_file=r"C:\1C_LLM\LoadDoc\БП3\BP3_1Cv8.cf")
 #   ❌ нет файла / чужое расширение / нет ibcmd / не создалась ИБ / config load не удался /
-#      разбор не дал пары <база>.xml + <база>/ - стадия conversion, до load_catalog не дошло (R13);
+#      разбор не дал <база>.xml - стадия conversion, до load_catalog не дошло (R13). Каталог
+#      <база>/ опционален: объект с пустым содержимым его не создаёт (замер узла V29), это не
+#      отказ разбора, а предупреждение в разделе разбора;
 #   ⚠️ config_file не задан и в ИБ нет конфигурации - ПРЕДУПРЕЖДЕНИЕ, объект всё равно загружен
 #      (атрибуты и ТЧ при этом пустые) - отказом НЕ является (R14, L5);
 #   ⚠️ конфигурация в ИБ есть, а имён cfg: в разборе нет - другая формулировка: объект может
@@ -548,9 +550,28 @@ delete_external_report_tool(source_path=...)  # или uuid=..., или report_i
 
 1. **Внешние обработки/отчеты НЕ проходят через `batch_index_from_dump`** — у них нет ConfigDumpInfo.xml
 2. **BSL-модули внешних обработок** индексируются автоматически из папки `*/Ext/*.bsl`
-3. **Бинарные файлы (.bin)** не читаем, только XML и .bsl
-4. **delete_config_tool(config_id, force=True)** — hard-delete, удаляет все связанные данные безвозвратно
+3. **Бинарные формы** (`Forms/<Имя>/Ext/Form.bin`) разбираются загрузчиком: `0/module` →
+   `form_ext.ext` (узел V14), `0/form` → колонки состава `form_ext` (узел V15); прочее бинарное
+   содержимое (`templates.ext_bin`) сохраняется как есть и не разбирается
+4. **Удаление внешнего объекта — `delete_external_report_tool(source_path | uuid | report_id,
+   object_type?)`**; `delete_config_tool` удалён 14.10.2026 вместе с внеконтрактными
+   инструментами (п. 11)
 5. **Источники конфигураций:** `C:\1C_LLM\LoadDoc` (вне проекта)
+6. **Правим только в базе данных (принято оператором 15.10.2026).** Создание, редактирование и
+   удаление внешнего объекта выполняется **только строками БД** `ckb_1c_configurations`
+   (`external_report`, `attributes`, `tabular_sections`, `forms`, `form_ext`, `templates`,
+   `bsl_modules`, `config_*`). Каталог XML-выгрузки — **не источник истины и не место правок**,
+   а транспорт: через него объект загружается в БД (`load_1c_catalog_tool`,
+   `load_external_object_file_tool`) и выгружается из неё (сборка XML из строк БД →
+   `ibcmd config import` → `.erf`/`.epf`). Штатный цикл правки: **правка строк БД → сборка XML
+   из БД → `import_from_layout` → проверка в конфигураторе → повторная загрузка**. Правки файлов
+   выгрузки «в обход БД» рабочим путём не считаются; значит любой инструмент правки обязан писать
+   в БД, а отдавать объект наружу — только через сборку XML из этих же строк (узел V18/V29).
+   Полнота обратной сборки (проверено по живой схеме): ordinary-форма — из `form_ext.ext_bin`
+   побайтово, макет — из `templates.ext`, модули — из `bsl_modules.code` / `form_ext.ext`,
+   свойства заголовка — из колонок `external_report`; **исходный текст `Form.xml` управляемой
+   формы в БД не сохраняется** (в `form_ext` лежат только разложенные колонки), поэтому для
+   загруженного извне объекта она будет сборкой по колонкам, а не побайтовым воспроизведением.
 
 ## 📁 Путь к источникам конфигураций
 
@@ -1293,6 +1314,35 @@ rc=0 — 34 проверки (схема: колонка и индекс ест�
   `object_kind` соответствует `containedobject_classid` (для непустого ClassId); self-цель
   обогащения — `ExternalReport` у отчёта и `ExternalProcessing` у обработки; `parent_type` строк
   обогащения совпадает с видом заголовка; нарушений по всей БД — 0.
+- значения `containedobject_classid` — **константы класса метаданных, а не объекта**: замер 915 XML
+  (`python tools/measure_metadata_uuid_versions.py`, 15.10.2026) даёт ровно одно значение на вид
+  метаданных — внешний отчёт `e41aff26-25cf-4bb6-b6c1-3f478a75f374`, внешняя обработка
+  `c3831ec8-d8d5-4f93-8a22-f9bfae07327f`; одно и то же значение переходит из поставки в
+  поставку, поэтому подменять его при создании объекта нельзя. Идентификатором самого объекта
+  являются `uuid` / `<xr:ObjectId>` (в замере — v4), а `TypeId`/`ValueId` принадлежат
+  генерируемому типу и переносить их с объекта на объект нельзя. Семантика четырёх
+  идентификаторов, версии UUID и служебный справочник ИОМ закреплены в слое знаний
+  `xml-format` — якорь `identifier-profile-classid-objectid-typeid-valueid`
+  (MCP `1c-knowledge-base`, `search_docs_tool` с `category="xml-format"`); описание слоя и
+  его регрессия — `.clinerules/1c-knowledge-base_Rule.md`, раздел «Слой знаний `xml-format`».
+- **граница присутствия `ClassId` (замер 15.10.2026, сквозной проход 158 925 XML):** блока
+  `<xr:ContainedObject>` / `<xr:ClassId>` **у объектов конфигурации нет вовсе** — в их
+  `<InternalInfo>` лежат только `<xr:GeneratedType>` с `TypeId`/`ValueId` (проверены `Catalogs`,
+  `Documents`, `CommonModules`, `DataProcessors`, `Reports`, `InformationRegisters`,
+  `ConfigDumpInfo.xml` — 0 вхождений). `ClassId` встречается только в корневом
+  `Configuration.xml` (7 значений, два — формы UUID v1) и в файлах внешних объектов (по одному
+  на вид). Поэтому «9 уникальных значений ClassId» — это 7 значений корня + 2 значения внешних
+  видов, а не девять классов метаданных; требовать `ClassId` у объекта конфигурации нельзя.
+  Опровергнутые значения, которые нельзя возвращать в документы и код:
+  `d69d52f4-7104-4da8-877c-eeeb01ef4f5b` («внешняя обработка») и
+  `c48e8ff8-e4a6-47ab-a33d-6da1dbbfdd07` («Catalog» и «Document») — 0 вхождений в 158 925 XML;
+  ошибка была в `xsd-docs/overview/04-internal-info.md` (исправлен на замерный вариант) и в
+  `docs/legacy/DB_STRUCTURE_1c_configurations.md` (помечен устаревшим).
+  Следствие для создания внешнего объекта (узел V29): `<xr:ContainedObject>` **не пишут вовсе** —
+  импорт `ibcmd` принимает файл без него и доставляет блок сам (`v15_no_containedobject` принят);
+  пустой `<xr:ClassId>` и `ClassId` чужого вида — отказ импорта (`v14_empty_classid`,
+  `v10_foreign_classid`: «Неверный идентификатор класса хранимого объекта»). Замеры —
+  `_ibcmd_work/v29_probe/report.json`.
 **Проверка (14.10.2026):** `python validate_load_flow.py --with-load` rc=0 — новый кейс `TSD_0`
 даёт `✅ загружено` с видом `external_processing` и счётчиками `35/2/6/6/3/1`
 (реквизиты 35, ТЧ 2, формы 6, описания форм 6, макеты 3, BSL 1);

@@ -388,6 +388,11 @@ def _conversion_lines(conversion):
         f"Разобранный XML: {conversion.get('root_xml')}; "
         f"файлов содержимого: {conversion.get('content_files')}"
     )
+    # Предупреждения самого разбора (узел V29): пустое содержимое внешнего объекта —
+    # штатное состояние, каталог содержимого платформой не создаётся. Молчать об этом
+    # нельзя: отсутствие каталога видно и в карточке, и оператор обязан понять причину.
+    for warning in conversion.get("warnings") or []:
+        lines.append("⚠️ " + warning)
     timings = ", ".join(f"{name} {value}с"
                         for name, value in (conversion.get("timings") or {}).items())
     if timings:
