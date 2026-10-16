@@ -72,12 +72,66 @@ try:
     from enrichment_snippets import (add_config_snippet, get_config_snippet, list_config_snippets,
                                     search_config_snippets, delete_config_snippet,
                                     get_snippets_for_object, enrichment_stats)
+    # узел Q1 (16.10.2026): карантин сниппета — мягкая пометка зарезервированным тегом,
+    # без изменения схемы. Инструменты контура enrich и общий помощник тегов/SQL-фрагментов
+    # (тот же контракт для local_doc): импорт без побочных эффектов, в БД не пишет.
+    # Имена берутся из src, а не из памяти об API: в src/quarantine.py нет ни MARK_TAG, ни
+    # mark_reason / make_mark_tag / make_unmark_tag / MARKED_COND — метка называется MARKER,
+    # имена SQL-параметров — MARK_ARRAY / MARK_PARAM / MARK_TAG_PARAM, условие карантина —
+    # MARKED_COND_NAMED / MARKED_COND_POSITIONAL. В enrichment_snippets нет и
+    # count_marked_config_snippets / list_marked_objects: сводку даёт marked_snippet_stats.
+    # Импорт имени, которого в коде нет, обрывает шаг 3 и гасит все остальные проверки (Q3).
+    from enrichment_snippets import (mark_config_snippet, unmark_config_snippet,
+                                     list_marked_config_snippets)
+    from quarantine import (MARKER, MARK_ARRAY, MARK_PARAM, MARK_TAG_PARAM, REASON_PREFIX,
+                            REASON_SUFFIX, REASON_EXPR_NAMED, is_marked, reason_of, with_mark,
+                            without_mark, strip_reserved, MARKED_COND_NAMED,
+                            MARKED_COND_POSITIONAL, reason_expr_named, reason_expr_positional)
     print("  ✅ загрузка: config_load_router, external_report_loader")
     print("  ✅ разбор бинарных .erf/.epf: ibcmd_bridge + format_binary_load_result")
     print("  ✅ обогащение: generator (generate_enrichment, describe_object), aliases, snippets")
+    print("  ✅ карантин сниппетов (узел Q1): enrichment mark/unmark/list + src/quarantine.py")
 except Exception as e:
     print(f"  ❌ живые модули не импортируются: {e}")
     sys.exit(1)
+# 3b. Инварианты карантина (узел Q3): тег причины и её SQL-разбор собираются из одного MARKER.
+#     Три дефекта одного выражения нашли живым прогоном (tools/check_quarantine_round_trip.py):
+#     отсутствующий номер части split_part (запрос не выполняется), разделитель без префикса
+#     метки (запрос выполняется, но отвечает пусто) и разбор, зависящий от порядка тегов
+#     (причина читается, только если тег причины последний). Статическая проверка сторожит
+#     именно эти границы, а не конкретную запись: порядок тегов меняется, когда к строке
+#     применяют with_mark повторно.
+print("\n[3b/7] Checking quarantine tag/SQL invariants...")
+try:
+    fragment = reason_expr_named(MARK_TAG_PARAM)
+    positional = reason_expr_positional()
+    problems = []
+    if REASON_PREFIX != MARKER + REASON_SUFFIX:
+        problems.append("REASON_PREFIX не выводится из MARKER (тег и разбор разъехались)")
+    if f"%({MARK_TAG_PARAM})s || '{REASON_SUFFIX}'" not in fragment:
+        problems.append("префикс причины в reason_expr_named не собирается из параметра MARKER")
+    if "split_part" in fragment:
+        problems.append("разбор причины через split_part зависит от порядка тегов: "
+                        "часть 2 ограничена следующим вхождением разделителя, "
+                        "нужен поиск по каждому тегу")
+    if fragment.replace(f"%({MARK_TAG_PARAM})s", "%s") != positional:
+        problems.append("именованный и позиционный разбор причины разошлись по тексту")
+    if REASON_EXPR_NAMED != reason_expr_named(MARK_TAG_PARAM):
+        problems.append("REASON_EXPR_NAMED собран не от MARK_TAG_PARAM "
+                        "(значение параметра не совпадёт с MARKER)")
+    if problems:
+        for problem in problems:
+            print(f"  ❌ {problem}")
+        sys.exit(1)
+    print("  ✅ тег причины и её SQL-разбор согласованы (префикс от MARKER, "
+          "оба стиля идентичны, порядок тегов не используется)")
+except SystemExit:
+    raise
+except Exception as e:
+    print(f"  ❌ инварианты карантина не проверены: {e}")
+    sys.exit(1)
+
+
 
 # 4. Состав инструментов контракта (core 4 / enrichment 18 / export 1) — по разбору шага 2.
 #    Лишний инструмент = возврат к неработающим вызовам; недостающий = потерянный контракт.
@@ -109,9 +163,14 @@ except Exception as e:
 print("\n[5/7] Checking MCP tools...")
 try:
     from mcp_tools_api import add_snippet, get_db_state, get_group, search_docs
+    # узел Q1: карантин сниппетов local_doc — те же операции, что у enrich-контура
+    from mcp_tools_api import (mark_snippet_for_deletion, unmark_snippet_for_deletion,
+                               list_marked_snippets)
     from mcp_tools_loader import load_files, load_bsl_docs
     from loader import detect_tags
     print(f"  ✅ 7 functions imported: {', '.join(['add_snippet', 'get_db_state', 'get_group', 'search_docs', 'load_files', 'load_bsl_docs', 'detect_tags'])}")
+    print("  ✅ карантин local_doc: mark_snippet_for_deletion, unmark_snippet_for_deletion, "
+          "list_marked_snippets")
 except Exception as e:
     print(f"  ❌ MCP tools failed: {e}")
     sys.exit(1)
@@ -184,6 +243,7 @@ _contract = ", ".join(
 print(f"✅ состав инструментов совпадает с контрактом ({_contract})")
 print("✅ живые модули загрузки (config_load_router, external_report_loader) и обогащения "
       "(generator/aliases/snippets): imports OK")
+print("✅ инварианты карантина сниппетов: тег причины и её SQL-разбор согласованы")
 print("✅ мёртвый код базы 'configurations' удалён, повторных обращений нет")
 print("✅ mcp_tools_api.py + mcp_tools_loader.py + loader.py: imports OK")
 print("✅ local_doc DB: connected")

@@ -176,11 +176,18 @@ def load_single_html_tool(filepath: str, category: str = "language"):
 
 
 @mcp.tool()
-def search_docs_tool(query: str, category: str = None, limit: int = 20):
-    """Комбинированный поиск по группам и сниппетам."""
+def search_docs_tool(query: str, category: str = None, limit: int = 20,
+                     include_marked: bool = False):
+    """Комбинированный поиск по группам и сниппетам.
+
+    include_marked=False (по умолчанию) — сниппеты, помеченные к удалению
+    (узел Q1, зарезервированный тег mark-for-deletion), не отдаются.
+    include_marked=True — отдаются, каждая с пометкой [помечен к удалению: причина].
+    """
     try:
         from mcp_tools_api import search_docs as _search_docs
-        results = _search_docs(query=query, category=category, limit=limit)
+        results = _search_docs(query=query, category=category, limit=limit,
+                               include_marked=include_marked)
         if not results:
             return "Результатов не найдено."
         lines = [f"Найдено {len(results)} результатов:\n"]
@@ -188,7 +195,12 @@ def search_docs_tool(query: str, category: str = None, limit: int = 20):
             rtype = r.get('type', '?')
             title = str(r.get('title', ''))[:80]
             desc = str(r.get('description', ''))[:60]
-            lines.append(f"[{rtype}] ID:{r.get('id')} | {title} ({desc})")
+            # Узел Q1: скрытое состояние обязано быть видимым — иначе include_marked=True
+            # отдал бы помеченную строку так же, как обычную.
+            mark = ""
+            if r.get('marked'):
+                mark = f" | ⚠️помечен к удалению: {r.get('marked_reason') or 'причина не указана'}"
+            lines.append(f"[{rtype}] ID:{r.get('id')} | {title} ({desc}){mark}")
         return '\n'.join(lines)
     except Exception as e:
         return f"Ошибка при поиске: {str(e)}"
@@ -223,9 +235,85 @@ def get_db_state_tool():
     try:
         state = _get_db_state()
         lines = [f"groups: {state.get('groups', 0)}", f"snippets: {state.get('snippets', 0)}", f"aliases: {state.get('aliases', 0)}"]
+        # Узел Q1: строки в карантине остаются в базе, поэтому их число называется отдельно,
+        # а не вычитается из snippets.
+        if 'snippets_marked_for_deletion' in state:
+            lines.append(f"snippets_marked_for_deletion: {state.get('snippets_marked_for_deletion', 0)}")
         return '\n'.join(lines)
     except Exception as e:
         return f"Ошибка при получении состояния БД: {str(e)}"
+
+
+@mcp.tool()
+def mark_snippet_for_deletion_tool(snippet_id: int, reason: str = None):
+    """Пометить сниппет local_doc к удалению (узел Q1): строка остаётся в базе, поиск её не отдаёт.
+
+    Механизм — зарезервированный тег mark-for-deletion в knowledge_snippets.tags
+    (колонки soft-delete в схеме нет, схему это не меняет). Причина — второй тег
+    mark-for-deletion:reason=…; без причины строка скрыта и непонятно почему, поэтому
+    reason обязателен по смыслу контракта (пустой текст — отказ).
+    Идемпотентно; алиасы сниппета не трогаются.
+    """
+    try:
+        from mcp_tools_api import mark_snippet_for_deletion as _mark
+        result = _mark(snippet_id=snippet_id, reason=reason)
+        if not result.get('success'):
+            return f"❌ {result.get('error')}"
+        lines = [
+            "✅ Сниппет помечен к удалению (в базе он остался).",
+            f"ID: {result.get('snippet_id')}",
+            f"Вопрос: {str(result.get('question') or '')[:120]}",
+            f"Причина: {result.get('reason') or 'не указана'}",
+            f"Теги после пометки: {', '.join(result.get('tags') or [])}",
+            "",
+            str(result.get('note') or ""),
+        ]
+        return '\n'.join(lines)
+    except Exception as e:
+        return f"Ошибка при пометке сниппета: {str(e)}"
+
+
+@mcp.tool()
+def unmark_snippet_for_deletion_tool(snippet_id: int):
+    """Снять пометку к удалению со сниппета local_doc (метка и тег причины)."""
+    try:
+        from mcp_tools_api import unmark_snippet_for_deletion as _unmark
+        result = _unmark(snippet_id=snippet_id)
+        if not result.get('success'):
+            return f"❌ {result.get('error')}"
+        lines = [
+            "✅ Пометка снята — сниппет снова виден поиску.",
+            f"ID: {result.get('snippet_id')}",
+            f"Вопрос: {str(result.get('question') or '')[:120]}",
+            f"Теги после снятия: {', '.join(result.get('tags') or [])}",
+            "",
+            str(result.get('note') or ""),
+        ]
+        return '\n'.join(lines)
+    except Exception as e:
+        return f"Ошибка при снятии пометки: {str(e)}"
+
+
+@mcp.tool()
+def list_marked_snippets_tool(limit: int = 50):
+    """Перечень сниппетов local_doc, помеченных к удалению (разбор перед purge)."""
+    try:
+        from mcp_tools_api import list_marked_snippets as _list
+        result = _list(limit=limit)
+        if not result.get('success'):
+            return f"Ошибка: {result.get('error')}"
+        rows = result.get('rows') or []
+        if not rows:
+            return "Сниппетов, помеченных к удалению, нет."
+        lines = [f"Сниппетов в карантине: {len(rows)} (показано {len(rows)}):\n"]
+        for row in rows:
+            lines.append(f"ID:{row.get('id')} | {str(row.get('question') or '')[:100]} | "
+                         f"причина: {row.get('reason') or 'не указана'}")
+        lines.append("")
+        lines.append("Удалить физически: python tools/purge_marked_snippets.py --db local_doc --apply")
+        return '\n'.join(lines)
+    except Exception as e:
+        return f"Ошибка при перечислении помеченных сниппетов: {str(e)}"
 
 
 @mcp.tool()

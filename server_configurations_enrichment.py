@@ -71,10 +71,14 @@ from enrichment_aliases import (add_config_aliases, search_config_aliases, resol
                                 list_config_aliases, delete_config_alias)
 from enrichment_snippets import (add_config_snippet, get_config_snippet, list_config_snippets,
                                  search_config_snippets, delete_config_snippet,
-                                 get_snippets_for_object, add_config_cross_reference,
-                                 get_config_cross_references, delete_config_cross_reference,
-                                 enrichment_stats)
+                                 mark_config_snippet, unmark_config_snippet,
+                                 list_marked_config_snippets, get_snippets_for_object,
+                                 add_config_cross_reference, get_config_cross_references,
+                                 delete_config_cross_reference, enrichment_stats)
 from enrichment_dcs import get_template_content
+# Узел Q1 (карантин сниппетов, вариант A): тег пишется в шапке ответа сводки прямо, чтобы
+# оператор видел, каким признаком снята строка, и не искал его в коде.
+from quarantine import MARKER
 
 mcp = FastMCP("1c-configurations-enrichment")
 
@@ -210,9 +214,14 @@ def config_enrichment_stats_tool(uuid: str = None, limit: int = 20, card: bool =
         objects = res.get('objects') or []
 
         def _obj_counters(row):
+            # Карантин (узел Q1): общее число сниппетов остаётся полным, помеченные
+            # показываются отдельной скобкой — «снято N» и «всего M» не должны смешиваться.
+            marked = int(row.get('quarantine_snippets') or 0)
             return (f"алиасы {row.get('aliases_total')} "
                     f"(ручных {row.get('aliases_manual')}, на сниппеты {row.get('aliases_snippet')}), "
-                    f"сниппеты {row.get('snippets')}, зависимости {row.get('snippet_dependencies')}, "
+                    f"сниппеты {row.get('snippets')}"
+                    + (f" (в карантине {marked})" if marked else "")
+                    + f", зависимости {row.get('snippet_dependencies')}, "
                     f"links documentation {row.get('doc_links')}")
 
         if not uuid:
@@ -235,6 +244,7 @@ def config_enrichment_stats_tool(uuid: str = None, limit: int = 20, card: bool =
                              f"| uuid={row.get('report_uuid')} | {_obj_counters(row)}")
             lines += _over_limit(objects)
             lines += _binding_lines(res)
+            lines += _quarantine_lines(totals)
             return "\n".join(lines)
         lines = []
         if card:
@@ -270,6 +280,9 @@ def config_enrichment_stats_tool(uuid: str = None, limit: int = 20, card: bool =
                                 for row in res.get('dependencies_by_target', [])}))
         orphans = (res.get('orphans') or [{}])[0].get('aliases_without_snippet')
         lines.append(f"Сироты (алиасы без сниппета): {orphans}")
+        # Карантин (узел Q1): по объекту totals считаются им же, поэтому строка та же, что и
+        # в сводке без uuid. Без неё «сниппеты N» читались бы как «все N рабочих».
+        lines += _quarantine_lines(res.get('totals') or {})
         # карточка привязку уже назвала (_card_identity_lines); при card=False её не было,
         # поэтому состояние привязки печатается здесь — иначе объект остался бы без ответа
         # на вопрос «к какой конфигурации он привязан и цела ли ссылка»
@@ -278,6 +291,24 @@ def config_enrichment_stats_tool(uuid: str = None, limit: int = 20, card: bool =
         return "\n".join(lines)
     except Exception as exc:
         return f"❌ Внутренняя ошибка сводки по обогащению: {exc}"
+
+
+def _quarantine_lines(totals):
+    """Строка карантина сниппетов (узел Q1, вариант A).
+
+    Помеченные `mark-for-deletion` строки остаются в базе и скрыты из поиска и перечней по
+    умолчанию. Сводка обязана назвать их число явно: «сниппетов N» без этой строки читалось бы
+    как «все N рабочих», а оператор не узнал бы, что часть снята как ошибочная. Пустой карантин
+    не печатается — нулевая строка шума не даёт.
+    """
+    marked = int((totals or {}).get("quarantine_snippets") or 0)
+    if not marked:
+        return []
+    return ["", f"КАРАНТИН СНИППЕТОВ (тег {MARKER}): помечено на удаление {marked}. "
+                "Строки в базе, из поиска и перечней по умолчанию скрыты; видны по id "
+                "(get_config_snippet_tool) и под include_marked=True. Снять пометку: "
+                "unmark_config_snippet_tool(snippet_id); удалить совсем: "
+                "python tools/purge_marked_snippets.py --apply (сначала без --apply — что снимет)."]
 
 
 def _binding_lines(res):
@@ -642,6 +673,16 @@ def get_config_snippet_tool(snippet_id: int):
                  f"Источник: {row.get('source_kind')} | {row.get('source_path') or row.get('source_uuid') or '-'} "
                  f"| is_verified={row.get('is_verified')} | confidence={row.get('confidence')}",
                  f"Теги: {', '.join(row.get('tags') or []) or '-'} | код {len(answer)} симв.", ""]
+        # Узел Q1: карточка по id — единственная точка, куда оператор попадает за скрытой
+        # строкой; она обязана назвать карантин и способ его снять, иначе «почему её нет в
+        # поиске» пришлось бы угадывать.
+        if row.get('marked'):
+            lines.append(f"⚠️ Сниппет в карантине ({MARKER}): скрыт из поиска, списков и "
+                         f"раздела «ЧТО ДЕЛАЕТ КОД» карточки объекта.")
+            lines.append(f"   Причина: {row.get('marked_reason') or 'не указана'}")
+            lines.append(f"   Снять: unmark_config_snippet_tool(snippet_id={row.get('id')}); "
+                         f"удалить совсем: python tools/purge_marked_snippets.py --apply")
+            lines.append("")
         lines.append("Код:")
         lines.append(answer[:MAX_ANSWER])
         if len(answer) > MAX_ANSWER:
@@ -664,36 +705,49 @@ def get_config_snippet_tool(snippet_id: int):
 
 
 def _snippet_rows(res, rows):
-    """Строки списка сниппетов: id, происхождение, вопрос, размер кода, зависимости."""
+    """Строки списка сниппетов: id, происхождение, вопрос, размер кода, зависимости.
+
+    Узел Q1: строка в карантине помечается прямо в выдаче. Без пометки снятый сниппет
+    (его отдают list/search при include_marked=True) визуально неотличим от рабочего,
+    и оператор выбирает ошибочную строку, сам того не зная.
+    """
     lines = []
     for row in rows[:MAX_ROWS]:
         verified = "verified" if row.get("is_verified") else "auto"
+        mark = ""
+        if row.get("marked"):
+            reason = row.get("reason") or row.get("marked_reason") or ""
+            mark = f" | ⚠️ помечен на удаление ({MARKER})" + (f": {reason}" if reason else "")
         lines.append(f"  [{row.get('id')}] {verified} | {row.get('source_kind')} "
                      f"| {row.get('dependencies')} зав. | {row.get('answer_size')} симв. "
-                     f"| {_clip(row.get('question'))}")
+                     f"| {_clip(row.get('question'))}" + mark)
     lines += _over_limit(rows)
     return lines
 
 
 @mcp.tool()
 def list_config_snippets_tool(uuid: str = None, source_kind: str = None, limit: int = 20,
-                              only_verified: bool = False):
+                              only_verified: bool = False, include_marked: bool = False):
     """Список сниппетов объекта БЕЗ кода целиком (размер и начало): код бывает десятки КБ.
 
     source_kind='generated' — авто-сниппеты из сохранённых модулей и макета, 'manual'/'file' —
     добавленные оператором; only_verified=True — только ручные (их перегенерация не снимает).
-    Полный код — get_config_snippet_tool.
+    include_marked=True — показать и сниппеты в карантине (`mark-for-deletion`, узел Q1);
+    по умолчанию они скрыты, а показанные помечаются «⚠️ помечен на удаление» и опускаются
+    в конец выдачи. Полный код — get_config_snippet_tool.
     """
     try:
         res = list_config_snippets(uuid=uuid, source_kind=source_kind, limit=limit,
-                                   only_verified=only_verified)
+                                   only_verified=only_verified, include_marked=include_marked)
         if not res.get('success'):
             return _fail(res, "Список сниппетов не получен")
         rows = res.get('rows') or []
         if not rows:
             return "❌ Сниппетов под такие фильтры нет."
         lines = [f"Сниппетов: {res.get('found')}"
-                 + (f" (объект uuid={uuid})" if uuid else " (по всем объектам)")]
+                 + (f" (объект uuid={uuid})" if uuid else " (по всем объектам)")
+                 + (f" | в карантине ({MARKER}) показаны" if include_marked
+                    else f" | карантин ({MARKER}) скрыт — include_marked=True")]
         lines += _snippet_rows(res, rows)
         return "\n".join(lines)
     except Exception as exc:
@@ -701,22 +755,31 @@ def list_config_snippets_tool(uuid: str = None, source_kind: str = None, limit: 
 
 
 @mcp.tool()
-def search_config_snippets_tool(query: str, uuid: str = None, limit: int = 10):
+def search_config_snippets_tool(query: str, uuid: str = None, limit: int = 10,
+                                include_marked: bool = False):
     """Полнотекстовый поиск по сниппетам (вопрос + код) — аналог search по knowledge_snippets.
 
     Отличие от 1c-knowledge-base: здесь у сниппета есть цели внутри объекта, поэтому тот же
     запрос находит и документацию языка, и код конкретного объекта выгрузки. Ограничение по
     объекту — uuid. Дальше по найденному сниппету — get_config_snippet_tool.
+
+    Узел Q1: строки в карантине (`mark-for-deletion`) из поиска по умолчанию исключены;
+    include_marked=True отдаёт их с явной пометкой и в конце выдачи.
     """
     try:
-        res = search_config_snippets(query=query, uuid=uuid, limit=limit)
+        res = search_config_snippets(query=query, uuid=uuid, limit=limit,
+                                     include_marked=include_marked)
         if not res.get('success'):
             return _fail(res, "Поиск по сниппетам не выполнен")
         rows = res.get('rows') or []
         if not rows:
             return (f"❌ По запросу '{query}' enrich-сниппетов нет. По языку 1С ищите "
-                    "search_docs_tool в 1c-knowledge-base.")
-        lines = [f"Найдено сниппетов: {res.get('found')} по запросу '{query}'"]
+                    "search_docs_tool в 1c-knowledge-base."
+                    + ("" if include_marked else
+                       f" Карантин ({MARKER}) из поиска исключён — include_marked=True."))
+        lines = [f"Найдено сниппетов: {res.get('found')} по запросу '{query}'"
+                 + (f" | в карантине ({MARKER}) показаны" if include_marked
+                    else f" | карантин ({MARKER}) скрыт — include_marked=True")]
         lines += _snippet_rows(res, rows)
         return "\n".join(lines)
     except Exception as exc:
@@ -725,22 +788,29 @@ def search_config_snippets_tool(query: str, uuid: str = None, limit: int = 10):
 
 @mcp.tool()
 def get_config_snippets_for_object_tool(uuid: str = None, source_path: str = None,
-                                        target_type: str = None, target_name: str = None):
+                                        target_type: str = None, target_name: str = None,
+                                        include_marked: bool = False):
     """Найти сниппеты, которые ссылаются на конкретную цель объекта (по зависимостям).
 
     target_type/target_name — та же адресация цели, что в зависимостях и алиасах:
     Attribute, TabularSection, Form, FormItem ('ИмяФормы.ИмяЭлемента'), Template, Module.
     Отвечает на вопрос «что уже известно про этот реквизит/форму/макет» — например перед тем,
     как писать новый сниппет.
+
+    Узел Q1: сниппеты в карантине (`mark-for-deletion`) в ответ по умолчанию не входят:
+    вопрос «что известно» не должен отвечать строкой, которую оператор уже снял.
+    include_marked=True отдаёт их с пометкой и в конце выдачи.
     """
     try:
         res = get_snippets_for_object(uuid=uuid, source_path=source_path, target_type=target_type,
-                                      target_name=target_name)
+                                      target_name=target_name, include_marked=include_marked)
         if not res.get('success'):
             return _fail(res, "Сниппеты цели не получены")
         rows = res.get('rows') or []
         lines = [f"Сниппетов, ссылающихся на {res.get('target_type')}:{res.get('target_name')}: "
-                 f"{res.get('found')}", _obj_line(res)]
+                 f"{res.get('found')}", _obj_line(res),
+                 (f"карантин ({MARKER}) показан" if include_marked
+                  else f"карантин ({MARKER}) скрыт — include_marked=True")]
         lines += _snippet_rows(res, rows)
         return "\n".join([line for line in lines if line])
     except Exception as exc:
@@ -766,6 +836,94 @@ def delete_config_snippet_tool(snippet_id: int):
         return "\n".join([line for line in lines if line])
     except Exception as exc:
         return f"❌ Внутренняя ошибка удаления сниппета: {exc}"
+
+
+# ── Карантин сниппетов (узел Q1, вариант A: зарезервированный тег mark-for-deletion) ──
+# Тот же механизм, что в 1c-knowledge-base (mark_snippet_for_deletion_tool): строка остаётся
+# в базе, но скрывается из поиска, списков и карточки. Разница только в таблице-природе:
+# здесь hard-delete снимает ещё и алиасы, зависимости и ссылки на documentation, поэтому
+# «пометить» — это единственный способ зафиксировать ошибочность, не теряя ответ оператора.
+
+@mcp.tool()
+def mark_config_snippet_tool(snippet_id: int, reason: str = None):
+    """Пометить enrich-сниппет на удаление (узел Q1): строка остаётся, выдача её не отдаёт.
+
+    Отличие от delete_config_snippet_tool: hard-delete снимает и саму строку, и её алиасы,
+    зависимости, ссылки documentation — вместе с ней пропадает и ответ оператора. Пометка
+    скрывает сниппет из search_config_snippets_tool, list_config_snippets_tool,
+    get_config_snippets_for_object_tool и из раздела «ЧТО ДЕЛАЕТ КОД» карточки объекта, но
+    строка остаётся доступной по id и в перечне карантина. Причина кладётся вторым тегом
+    `mark-for-deletion:reason=…` (колонки под причину вариант A не заводит).
+    Для авто-сниппета признак переживает перегенерацию: генератор переносит его по совпадению
+    идентичности (parent_uuid + source_kind + source_uuid + question, узел Q2).
+    """
+    try:
+        res = mark_config_snippet(snippet_id=snippet_id, reason=reason)
+        if not res.get('success'):
+            return _fail(res, "Сниппет не помечен")
+        lines = [f"✅ Сниппет помечен на удаление: id={res.get('id')} "
+                 f"({res.get('source_kind')}, is_verified={res.get('is_verified')})",
+                 _obj_line(res),
+                 f"Вопрос: {res.get('question')}",
+                 f"Причина: {res.get('reason') or 'не указана'}",
+                 f"Признак: {MARKER}"
+                 + (f", {MARKER}:reason=…" if res.get('reason') else ""),
+                 res.get('note') or ""]
+        return "\n".join([line for line in lines if line])
+    except Exception as exc:
+        return f"❌ Внутренняя ошибка пометки сниппета: {exc}"
+
+
+@mcp.tool()
+def unmark_config_snippet_tool(snippet_id: int):
+    """Снять пометку «на удаление» с enrich-сниппета (метку и тег причины).
+
+    Строка возвращается в поиск, списки и карточку объекта. Если строка не помечена,
+    инструмент отвечает отказом с прямым текстом («снимать нечего») — молча он ничего не меняет.
+    """
+    try:
+        res = unmark_config_snippet(snippet_id=snippet_id)
+        if not res.get('success'):
+            return _fail(res, "Признак не снят")
+        lines = [f"✅ Пометка снята: id={res.get('id')} ({res.get('source_kind')}, "
+                 f"is_verified={res.get('is_verified')})",
+                 _obj_line(res),
+                 f"Вопрос: {res.get('question')}",
+                 res.get('note') or ""]
+        return "\n".join([line for line in lines if line])
+    except Exception as exc:
+        return f"❌ Внутренняя ошибка снятия пометки: {exc}"
+
+
+@mcp.tool()
+def list_marked_config_snippets_tool(uuid: str = None, limit: int = 50):
+    """Перечень enrich-сниппетов, помеченных на удаление (разбор перед чисткой).
+
+    Показывает то, что удалит tools/purge_marked_snippets.py: id, объект, вопрос, источник,
+    признак is_verified и причину. Ограничение по объекту — uuid. Пустой ответ означает, что
+    чистить нечего; это НЕ означает, что ошибочных строк нет — они могли быть удалены сразу.
+    """
+    try:
+        res = list_marked_config_snippets(uuid=uuid, limit=limit)
+        if not res.get('success'):
+            return _fail(res, "Перечень карантина не получен")
+        rows = res.get('rows') or []
+        if not rows:
+            return f"✅ Сниппетов, помеченных на удаление ({MARKER}), нет — чистить нечего."
+        lines = [f"Помечено на удаление ({MARKER}): {res.get('found')}"
+                 + (f" (объект uuid={uuid})" if uuid else " (по всем объектам)")]
+        for row in rows[:MAX_ROWS]:
+            verified = "verified" if row.get("is_verified") else "auto"
+            lines.append(f"  [{row.get('id')}] {row.get('object_name') or row.get('parent_uuid')} "
+                         f"| {verified} | {row.get('source_kind')} "
+                         f"| {row.get('answer_size')} симв. | {_clip(row.get('question'))}"
+                         f" | причина: {row.get('reason') or 'не указана'}")
+        lines += _over_limit(rows)
+        lines.append(f"Снять: unmark_config_snippet_tool(snippet_id). Удалить совсем: "
+                     f"python tools/purge_marked_snippets.py --apply (без --apply — что снимет).")
+        return "\n".join(lines)
+    except Exception as exc:
+        return f"❌ Внутренняя ошибка перечня карантина: {exc}"
 
 
 # =====================================================
@@ -938,9 +1096,21 @@ def _card_code_lines(res):
                              res.get("counts") or {}, "snippets")]
     for row in snippets[:MAX_ROWS]:
         origin = "ручной" if row.get("is_verified") else str(row.get("source_kind"))
+        # Карантин (узел Q1): помеченная строка остаётся в перечне (карточка описывает
+        # состояние объекта целиком), но обязана читаться снятой — иначе раздел кода
+        # выдавал бы ошибочный сниппет за рабочий.
+        mark = ""
+        if row.get("marked"):
+            mark = f" | ⚠️ помечен на удаление ({MARKER})"
+            if row.get("marked_reason"):
+                mark += f": {_clip(row['marked_reason'], 120)}"
         lines.append(f"  [{row.get('id')}] {_clip(row.get('question'), MAX_TEXT)} "
-                     f"| {origin} | {row.get('answer_chars')} симв")
+                     f"| {origin} | {row.get('answer_chars')} симв{mark}")
     lines += _over_limit(snippets)
+    marked_total = int((res.get("counts") or {}).get("snippets_marked") or 0)
+    if marked_total:
+        lines.append(f"  Из них в карантине ({MARKER}): {marked_total} — скрыты из поиска и "
+                     "перечней по умолчанию; снять: unmark_config_snippet_tool(snippet_id).")
     lines.append("Дальше по коду: get_config_snippet_tool(snippet_id) — полный код и цели; "
                  "search_config_snippets_tool(query) — поиск по тексту сниппетов.")
     return lines

@@ -42,6 +42,15 @@ from enrichment_generator import (  # noqa: E402
     object_target_type,
     resolve_object,
 )
+# Узел Q1: карантин enrich-сниппетов — тот же зарезервированный тег, что и в local_doc
+# (src/quarantine.py). Двух разных механизмов «ошибочная строка скрыта, но не удалена»
+# в двух базах быть не должно: оператор читает один и тот же флаг и ту же причину.
+from quarantine import (MARK_ARRAY, MARKED_FLAG_POSITIONAL_SQL,  # noqa: E402
+                        MARKED_FLAG_SQL, MARKED_SQL, MARKED_SQL_NAMED, MARKER,
+                        MARK_PARAM, MARK_TAG_PARAM, NOT_MARKED_SQL,
+                        NOT_MARKED_SQL_NAMED, REASON_EXPR_NAMED, is_marked, marked_flag,
+                        reason_of, reason_expr_named, sql_marked, sql_not_marked,
+                        strip_reserved, without_mark, with_mark)
 
 MAX_LIST_LIMIT = 500
 TOKEN_RE = re.compile(r"[0-9A-Za-zА-Яа-яЁё_]+")
@@ -311,6 +320,10 @@ def get_config_snippet(snippet_id):
                 return {"success": False, "error": f"Сниппет id={snippet_id} не найден"}
             card = rows[0]
             card["dependencies"] = _snippet_dependencies(cur, int(snippet_id))
+            # Узел Q1: карточка обязана называть карантин — оператор приходит в неё по id
+            # из списка или из поиска, и не должен узнавать о скрытой строке случайно.
+            card["marked"] = is_marked(card.get("tags"))
+            card["marked_reason"] = reason_of(card.get("tags"))
             card["aliases"] = fetch_rows(cur, "SELECT id, alias_name, weight, origin "
                                               "FROM config_aliases WHERE target_snippet_id = %s "
                                               "AND active ORDER BY weight DESC, alias_name",
@@ -326,11 +339,16 @@ def get_config_snippet(snippet_id):
         return {"success": False, "error": f"Сниппет не получен: {exc}"}
 
 
-def list_config_snippets(uuid=None, source_kind=None, limit=20, only_verified=False):
+def list_config_snippets(uuid=None, source_kind=None, limit=20, only_verified=False,
+                         include_marked=False):
     """Список сниппетов объекта БЕЗ кода целиком (размер и начало): код бывает десятки КБ.
 
     only_verified=True - только ручные (is_verified=true), их перегенерация не снимает;
     source_kind='manual' даёт тот же результат для сниппетов, добавленных оператором.
+
+    Узел Q1: по умолчанию строки в карантине (`mark-for-deletion`) скрыты; include_marked=True
+    отдаёт их с флагом `marked` и в конце выдачи — перечень не должен выглядеть так, будто
+    снятая строка всё ещё является ответом.
     """
     limit = max(1, min(int(limit or 20), MAX_LIST_LIMIT))
     where = ["TRUE"]
@@ -343,15 +361,22 @@ def list_config_snippets(uuid=None, source_kind=None, limit=20, only_verified=Fa
         params["source_kind"] = source_kind
     if only_verified:
         where.append("s.is_verified")
+    # Узел Q1: по умолчанию карантина нет; include_marked=True отдаёт его с явным флагом.
+    # Именованные фрагменты: запрос идёт на dict, позиционный %s в нём не работает.
+    # MARKED_FLAG_SQL уже содержит "AS marked" — повторно колонку не именуют.
+    params[MARK_PARAM] = MARK_ARRAY
+    if not include_marked:
+        where.append(NOT_MARKED_SQL_NAMED)
     sql = (f"SELECT s.id, s.parent_uuid::text AS parent_uuid, s.source_kind, s.source_uuid, "
            f"s.source_path, s.question, s.tags, s.confidence, s.is_verified, "
+           f"{MARKED_FLAG_SQL}, "
            f"length(s.answer) AS answer_size, left(s.answer, 300) AS answer_preview, "
            f"e.name AS object_name, "
            f"(SELECT count(*) FROM config_snippet_dependencies d WHERE d.snippet_id = s.id) "
            f"AS dependencies "
            f"FROM config_snippets s LEFT JOIN external_report e ON e.uuid = s.parent_uuid "
            f"WHERE {' AND '.join(where)} "
-           f"ORDER BY s.parent_uuid, s.source_kind, s.question LIMIT %(limit)s")
+           f"ORDER BY marked, s.parent_uuid, s.source_kind, s.question LIMIT %(limit)s")
     try:
         with transaction() as cur:
             rows = fetch_rows(cur, sql, params)
@@ -360,13 +385,17 @@ def list_config_snippets(uuid=None, source_kind=None, limit=20, only_verified=Fa
         return {"success": False, "error": f"Список сниппетов не получен: {exc}"}
 
 
-def search_config_snippets(query, uuid=None, limit=10):
+def search_config_snippets(query, uuid=None, limit=10, include_marked=False):
     """Найти сниппеты: полнотекстовый поиск по tsv; при пустом результате - подстрока.
 
     tsv построена базой по конфигу simple (идентификаторы 1С не склоняются), поэтому запрос
     собирается из токенов с оператором начала слова 'токен:*' - без него префикс не работает
     (проверено на FTS local_doc: форма 'слово*' оператор * теряет).
     Подстрока - запасной путь: она находит то, чего FTS не видит (часть идентификатора).
+
+    Узел Q1 (то же поведение, что у `search_docs` в local_doc): по умолчанию карантинных
+    строк нет; `include_marked=True` отдаёт их с флагом `marked` и опускает в конец выдачи,
+    чтобы скрытая строка не выглядела результатом поиска.
     """
     tokens = [token.lower() for token in TOKEN_RE.findall(str(query or "")) if len(token) >= 3]
     if not tokens:
@@ -375,22 +404,25 @@ def search_config_snippets(query, uuid=None, limit=10):
                          "длиннее 2 символов"}
     limit = max(1, min(int(limit or 10), MAX_LIST_LIMIT))
     scope_where = []
-    params = {"limit": limit}
+    params = {"limit": limit, MARK_PARAM: MARK_ARRAY}
     if uuid:
         scope_where.append("s.parent_uuid = %(uuid)s::uuid")
         params["uuid"] = str(uuid)
+    if not include_marked:
+        scope_where.append(NOT_MARKED_SQL_NAMED)
     scope = (" AND " + " AND ".join(scope_where)) if scope_where else ""
     columns = ("s.id, s.parent_uuid::text AS parent_uuid, s.source_kind, s.source_path, "
                "s.question, s.tags, s.is_verified, length(s.answer) AS answer_size, "
-               "left(s.answer, 300) AS answer_preview, e.name AS object_name")
+               "left(s.answer, 300) AS answer_preview, e.name AS object_name, "
+               f"{MARKED_FLAG_SQL}")
     fts_sql = (f"SELECT {columns}, ts_rank(s.tsv, %(tsq)s::tsquery) AS rank "
                f"FROM config_snippets s LEFT JOIN external_report e ON e.uuid = s.parent_uuid "
                f"WHERE s.tsv @@ %(tsq)s::tsquery{scope} "
-               f"ORDER BY rank DESC, s.question LIMIT %(limit)s")
+               f"ORDER BY marked, rank DESC, s.question LIMIT %(limit)s")
     sub_sql = (f"SELECT {columns}, 0.0 AS rank "
                f"FROM config_snippets s LEFT JOIN external_report e ON e.uuid = s.parent_uuid "
                f"WHERE position(%(word)s IN lower(s.question || ' ' || s.answer)) > 0{scope} "
-               f"ORDER BY s.question LIMIT %(limit)s")
+               f"ORDER BY marked, s.question LIMIT %(limit)s")
     try:
         with transaction() as cur:
             tsquery = " & ".join(f"{token}:*" for token in tokens)
@@ -448,8 +480,134 @@ def delete_config_snippet(snippet_id):
         return {"success": False, "error": f"Сниппет не удалён: {exc}"}
 
 
-def get_snippets_for_object(uuid=None, source_path=None, target_type=None, target_name=None):
-    """Найти сниппеты, которые ссылаются на указанную цель (через config_snippet_dependencies)."""
+# ── Карантин сниппетов (узел Q1, вариант A) ─────────────────────────────────────
+# Тот же контракт, что у local_doc (src/mcp_tools_api.py::mark_snippet_for_deletion):
+# состояние живёт в текстовом теге `mark-for-deletion`, схема не меняется. Логика тегов
+# общая — src/quarantine.py, иначе две базы начнут описывать один признак по-разному.
+
+def mark_config_snippet(snippet_id, reason=None):
+    """Пометить enrich-сниппет на удаление (мягко): строка остаётся, но скрывается из выдачи.
+
+    Назначение — зафиксировать ошибочность ручного вывода, не теряя строку: hard-delete
+    (`delete_config_snippet`) снимает и алиасы, и зависимости, и ссылки на documentation,
+    а вместе со строкой пропадает и ответ оператора. Помеченная строка не участвует в
+    поиске (`search_config_snippets`), в списках (`list_snippets`), в ответе «что известно
+    про цель» (`get_snippets_for_object`) и в разделе «ЧТО ДЕЛАЕТ КОД» карточки объекта,
+    но остаётся доступной по id (`get_config_snippet`) и в явном перечне карантина.
+
+    Для авто-сниппета (is_verified=false) генерация пересоздаёт строку — признак при этом
+    сохраняется: генератор переносит `mark-for-deletion` по совпадению идентичности
+    (parent_uuid + source_kind + source_uuid + question), см. узел Q2. Причина (reason)
+    кладётся вторым тегом `mark-for-deletion:reason=…` и читается обратно инструментами.
+    """
+    try:
+        with transaction() as cur:
+            # Карточка операции обязана называть объект (имя и вид), как это делают остальные
+            # инструменты: обе строки — отчёт и обработка — живут в одной таблице, и по одному
+            # uuid их не отличить (узел V22).
+            rows = fetch_rows(cur, "SELECT s.id, s.question, s.source_kind, s.is_verified, "
+                                   "s.tags, s.parent_uuid::text AS parent_uuid, "
+                                   "e.name AS object_name, e.object_kind "
+                                   "FROM config_snippets s "
+                                   "LEFT JOIN external_report e ON e.uuid = s.parent_uuid "
+                                   "WHERE s.id = %s", (int(snippet_id),))
+            if not rows:
+                return {"success": False, "error": f"Сниппет id={snippet_id} не найден"}
+            card = rows[0]
+            # with_mark отдаёт один список тегов (метка + тег причины); причина читается
+            # обратно тем же модулем, который её записал, — иначе текст причины мог бы
+            # разойтись с форматом тега.
+            marked_tags = with_mark(card["tags"], reason)
+            if not is_marked(marked_tags):
+                return {
+                    "success": False,
+                    "error": f"Признак {MARKER} не проставлен: сниппет id={snippet_id} "
+                             "не помечен"}
+            cur.execute("UPDATE config_snippets SET tags = %s::text[] WHERE id = %s",
+                        (marked_tags, int(snippet_id)))
+            return {"success": True, "id": int(snippet_id), "marked": True,
+                    "reason": reason_of(marked_tags), "question": card["question"],
+                    "source_kind": card["source_kind"], "is_verified": card["is_verified"],
+                    "uuid": card["parent_uuid"], "object_name": card.get("object_name"),
+                    "object_kind": card.get("object_kind"), "tags": marked_tags,
+                    "note": ("строка скрыта из поиска, списков и карточки объекта; доступна "
+                             "по id и в перечне карантина; удаления не было — remove её "
+                             "снимает, чистка tools/purge_marked_snippets.py удаляет")}
+    except Exception as exc:
+        return {"success": False, "error": f"Сниппет не помечен: {exc}"}
+
+
+def unmark_config_snippet(snippet_id):
+    """Снять пометку «на удаление»: строка возвращается в поиск, списки и карточку."""
+    try:
+        with transaction() as cur:
+            rows = fetch_rows(cur, "SELECT s.id, s.question, s.source_kind, s.is_verified, "
+                                   "s.tags, s.parent_uuid::text AS parent_uuid, "
+                                   "e.name AS object_name, e.object_kind "
+                                   "FROM config_snippets s "
+                                   "LEFT JOIN external_report e ON e.uuid = s.parent_uuid "
+                                   "WHERE s.id = %s", (int(snippet_id),))
+            if not rows:
+                return {"success": False, "error": f"Сниппет id={snippet_id} не найден"}
+            card = rows[0]
+            if not is_marked(card["tags"]):
+                return {"success": False, "already_unmarked": True, "id": int(snippet_id),
+                        "error": f"Сниппет id={snippet_id} не помечен признаком {MARKER}: "
+                                 "снимать нечего"}
+            unmarked = without_mark(card["tags"])
+            cur.execute("UPDATE config_snippets SET tags = %s::text[] WHERE id = %s",
+                        (unmarked, int(snippet_id)))
+            return {"success": True, "id": int(snippet_id), "marked": False,
+                    "question": card["question"], "source_kind": card["source_kind"],
+                    "is_verified": card["is_verified"], "uuid": card["parent_uuid"],
+                    "object_name": card.get("object_name"),
+                    "object_kind": card.get("object_kind"), "tags": unmarked,
+                    "note": "строка снова видна поиску, спискам и карточке объекта"}
+    except Exception as exc:
+        return {"success": False, "error": f"Признак не снят: {exc}"}
+
+
+def list_marked_config_snippets(uuid=None, limit=50):
+    """Перечень помеченных enrich-сниппетов (то, что удалит чистка). uuid — фильтр по объекту."""
+    limit = max(1, min(int(limit or 50), MAX_LIST_LIMIT))
+    # Узел Q1: условие карантина и разбор причины читаются SQL-фрагментами общего модуля.
+    # Именованные варианты обоих фрагментов: запрос идёт на dict, а смешать %s и %(name)s
+    # в одном SQL нельзя (замер: позиционный MARKED_SQL в именованном запросе давал
+    # «not enough arguments» и перечень карантина возвращался с error).
+    where = [MARKED_SQL_NAMED]
+    params = {"mark": MARK_ARRAY, MARK_TAG_PARAM: MARKER, "limit": limit}
+    if uuid:
+        where.append("s.parent_uuid = %(uuid)s::uuid")
+        params["uuid"] = str(uuid)
+    try:
+        with transaction() as cur:
+            rows = fetch_rows(
+                cur,
+                f"SELECT s.id, s.parent_uuid::text AS parent_uuid, e.name AS object_name, "
+                f"s.question, s.source_kind, s.is_verified, s.tags, "
+                f"{reason_expr_named(MARK_TAG_PARAM)} AS reason, "
+                f"length(s.answer) AS answer_size "
+                f"FROM config_snippets s "
+                f"LEFT JOIN external_report e ON e.uuid = s.parent_uuid "
+                f"WHERE {' AND '.join(where)} ORDER BY s.parent_uuid, s.id LIMIT %(limit)s",
+                params)
+            for row in rows:
+                row["marked"] = True
+                if not row.get("reason"):
+                    row["reason"] = reason_of(row.get("tags"))
+            return {"success": True, "found": len(rows), "rows": rows, "marker": MARKER}
+    except Exception as exc:
+        return {"success": False, "error": f"Перечень карантина не получен: {exc}"}
+
+
+def get_snippets_for_object(uuid=None, source_path=None, target_type=None, target_name=None,
+                            include_marked=False):
+    """Найти сниппеты, которые ссылаются на указанную цель (через config_snippet_dependencies).
+
+    Узел Q1: по умолчанию карантинные сниппеты скрыты; `include_marked=True` отдаёт их с
+    флагом `marked` и в конце выдачи — цель этого вопроса («что известно про реквизит») не
+    должна отвечать ошибочной строкой.
+    """
     if not target_type:
         return {"success": False, "error": "Нужен target_type цели (Attribute, FormItem, ...)"}
     try:
@@ -458,18 +616,29 @@ def get_snippets_for_object(uuid=None, source_path=None, target_type=None, targe
             if obj_uuid is None:
                 return obj
             if not target_name:
-                return {"success": False,
-                        "error": f"Нужен target_name цели для target_type='{target_type}'"}
-            rows = fetch_rows(cur, """
+                return {
+                    "success": False,
+                    "error": f"Нужен target_name цели для target_type='{target_type}'"}
+            # Порядок плейсхолдеров = порядок параметров: сначала маркер из SELECT
+            # (признак карантина в выдаче), затем условия WHERE и маркер фильтра.
+            # MARKED_FLAG_POSITIONAL_SQL уже содержит "AS marked" — колонку повторно не именуют.
+            params = [MARK_ARRAY, obj_uuid, target_type, target_name]
+            where = ["s.parent_uuid = %s::uuid", "d.target_type = %s",
+                     "lower(d.target_name) = lower(%s)"]
+            if not include_marked:
+                where.append(NOT_MARKED_SQL)
+                params.append(MARK_ARRAY)
+            rows = fetch_rows(cur, f"""
                 SELECT s.id, s.question, s.source_kind, s.source_path, s.is_verified,
+                       s.tags,
                        length(s.answer) AS answer_size, left(s.answer, 300) AS answer_preview,
-                       d.dependency_type, d.target_type, d.target_name, d.target_uuid
+                       d.dependency_type, d.target_type, d.target_name, d.target_uuid,
+                       {MARKED_FLAG_POSITIONAL_SQL}
                 FROM config_snippet_dependencies d
                 JOIN config_snippets s ON s.id = d.snippet_id
-                WHERE s.parent_uuid = %s::uuid AND d.target_type = %s
-                  AND lower(d.target_name) = lower(%s)
-                ORDER BY s.question
-            """, (obj_uuid, target_type, target_name))
+                WHERE {' AND '.join(where)}
+                ORDER BY marked, s.question
+            """, params)
             return {"success": True, "uuid": obj_uuid, "object_name": obj.get("name"),
                     "target_type": target_type, "target_name": target_name,
                     "found": len(rows), "rows": rows}
@@ -654,6 +823,13 @@ def enrichment_stats(uuid=None, limit=20):
     limit = max(1, min(int(limit or 20), MAX_LIST_LIMIT))
     where = ["TRUE"]
     params = {"limit": limit}
+    # Карантин (узел Q1): именованные фрагменты карантина (MARKED_SQL_NAMED,
+    # reason_expr_named) обращаются к %(qmark)s и %(mark_tag)s. Ключи добавляются один раз:
+    # psycopg2 допускает неиспользуемые ключи dict, поэтому один набор параметров обслуживает
+    # и запросы витрины, и запросы карантина — иначе именованный плейсхолдер остался бы без
+    # значения (ошибка «not enough arguments» при одном имени под два типа).
+    params[MARK_PARAM] = MARK_ARRAY
+    params[MARK_TAG_PARAM] = MARKER
     if uuid:
         where.append("v.report_uuid = %(uuid)s::uuid")
         params["uuid"] = str(uuid)
@@ -686,6 +862,26 @@ def enrichment_stats(uuid=None, limit=20):
                 f"WHERE {' AND '.join(cfg_where)} ORDER BY er.name LIMIT %(limit)s", params)
             if uuid:
                 result["configuration"] = (result["configuration_links"] or [{}])[0]
+                # Узел Q1: карантин виден в сводке по объекту. Строка скрыта из поиска, списков
+                # и карточки «что делает код» — без отдельного счётчика о ней нельзя было бы
+                # узнать, что чистка не выполнена.
+                marked = fetch_rows(
+                    cur,
+                    f"SELECT count(*) AS quarantine_snippets FROM config_snippets s "
+                    f"WHERE s.parent_uuid = %(uuid)s::uuid AND {MARKED_SQL_NAMED}", params)
+                result["quarantine"] = marked[0] if marked else {"quarantine_snippets": 0}
+                # totals — то же поле, что и в сводке без uuid: слой форматирования читает
+                # один ключ и не должен различать две ветки одного инструмента.
+                result["totals"] = {"quarantine_snippets": int(
+                    result["quarantine"].get("quarantine_snippets") or 0)}
+                result["quarantine"]["rows"] = fetch_rows(
+                    cur,
+                    f"SELECT s.id, s.question, s.source_kind, s.is_verified, s.tags, "
+                    f"{reason_expr_named(MARK_TAG_PARAM)} AS reason "
+                    f"FROM config_snippets s "
+                    f"WHERE s.parent_uuid = %(uuid)s::uuid AND {MARKED_SQL_NAMED} "
+                    f"ORDER BY s.id LIMIT %(limit)s",
+                    {**params, MARK_TAG_PARAM: MARKER})
             if not uuid:
                 totals = fetch_rows(cur, "SELECT count(*) AS objects, "
                                          "coalesce(sum(aliases_total), 0) AS aliases, "
@@ -706,6 +902,27 @@ def enrichment_stats(uuid=None, limit=20):
                     "FROM external_report er "
                     "LEFT JOIN configurations cfg ON cfg.id = er.configuration_id")
                 result["totals"].update(binding[0] if binding else {})
+                # Узел Q1: число скрытых (карантинных) сниппетов по всей базе — ровно то, что
+                # ещё не удалено скриптом чистки; в витрине v_config_enrichment этой колонки
+                # нет, поэтому счётчик считается прямым запросом с тем же фильтром.
+                marked = fetch_rows(
+                    cur, f"SELECT count(*) AS quarantine_snippets FROM config_snippets s "
+                         f"WHERE {MARKED_SQL_NAMED}", {MARK_PARAM: MARK_ARRAY})
+                result["totals"].update(marked[0] if marked else {})
+                # Число карантина по каждому объекту: витрина v_config_enrichment про теги не
+                # знает, поэтому счётчик присоединяется к строкам objects отдельно — иначе
+                # «сниппеты N» в перечне объектов не отвечали бы, сколько из них снято.
+                by_object = fetch_rows(
+                    cur,
+                    f"SELECT s.parent_uuid::text AS report_uuid, "
+                    f"       count(*) AS quarantine_snippets "
+                    f"FROM config_snippets s WHERE {MARKED_SQL_NAMED} GROUP BY s.parent_uuid",
+                    {MARK_PARAM: MARK_ARRAY})
+                marked_by_object = {str(row["report_uuid"]): int(row["quarantine_snippets"])
+                                    for row in by_object}
+                for row in objects:
+                    row["quarantine_snippets"] = marked_by_object.get(
+                        str(row.get("report_uuid")), 0)
                 # Узел V22: разбивка по ВИДУ объекта. Обе строки (отчёт и обработка) лежат в одной
                 # таблице-заголовке, поэтому «сколько объектов в базе» без object_kind — вопрос,
                 # на который нельзя ответить честно: число объектов не говорит, чего именно.

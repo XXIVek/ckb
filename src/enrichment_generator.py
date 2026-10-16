@@ -40,6 +40,22 @@ from external_table_writer import (  # noqa: E402
     ConfigSnippetRowWriter,
     _quote,
 )
+# Узел Q2: карантин (узел Q1) обязан переживать перегенерацию. Генератор снимает и создаёт
+# авто-строки заново, поэтому признак `mark-for-deletion` переносится по идентичности строки
+# (parent_uuid, source_kind, source_uuid, question) — тому же ключу, что у уникального индекса
+# uq_config_snippets_object_source. Без этого пометка авто-сниппета исчезала бы при каждом
+# generate_config_enrichment_tool, то есть карантин нельзя было бы использовать вообще.
+from quarantine import (  # noqa: E402
+    MARKER,
+    MARK_ARRAY,
+    MARKED_COND_NAMED,
+    MARK_PARAM,
+    MARK_TAG_PARAM,
+    is_marked,
+    reason_of,
+    reason_expr_named,
+    with_mark,
+)
 
 # Пороги полезности (разделы 2.2 и 4.2 плана V17).
 MIN_BODY_LINES = 5                    # непустых строк тела объявления, чтобы не было шума
@@ -857,6 +873,24 @@ def _existing_snippet_keys(cur, obj_uuid):
     return {(row[0], row[1] or "", row[2]) for row in cur.fetchall()}
 
 
+def _quarantined_snippet_tags(cur, obj_uuid):
+    """Ключ сниппета -> его карантинная причина. Читается ДО снятия авто-строк (узел Q2).
+
+    Ключ ровно тот же, что у `_existing_snippet_keys` и у уникального индекса
+    `uq_config_snippets_object_source` (parent_uuid задан фильтром). Снимать строки и
+    собирать их ключи должны один и тот же набор колонок, иначе перенос признака молча
+    промахнётся: признак останется у удалённой строки, а новая строка выйдет чистой.
+
+    Хранится только причина, а не весь список тегов: исчерпывающие теги новой строке
+    даёт генератор (теги источника, `dataset` и т. п.), к ним добавляется метка карантина.
+    """
+    cur.execute("SELECT source_kind, COALESCE(source_uuid, ''), question, tags "
+                "FROM config_snippets WHERE parent_uuid = %s::uuid AND %s = ANY(tags)",
+                (obj_uuid, MARKER))
+    return {(row[0], row[1] or "", row[2]): reason_of(row[3])
+            for row in cur.fetchall() if is_marked(row[3])}
+
+
 def generate_enrichment(uuid=None, source_path=None):
     """Пересобрать обогащение объекта: алиасы объекта, сниппеты, зависимости, алиасы сниппетов.
 
@@ -897,6 +931,9 @@ def generate_enrichment(uuid=None, source_path=None):
             snippets = build_snippets(obj, data)
             index = _identifier_index(data)
 
+            # Узел Q2: карантинные признаки читаются ДО снятия авто-строк — после DELETE
+            # их уже не существует, и переносить было бы нечего.
+            quarantined = _quarantined_snippet_tags(cur, obj_uuid)
             removed = _purge_generated(cur, obj_uuid)
             existing = _existing_snippet_keys(cur, obj_uuid)
 
@@ -905,11 +942,19 @@ def generate_enrichment(uuid=None, source_path=None):
 
 
             snippet_rows = []
+            carried_quarantine = 0
             for snippet in snippets:
                 row = snippet["row"]
                 key = (row["source_kind"], row["source_uuid"] or "", row["question"])
                 if key in existing:
                     continue
+                if key in quarantined:
+                    # Пометку поставил оператор, а генератор пересоздаёт строку по тому же
+                    # объявлению. Теги источника остаются те, что построил генератор, к ним
+                    # добавляется метка карантина (+ прежняя причина): состояние сохраняется,
+                    # а теги не дублируются.
+                    row["tags"] = with_mark(row.get("tags") or [], quarantined[key])
+                    carried_quarantine += 1
                 snippet_rows.append((snippet, row))
             inserted_ids = ConfigSnippetRowWriter.insert_ids(cur, [row for _, row in snippet_rows])
 
@@ -954,6 +999,11 @@ def generate_enrichment(uuid=None, source_path=None):
                     "snippet_dependencies": dependencies_inserted,
                     "snippet_aliases": snippet_aliases_inserted,
                 },
+                # Узел Q2: сколько пометок перенесено на пересозданные строки. Число
+                # называется прямо: оператору важно знать, что карантин не потерялся, а
+                # число помеченных строк после генерации не изменилось.
+                "quarantine": {"carried": carried_quarantine,
+                               "marked_before": len(quarantined)},
                 "skipped_duplicates": skipped,
                 "warnings": warnings,
                 "totals": counts,
@@ -1161,6 +1211,10 @@ def describe_object(uuid=None, source_path=None, limit=DESCRIBE_DEFAULT_LIMIT):
       * как он работает — перечень сохранённых enrich-сниппетов (объявления модулей, запросы
         макетов), события формы и ссылки на documentation.
 
+    Сниппеты в карантине (тег `mark-for-deletion`, узел Q1) из перечня не убираются: карточка
+    описывает состояние объекта целиком. Они получают флаг `marked`, ставятся в конец перечня,
+    а их число отдаёт отдельный счётчик `counts.snippets_marked`.
+
     Только чтение, одна транзакция, ничего не пишет. Разделы ограничены `limit`
     (limit=0 — разделы не отдаются, счётчики всё равно считаются). `counts` — полные числа
     по БД, от `limit` они не зависят (в том числе form_elements / form_events): карточка
@@ -1230,10 +1284,16 @@ def describe_object(uuid=None, source_path=None, limit=DESCRIBE_DEFAULT_LIMIT):
                 "       (SELECT count(*) FROM v_form_events "
                 "        WHERE report_uuid = %(u)s::uuid) AS form_events, "
                 "       (SELECT count(*) FROM config_snippets WHERE parent_uuid = %(u)s::uuid) AS snippets, "
+                # Карантин (узел Q1, вариант A): то же общее число, но только помеченных mark-for-deletion.
+                # В счётчике «сниппетов» карточки помеченные остаются — карточка показывает
+                # состояние объекта целиком; отдельно число помечённых нужно, чтобы раздел кода
+                # называл полную численность и одновременно отвечал, сколько из неё снято.
+                f"       (SELECT count(*) FROM config_snippets WHERE parent_uuid = %(u)s::uuid "
+                f"        AND {MARKED_COND_NAMED}) AS snippets_marked, "
                 "       (SELECT count(*) FROM config_aliases WHERE parent_uuid = %(u)s::uuid AND active) AS aliases, "
                 "       (SELECT count(*) FROM config_cross_references "
                 "        WHERE parent_uuid = %(u)s::uuid) AS doc_links",
-                {"u": obj_uuid})[0]
+                {"u": obj_uuid, MARK_PARAM: MARK_ARRAY})[0]
             result = {"success": True, "uuid": obj_uuid, "object": identity[0], "counts": counts,
                       "caption": caption_of(identity[0].get("synonym")), "limit": limit,
                       # узел V22: вид объекта — верхнеуровневое поле, а не только поле внутри
@@ -1261,7 +1321,13 @@ def _describe_sections(cur, result, obj_uuid, limit):
     Состав элементов и событий форм читается через витрины v_form_elements / v_form_events —
     те же источники, что и SQL-сверки (check_external_report_inventory.sql, разделы 10-10e).
     """
-    params = {"u": obj_uuid, "l": limit}
+    # `params` переиспользуется всеми запросами раздела (psycopg2 лишние ключи не требует),
+    # поэтому карательный ключ с самим маркером добавляется сюда один раз: выражение причины
+    # (reason_expr_named) обращается к %(marktag)s, и без этого ключа psycopg2 даёт
+    # "dictionary didn't supply key 'marktag'" — падал весь раздел «ЧТО ДЕЛАЕТ КОД» карточки.
+    # Массив тегов и текстовый маркер — разные параметры именно здесь (MARK_ARRAY против
+    # MARKER), поэтому оба ключа обязаны присутствовать.
+    params = {"u": obj_uuid, "l": limit, MARK_PARAM: MARK_ARRAY, MARK_TAG_PARAM: MARKER}
     result["attributes"] = fetch_rows(
         cur,
         f"SELECT a.name, a.type, a.comment FROM attributes a "
@@ -1304,10 +1370,18 @@ def _describe_sections(cur, result, obj_uuid, limit):
         "SELECT module_type, module_name, file_path, code_size, truncated "
         "FROM bsl_modules WHERE parent_uuid = %(u)s::uuid ORDER BY module_type, id LIMIT %(l)s",
         params)
+    # Карантин (узел Q1, вариант A): карточка описывает состояние объекта целиком, поэтому
+    # помеченные на удаление сниппеты из перечня НЕ убираются — они получают флаг `marked`
+    # и ставятся в конец списка, чтобы рабочий перечень читался первым. Отдельное число
+    # помеченных даёт counts.snippets_marked; инвариант «число в заголовке раздела = число
+    # строк в БД» при этом не нарушается.
     result["snippets"] = fetch_rows(
         cur,
-        "SELECT id, question, source_kind, is_verified, length(answer) AS answer_chars "
-        "FROM config_snippets WHERE parent_uuid = %(u)s::uuid ORDER BY id LIMIT %(l)s", params)
+        "SELECT id, question, source_kind, is_verified, length(answer) AS answer_chars, "
+        f"       ({MARKED_COND_NAMED}) AS marked, "
+        f"       {reason_expr_named(MARK_TAG_PARAM)} AS marked_reason "
+        f"FROM config_snippets WHERE parent_uuid = %(u)s::uuid "
+        f"ORDER BY ({MARKED_COND_NAMED}), id LIMIT %(l)s", params)
     return result
 
 

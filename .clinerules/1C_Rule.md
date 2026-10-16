@@ -11,7 +11,8 @@
 - `1c-configurations-core_Rule.md` — MCP `1c-configurations-core`: контракт загрузки выгрузок,
   схема `ckb_1c_configurations`, порядок создания БД, известные дефекты.
 - `1c-configurations-enrichment_Rule.md` — MCP `1c-configurations-enrichment`: схема обогащения
-  (`config_*`), 18 инструментов контракта, генерация, карточка объекта, состав макета-СКД,
+  (`config_*`), 21 инструмент контракта (в т. ч. карантин сниппетов, узел Q1), генерация,
+  карточка объекта, состав макета-СКД,
   привязка внешнего объекта к конфигурации (узлы V20/V20.1).
 - `1c-configurations-export_Rule.md` — MCP `1c-configurations-export`: статус сценария экспорта
   (не реализован, узел V18), единственный инструмент `export_readiness_tool()`.
@@ -33,7 +34,7 @@
 
 | Сценарий | Инструмент | Описание |
 |----------|-----------|----------|
-| Общий поиск по документации | `search_docs_tool(query, category?, limit?)` | Комбинированный поиск по группам, сниппетам и алиасам; `category` фильтрует выдачу по категории (реализовано 15.10.2026) |
+| Общий поиск по документации | `search_docs_tool(query, category?, limit?, include_marked=False)` | Комбинированный поиск по группам, сниппетам и алиасам; `category` фильтрует выдачу по категории (реализовано 15.10.2026); сниппеты, помеченные к удалению (узел Q1, тег `mark-for-deletion`), скрыты по умолчанию — `include_marked=True` отдаёт их с явной пометкой |
 | Получить полную группу | `get_doc_tool(doc_id)` | Получить HTML-контент группы справки по ID |
 | Проверить состояние БД | `get_db_state_tool()` | Узнать количество групп, сниппетов, алиасов |
 | Список категорий | `list_categories_tool()` | Список категорий и честные счётчики по каждой (группы / сниппеты / алиасы) |
@@ -118,7 +119,7 @@
 **Когда использовать:** посмотреть, что представляет собой загруженный внешний отчёт и что делает его
 код; найти объект по русскому синониму, имени реквизита, элемента формы, имени процедуры; создать
 или снять алиас/сниппет/ссылку на документацию. Полные правила —
-`.clinerules/1c-configurations-enrichment_Rule.md` (контракт — 18 инструментов).
+`.clinerules/1c-configurations-enrichment_Rule.md` (контракт — 21 инструмент).
 
 | Сценарий | Инструмент | Описание |
 |----------|-----------|----------|
@@ -139,11 +140,15 @@
 | Снять алиас | `delete_config_alias_tool(alias_id, hard=False)` | по умолчанию мягкое снятие (`active=false`) |
 | **Сниппеты:** | | |
 | Полный код + зависимости + алиасы | `get_config_snippet_tool(snippet_id)` | карточка сниппета |
-| Список сниппетов (без кода целиком) | `list_config_snippets_tool(uuid?, source_kind?, limit?, only_verified?)` | код бывает десятки КБ |
-| Полнотекстовый поиск по сниппетам | `search_config_snippets_tool(query, uuid?, limit?)` | ищет и вопрос, и код |
-| Что известно про конкретную цель | `get_config_snippets_for_object_tool(uuid?, source_path?, target_type, target_name)` | перед тем, как писать новый сниппет |
+| Список сниппетов (без кода целиком) | `list_config_snippets_tool(uuid?, source_kind?, limit?, only_verified?, include_marked=False)` | код бывает десятки КБ; помеченные к удалению скрыты по умолчанию |
+| Полнотекстовый поиск по сниппетам | `search_config_snippets_tool(query, uuid?, limit?, include_marked=False)` | ищет и вопрос, и код; карантин скрыт по умолчанию, по `include_marked=True` отдаётся с явной пометкой и в конце выдачи |
+| Что известно про конкретную цель | `get_config_snippets_for_object_tool(uuid?, source_path?, target_type, target_name, include_marked=False)` | перед тем, как писать новый сниппет |
 | Добавить ручной сниппет | `add_config_snippet_tool(question, answer, uuid?, source_path?, dependencies?, ...)` | `is_verified=true`, обязан сослаться на сохранённую цель |
 | Удалить сниппет | `delete_config_snippet_tool(snippet_id)` | снимает и его алиасы, зависимости, ссылки |
+| **Карантин сниппетов (узел Q1, 16.10.2026)** | | |
+| Пометить ошибочный сниппет на удаление | `mark_config_snippet_tool(snippet_id, reason?)` | строка остаётся в БД, выдача её не отдаёт; причина — второй тег `mark-for-deletion:reason=…` |
+| Снять пометку | `unmark_config_snippet_tool(snippet_id)` | возвращает строку в поиск, списки и карточку объекта |
+| Разобрать карантин перед чисткой | `list_marked_config_snippets_tool(uuid?, limit=50)` | id, объект, вопрос, источник, `is_verified`, причина; физически снимает только `tools/purge_marked_snippets.py` (`--dry-run` по умолчанию) |
 | **Связи с документацией:** | | |
 | Поставить указатель `local_doc` → цель | `add_config_cross_reference_tool(uuid?, local_doc_kind, local_doc_id, target_type?, ...)` | битый id не сохраняется |
 | Прочитать связи | `get_config_cross_references_tool(uuid? \| local_doc_id, limit?)` | с проверкой указателя в `local_doc` |
@@ -200,11 +205,15 @@ XML, флаги изменённых объектов, сборка XML по с�
 │     └─ delete_external_report_tool(...)
 │
 ├─ Вопрос о содержимом загруженного объекта (свойства, реквизиты, формы, код)?
-│  └─→ MCP `1c-configurations-enrichment` (контракт — 18 инструментов)
+│  └─→ MCP `1c-configurations-enrichment` (контракт — 21 инструмент)
 │     ├─ config_enrichment_stats_tool(uuid=…, card=True) — карточка объекта
 │     ├─ get_config_template_tool(uuid=…, name=…) — состав макета-СКД (узел B)
 │     ├─ search_config_aliases_tool / resolve_config_alias_tool — поиск по терминам
 │     ├─ search_config_snippets_tool / get_config_snippet_tool — код объекта
+│     ├─ mark_config_snippet_tool / unmark_config_snippet_tool /
+│     │     list_marked_config_snippets_tool — карантин ошибочных сниппетов (узел Q1):
+│     │     строка остаётся в БД, выдача её не отдаёт; физическая чистка —
+│     │     tools/purge_marked_snippets.py
 │     ├─ set_object_configuration_tool(uuid=…, configuration_id=…) — заявить/снять привязку
 │     │     (V20.1); где битые ссылки и что привязано к заголовку — тот же
 │     │     config_enrichment_stats_tool() без uuid

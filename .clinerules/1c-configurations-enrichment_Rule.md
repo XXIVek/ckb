@@ -23,7 +23,7 @@ MCP сервер `1c-configurations-enrichment` (`server_configurations_enrichme
 различает колонка `object_kind` (узел V22); таблиц `configuration` и `external_processing` в
 схеме нет. `config_id` в этих инструментах отсутствует вовсе.
 
-## 🎯 Контракт — 18 инструментов
+## 🎯 Контракт — 21 инструмент (18 + карантин сниппетов, узел Q1)
 
 | Группа | Инструмент | Сигнатура |
 |---|---|---|
@@ -38,16 +38,19 @@ MCP сервер `1c-configurations-enrichment` (`server_configurations_enrichme
 | | `delete_config_alias_tool` | `(alias_id, hard=False)` |
 | сниппеты | `add_config_snippet_tool` | `(question, answer, uuid?, source_path?, source_kind='manual', source_uuid?, source_file?, target_type?, target_uuid?, tags?, confidence=1, dependencies?)` |
 | | `get_config_snippet_tool` | `(snippet_id)` |
-| | `list_config_snippets_tool` | `(uuid?, source_kind?, limit=20, only_verified=False)` |
-| | `search_config_snippets_tool` | `(query, uuid?, limit=10)` |
-| | `get_config_snippets_for_object_tool` | `(uuid?, source_path?, target_type?, target_name?)` |
+| | `list_config_snippets_tool` | `(uuid?, source_kind?, limit=20, only_verified=False, include_marked=False)` |
+| | `search_config_snippets_tool` | `(query, uuid?, limit=10, include_marked=False)` |
+| | `get_config_snippets_for_object_tool` | `(uuid?, source_path?, target_type?, target_name?, include_marked=False)` |
 | | `delete_config_snippet_tool` | `(snippet_id)` |
+| карантин сниппетов (узел Q1, 16.10.2026; схема не менялась — зарезервированный тег в `tags`) | `mark_config_snippet_tool` | `(snippet_id, reason?)` |
+| | `unmark_config_snippet_tool` | `(snippet_id)` |
+| | `list_marked_config_snippets_tool` | `(uuid?, limit=50)` |
 | documentation | `add_config_cross_reference_tool` | `(uuid?, source_path?, local_doc_kind='group', local_doc_id?, target_type='ExternalReport', target_name?, target_uuid?, reference_type='linked_to')` |
 | | `get_config_cross_references_tool` | `(uuid?, local_doc_id?, limit=50)` |
 | | `delete_config_cross_reference_tool` | `(reference_id)` |
 
-Состав контракта сторожит `tools/check_mcp_tool_wiring.py` (`EXPECTED_TOOLS`: core 3,
-enrichment 18, export 1) — он встроен в `validate_project.py`. Лишний инструмент или
+Состав контракта сторожит `tools/check_mcp_tool_wiring.py` (`EXPECTED_TOOLS`: core 4,
+enrichment 21, export 1) — он встроен в `validate_project.py`. Лишний инструмент или
 исчезнувший — провал проверки; возвращать инструменты прежнего поколения нельзя: они ходили
 в базу `configurations`, которой на сервере нет.
 
@@ -461,6 +464,41 @@ include_query=True)`: состав конкретного макета (набо
     объекта не участвуют (см. `.clinerules/1c-configurations-core_Rule.md`, п. 5). Если нужного
     нет ни в одном инструменте — сообщить оператору как пробел контракта.
 
+11. **Карантин ошибочных сниппетов (узел Q1–Q3, 16.10.2026).** Ошибочный сниппет сначала
+    **помечают**, а не удаляют: `mark_config_snippet_tool(snippet_id, reason)` кладёт в `tags`
+    зарезервированный тег `mark-for-deletion` и второй тег `mark-for-deletion:reason=<текст>`;
+    колонки состояния в схеме нет, и схему под это дело не заводят. Дальше:
+
+    * читающие инструменты (`search_config_snippets_tool`, `list_config_snippets_tool`,
+      `get_config_snippets_for_object_tool`) скрывают помеченные по умолчанию и отдают только по
+      `include_marked=True`, обязательно с явным флагом в выдаче; карточка
+      `get_config_snippet_tool` отдаёт `marked` / `marked_reason`;
+    * причина обязательна по смыслу контракта: строка без причины скрыта, и непонятно, почему её
+      нельзя показывать;
+    * `unmark_config_snippet_tool` — снять пометку (метку и тег причины); повторное снятие
+      отвечает `already_unmarked`, а не ошибкой;
+    * `delete_config_snippet_tool` остаётся hard-delete'ом: снимает и алиасы, и зависимости, и
+      doc-ссылки. Физически чистит карантин только `tools/purge_marked_snippets.py`
+      (по умолчанию `--dry-run`, запись — с `--apply`);
+    * ручная строка не может сама себя пометить: `add_config_snippet_tool`/`add_config_aliases_tool`
+      выбрасывают зарезервированные теги из аргумента `tags` (`strip_reserved`);
+    * метка переживает перегенерацию: генератор переносит её по идентичности строки
+      `(parent_uuid, source_kind, source_uuid, question)`; ручные сниппеты перегенерация не трогает;
+    * **словарь тегов и SQL-фрагменты — один модуль на оба контура** (`local_doc` и
+      `ckb_1c_configurations`): `src/quarantine.py` (`MARKER`, `REASON_SUFFIX`/`REASON_PREFIX`,
+      `MARK_PARAM`/`MARK_TAG_PARAM`, `sql_not_marked*`/`sql_marked*`, `NOT_MARKED_SQL*`,
+      `MARKED_FLAG_SQL`, `reason_expr_named`/`reason_expr_positional`). Писать свой фильтр
+      карантина или свой разбор причины в модуле-вызывателе нельзя; `split_part` для разбора
+      причины запрещён (он зависит от порядка тегов и отвечает пусто при неверном разделителе) —
+      причина читается по каждому тегу через `unnest`. Сторожит `validate_project.py` (шаг 3b),
+      живое поведение — `tools/check_quarantine_round_trip.py`;
+    * в `local_doc` тот же контракт: `mark_snippet_for_deletion_tool` /
+      `unmark_snippet_for_deletion_tool` / `list_marked_snippets_tool`, `search_docs_tool(...,
+      include_marked=False)`; `get_db_state_tool()` показывает `snippets_marked_for_deletion`
+      отдельной строкой, а не внутри `snippets`.
+
+    Норматив узла — раздел 14 `docs/CONFIGURATIONS_ENRICHMENT_PLAN.md`.
+
 ## 🔄 Штатный порядок работы
 
 ```text
@@ -497,7 +535,9 @@ include_query=True)`: состав конкретного макета (набо
 |---|---|
 | `python validate_enrichment_flow.py` | 122 проверок офлайн-слоя: загрузка → генерация → идемпотентность → карточка (`phase_object_card`: содержимое, `counts` против витрин, усечение при `limit=2` с полными счётчиками и явной строкой «всего N, показано M») → алиасы/резолв → сниппеты и зависимости → **узел A** (`phase_template_dataset_query`: `<query>` внутри `<dataSet>` → авто-сниппет `template_query` с целью на макет; ожидания выводятся из сохранённого `templates.ext` тем же генератором, сверка кода/цели/`source_uuid`, зависимости на макет, фильтр по `source_kind`, FTS, идемпотентность) → **узел B** (`phase_dcs_content`: 16 проверок состава макета-СКД из сохранённого `templates.ext` — разбор корня и инвентарь элементов, отсутствие неучтённых элементов, счётчики против разобранных списков, текст запроса сверяется с узлом A, ключи целей `dcs:<uuid макета>:<вид>:<имя>`, детерминированность повторного разбора, счётчики `dcs_*` карточки против разбора, раздел `dcs` по каждому макету, `limit=0` — счётчики полные, раздела нет, текст `get_config_template_tool` (наборы данных, параметры, запрос с явным усечением), отказ на несуществующее имя макета, негативные случаи: пустое/обрезанное/битое содержимое и чужой корневой элемент) → **привязка к конфигурации** (`phase_configuration_link`, узел V20.1: несуществующий заголовок отклоняется и привязки не появляется → привязка инструментом и `bound` в карточке → сводка без uuid отдаёт обратный перечень → заголовок удалён → `dangling` в карточке, сводке и предупреждении генерации, при этом чтение состава не ломается → снятие возвращает «не заявлена» → уборка тестовых заголовков) → ссылки `local_doc` → удаление и сироты |
 | `python tools/check_v20_config_link.py` | 34 проверки привязки (узел V20/V20.1) на `Test3_Otchet_Null` и тестовом заголовке: колонка и индекс есть, FK `external_report_configuration_fkey` в схеме нет; карточка называет заголовок и версию; карточка дубликата показывает привязку, `force=True` переносит её; несуществующий id отклоняется инструментом; после удаления заголовка ссылка битая и требует перепривязки; после снятия — «не заявлена»; эталонная пара не трогается, тестовые строки удаляются |
-| `python tools/check_mcp_tool_wiring.py` | AST-сверка `EXPECTED_TOOLS` (core 3, enrichment 18, export 1) с регистрами реальных серверов: лишнего/недостающего инструмента быть не должно |
+| `python tools/check_quarantine_round_trip.py` | живой контракт карантина (узел Q1–Q3): **проверок 52, провалено 0, пропущено 0** (замер 16.10.2026) — пометка/снятие в обоих контурах, скрытие по умолчанию и `include_marked=True` с явным флагом и причиной, перенос метки через перегенерацию и её идемпотентность, неизменность ручных строк, перечень карантина и разбор причины (SQL против Python-`reason_of`, расхождений 0), `already_unmarked` вместо ошибки при повторном снятии, пустая причина у строки без тега причины, **7 раскладок тегов**, аудит `snippet_audit_log` (таблицы `audit_log` в живой схеме нет — замер) |
+| `python tools/purge_marked_snippets.py` | физическая чистка карантина (узел Q2): по умолчанию `--dry-run` (запись только с `--apply`), `--db all\|ckb\|local_doc`, `--uuid`, `--limit`, `--keep-audit`; учёт живой схемы — колонки `active` в `alias_targets` нет, аудит в `snippet_audit_log` (FK без `ON DELETE`, поэтому шаг аудита до удаления), ключи ответа `delete_config_snippet` — `children_deleted`; rc=1 только при ошибке шага записи |
+| `python tools/check_mcp_tool_wiring.py` | AST-сверка `EXPECTED_TOOLS` (core 4, enrichment 21, export 1) с регистрами реальных серверов: лишнего/недостающего инструмента быть не должно |
 | `python validate_project.py` | состояние проекта: живые модули загрузчика и обогащения, контракт инструментов, отсутствие кода, обращающегося к базе `configurations` |
 | `python _cmp_ddl.py` | шаги 1 → 1b → 2 установки против живой схемы `ckb_1c_configurations`: колонки, индексы, уникальные ограничения, FK, определения витрин |
 | `check_external_report_search.sql` (варианты 17–21, секции 32–36), `check_external_report_inventory.sql` (разделы 15–15g) | находимость алиасов и текста запроса макета, заполненность и покрытие обогащения в SQL; раздел `15f` — состояния привязок к конфигурации (`not_declared`/`bound`/`dangling`), обратный перечень, отсутствие внешнего ключа при наличии индекса; раздел `15g` — виды внешних объектов (узел V22): состав по `object_kind`, инварианты вида (ClassId, `parent_type` детей, self-цель, конфликт uuid), состояние схемы и витрины; раздел `16` — слепые зоны обогащения, в том числе «алиасов с пустым `target_key` = 0» (см. правило 9 об явном `target_uuid`) |

@@ -77,9 +77,9 @@ MCP сервер `1c-knowledge-base` (server.py) — это система уп�
 
 | Инструмент | Параметры | Назначение |
 |-----------|-----------|------------|
-| `search_docs_tool(query, category?, limit?)` | query: string, category?: string, limit?: int | Комбинированный поиск по группам, сниппетам и алиасам. `category` **фильтрует** (один код или несколько через запятую) — семантика в п. 5 раздела «Критические правила» |
+| `search_docs_tool(query, category?, limit?, include_marked=False)` | query: string, category?: string, limit?: int, include_marked: bool | Комбинированный поиск по группам, сниппетам и алиасам. `category` **фильтрует** (один код или несколько через запятую) — семантика в п. 5 раздела «Критические правила». Сниппеты, помеченные к удалению (узел Q1, тег `mark-for-deletion`), скрыты по умолчанию; `include_marked=True` отдаёт их с пометкой `[помечен к удалению: причина]` |
 | `get_doc_tool(doc_id)` | doc_id: int | Получить полную группу по ID |
-| `get_db_state_tool()` | — | Состояние БД (groups, snippets, aliases) |
+| `get_db_state_tool()` | — | Состояние БД (groups, snippets, aliases) + отдельной строкой `snippets_marked_for_deletion` (узел Q1: снятые строки физически остаются в таблице, убирать их из итога — значит врать о содержимом) |
 | `list_categories_tool()` | — | Список категорий документации и честные счётчики по каждой: группы / сниппеты / алиасы, с учётом наследования категории от группы-родителя |
 | `detect_tags_tool(text)` | text: string | Определить теги контента |
 
@@ -99,6 +99,36 @@ add_aliases_tool(aliases="Catalog,справочник,справочники,ca
 add_aliases_tool(aliases="synonym,synonyms", groups_id=52977)
 
 **Важно:** Алиасы добавляются через `ON CONFLICT DO NOTHING` — дубликаты не создаются. Используйте для расширения поиска по существующим элементам, когда стандартные алиасы недостаточны.
+
+### Карантин ошибочных сниппетов (узел Q1–Q3, 16.10.2026)
+
+Тот же контракт, что в MCP `1c-configurations-enrichment` (раздел 14
+`docs/CONFIGURATIONS_ENRICHMENT_PLAN.md`): ошибочный сниппет сначала **помечают**, а не удаляют.
+Колонки состояния в `knowledge_snippets` нет и не заводят — используется зарезервированный тег в
+уже существующей колонке `tags text[]` (GIN `idx_snippets_tags` обслуживает фильтр так же, как
+фильтр по категории):
+
+| Инструмент | Параметры | Назначение |
+|-----------|-----------|------------|
+| `mark_snippet_for_deletion_tool(snippet_id, reason?)` | snippet_id: int, reason: string | Пометить сниппет к удалению: теги `mark-for-deletion` и `mark-for-deletion:reason=<текст>`. Идемпотентно; алиасы сниппета не трогаются. Причина обязательна по смыслу контракта (пустой текст — отказ) |
+| `unmark_snippet_for_deletion_tool(snippet_id)` | snippet_id: int | Снять пометку (метку и тег причины); строка возвращается в поиск и списки |
+| `list_marked_snippets_tool(limit=50)` | limit: int | Перечень помеченных — разбор перед чисткой |
+| `tools/purge_marked_snippets.py` (CLI, вне MCP) | `--db`, `--apply`, `--dry-run`, `--limit`, `--keep-audit` | Физически снимает строку. По умолчанию только просмотр; перед удалением — шаг аудита в `snippet_audit_log` (его FK на `knowledge_snippets` без `ON DELETE`) |
+
+Правила:
+
+* `search_docs_tool` скрывает помеченные по умолчанию, `include_marked=True` отдаёт их с явной
+  пометкой и причиной; `get_db_state_tool()` печатает `snippets_marked_for_deletion` отдельной
+  строкой;
+* **колонки `active` в `alias_targets` нет** — мягкое снятие есть только у `config_aliases`
+  (богатство контракта enrichment); в `local_doc` алиасы помеченного сниппета остаются активными,
+  пока не удалён сам сниппет (каскад `alias_targets_snippets_id_fkey ON DELETE CASCADE`);
+* таблицы `audit_log` в живой схеме нет, есть `snippet_audit_log` — имя проверять замером, а не
+  памятью;
+* словарь тегов и SQL-фрагменты — `src/quarantine.py`, один модуль на оба контура; свой разбор
+  причины в вызывающем коде не заводят, `split_part` запрещён (зависит от порядка тегов);
+* проверка живого поведения — `python tools/check_quarantine_round_trip.py` (52 проверки, провалено 0).
+
 
 
 ## 📝 Категории документации

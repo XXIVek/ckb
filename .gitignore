@@ -77,4 +77,9 @@ _docx_*.txt
 # Лог прогона tools/load_its_pdf.py (руководство разработчика, PDF). Сам загрузчик
 # src/its_pdf_loader.py и обёртка tools/load_its_pdf.py трекаются.
 _its_pdf_*.txt
+# Логи прогонов карантина сниппетов (узел Q1-Q3): tools/check_quarantine_round_trip.py
+# (_q3_*.txt) и tools/purge_marked_snippets.py (_purge_*.txt). Сами скрипты трекаются:
+# tools/check_quarantine_round_trip.py, tools/purge_marked_snippets.py.
+_q3_*.txt
+_purge_*.txt
 

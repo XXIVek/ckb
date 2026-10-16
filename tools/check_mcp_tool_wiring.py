@@ -41,7 +41,7 @@ DEFAULT_TARGETS = [
     ROOT / "server_configurations_export.py",
 ]
 
-# Контракт инструментов (зафиксирован: core — 3, enrichment — 18, export — 1; норматив
+# Контракт инструментов (зафиксирован: core — 4, enrichment — 21, export — 1; норматив
 # docs/config-scenarios/FLOWCHART_1c-configurations-core.md и docs/CONFIGURATIONS_ENRICHMENT_PLAN.md).
 # Проверка нужна потому, что в серверах уже лежали 18 и 6 инструментов вне контракта, которые
 # обращались к базе `configurations` и таблицам, которых в схеме нет: они падали на FATAL,
@@ -50,6 +50,9 @@ DEFAULT_TARGETS = [
 # Узел V20.2 (привязка к конфигурации) добавил set_object_configuration_tool: 17 → 18 —
 # решение оператора 14.10.2026, тем же решением из схемы снят FK на configurations(id).
 # Узел V25 (бинарные .erf/.epf) добавил load_external_object_file_tool: core 3 → 4.
+# Узел Q1 (карантин сниппетов, 16.10.2026) добавил в enrichment mark_config_snippet_tool,
+# unmark_config_snippet_tool, list_marked_config_snippets_tool: 18 → 21. Схема БД при этом
+# не менялась: пометка живёт тегом в tags (раздел 14 docs/CONFIGURATIONS_ENRICHMENT_PLAN.md).
 # Точка входа загрузки каталога при этом не меняется: новый инструмент только готовит
 # каталог выгрузки и вызывает тот же load_catalog (docs/CONFIGURATIONS_ENRICHMENT_PLAN.md,
 # раздел 13.7).
@@ -65,9 +68,10 @@ EXPECTED_TOOLS = {
         "generate_config_enrichment_tool", "get_config_cross_references_tool",
         "get_config_snippet_tool", "get_config_snippets_for_object_tool",
         "get_config_template_tool",
-        "list_config_aliases_tool", "list_config_snippets_tool", "resolve_config_alias_tool",
+        "list_config_aliases_tool", "list_config_snippets_tool", "list_marked_config_snippets_tool",
+        "mark_config_snippet_tool", "resolve_config_alias_tool",
         "search_config_aliases_tool", "search_config_snippets_tool",
-        "set_object_configuration_tool",
+        "set_object_configuration_tool", "unmark_config_snippet_tool",
     ],
     "server_configurations_export.py": ["export_readiness_tool"],
 }
