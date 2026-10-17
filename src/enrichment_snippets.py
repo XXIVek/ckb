@@ -175,10 +175,17 @@ def _resolve_target_uuid(cur, obj_uuid, target_type, target_name):
             return None
         return f"form_item:{rows[0]['form_uuid']}:{rows[0]['item_name']}"
     if target_type == "Module":
+        # узел E: модуль формы адресуется двумя записями одной цели - 'Module:<ИмяФормы>'
+        # (так его задают в зависимостях) и 'Form.<ИмяФормы>' (так его отдаёт target_name
+        # алиаса). Снимем префикс 'Form.', чтобы обе записи разрешались в один и тот же
+        # module:form:<uuid формы>, а не отклонялись как несуществующая цель.
+        form_name = str(target_name or "")
+        if form_name.lower().startswith("form."):
+            form_name = form_name[len("form."):]
         form_key = fetch_value(cur, "SELECT 'module:form:' || f.uuid::text AS key FROM forms f "
                                     "WHERE f.parent_uuid = %s::uuid "
                                     "AND lower(coalesce(f.name, '')) = lower(%s) LIMIT 1",
-                               (obj_uuid, target_name))
+                               (obj_uuid, form_name))
         if form_key:
             return form_key
         module_id = fetch_value(cur, "SELECT id FROM bsl_modules WHERE parent_uuid = %s::uuid "
@@ -724,9 +731,31 @@ def add_config_cross_reference(uuid=None, source_path=None, local_doc_kind="grou
                         "hint": "Уберите target_type (вид возьмётся из строки заголовка) или "
                                 "укажите цель внутри объекта: Template, Module, Form, "
                                 "Attribute, ConfigSnippet."}
-            resolved_uuid = target_uuid or (obj_uuid if target_type == self_target_type else None)
             resolved_name = target_name or (obj.get("name")
                                            if target_type == self_target_type else None)
+            resolved_uuid = target_uuid
+            if not resolved_uuid:
+                if target_type == self_target_type:
+                    resolved_uuid = obj_uuid
+                elif target_type == "ConfigSnippet":
+                    return {"success": False,
+                            "error": "Для цели-сниппета укажите target_uuid='snippet:<id>' - "
+                                     "id сниппета по имени не снижается"}
+                else:
+                    # узел E: цель внутри объекта разрешаем по её имени, чтобы target_uuid был
+                    # стабильным ключом: он переживает перегенерацию (в отличие от id
+                    # авто-сниппетов), на ссылку действует частичный уникальный индекс, и
+                    # ссылка не остаётся слепой зоной с пустым target_key (раздел 16).
+                    # Несуществующая цель - отказ, а не связь вникуда (правило 5).
+                    resolved_uuid = _resolve_target_uuid(cur, obj_uuid, target_type, target_name)
+                    if not resolved_uuid:
+                        return {"success": False,
+                                "error": f"Цель target_type='{target_type}' "
+                                         f"target_name={repr(target_name)} не найдена среди "
+                                         "сохранённого содержимого объекта",
+                                "hint": "Состав целей: config_enrichment_stats_tool(uuid=..., "
+                                        "card=True); для модуля формы target_name='Form.<Имя>' "
+                                        "или имя формы."}
             exists = fetch_rows(cur, "SELECT id FROM config_cross_references WHERE "
                                      "local_doc_kind = %s AND local_doc_id = %s "
                                      "AND target_type = %s AND COALESCE(target_uuid, '') = "

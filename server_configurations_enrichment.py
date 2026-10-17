@@ -485,9 +485,12 @@ def add_config_aliases_tool(aliases: str, uuid: str = None, source_path: str = N
     количество не ограничено (в отличие от автоалиасов сниппета). Ручные алиасы нужны там, где
     термина нет в выгрузке: русские формулировки, аббревиатуры, английские термины.
     Цель по умолчанию — сам внешний объект. Для цели на объект содержимого указывают
-    target_type/target_name/target_uuid (Attribute, TabularSection, Form, FormItem, Template,
+    target_type/target_name (Attribute, TabularSection, Form, FormItem, Template,
     Module — те же цели, что в зависимостях сниппетов); для цели на сниппет — target_snippet_id
     (тогда target_type='ConfigSnippet'). Нужен uuid или source_path каталога выгрузки.
+    target_uuid цели инструмент подставляет сам по target_type+target_name (узел E) — указывать
+    его вручную не нужно; несуществующая названная цель отклоняется, а не остаётся алиасом
+    с пустым target_key. Модуль формы адресуется target_name='Form.<ИмяФормы>' или именем формы.
     """
     try:
         res = add_config_aliases(aliases=aliases, uuid=uuid, source_path=source_path,
@@ -942,7 +945,11 @@ def add_config_cross_reference_tool(uuid: str = None, source_path: str = None,
     берётся из вида строки заголовка (узел V22): ExternalReport для отчёта и
     ExternalProcessing для обработки; явно указанный тип другого вида отклоняется. Для цели на
     enrich-сниппет указывают target_type='ConfigSnippet' и target_uuid='snippet:<id>' (ту же
-    запись цели читает get_config_snippet_tool). Указатель проверяется в базе local_doc: битый
+    запись цели читает get_config_snippet_tool). Для цели внутри объекта (Template, Module, Form,
+    Attribute, …) достаточно target_type+target_name: инструмент разрешает цель и заполняет
+    target_uuid сам (узел E) — якорь переживает перегенерацию и не остаётся слепой зоной;
+    несуществующая названная цель отклоняется. Модуль формы — target_name='Form.<ИмяФормы>'
+    или имя формы. Указатель проверяется в базе local_doc: битый
     id не сохраняется, чтобы связь вникуда не замусоривала анализ. Дубликат не создаётся.
     Это то, чего не хватало в старом register_cross_reference_tool: он ссылался на
     configuration_id, которого в схеме нет.

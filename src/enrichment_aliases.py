@@ -44,6 +44,10 @@ from enrichment_generator import (  # noqa: E402
     object_target_type,
     resolve_object,
 )
+# узел E: тот же резолвер стабильного ключа цели, что у зависимостей (src/enrichment_snippets).
+# Одна и та же цель не должна описываться двумя запросами; импорт односторонний -
+# enrichment_snippets этот модуль не импортирует, цикла нет.
+from enrichment_snippets import _resolve_target_uuid  # noqa: E402
 
 
 MAX_LIST_LIMIT = 500
@@ -140,6 +144,26 @@ def add_config_aliases(aliases, uuid=None, source_path=None, target_type=None,
                 resolved_uuid = target_uuid or (obj_uuid if resolved_type == object_type
                                                else None)
                 resolved_snippet = None
+                # узел E: цель содержимого разрешаем по её имени, чтобы алиас получил
+                # стабильный target_uuid / target_key, а не остался слепой зоной с пустым
+                # target_key (раздел 16 inventory). На такой алиас начинает действовать
+                # частичный уникальный индекс uq_config_aliases_alias_target. Несуществующая
+                # названная цель - отказ, а не связь вникуда (правило 5).
+                if resolved_uuid is None:
+                    if resolved_type == "ConfigSnippet":
+                        return {"success": False,
+                                "error": "Для цели-сниппета укажите target_snippet_id - "
+                                         "id сниппета по имени не снижается"}
+                    resolved_uuid = _resolve_target_uuid(cur, obj_uuid, resolved_type,
+                                                        resolved_name)
+                    if not resolved_uuid:
+                        return {"success": False,
+                                "error": f"Цель target_type='{resolved_type}' "
+                                         f"target_name={repr(resolved_name)} не найдена среди "
+                                         "сохранённого содержимого объекта",
+                                "hint": "Состав целей объекта: config_enrichment_stats_tool("
+                                        "uuid=..., card=True). Для модуля формы укажите "
+                                        "target_name='Form.<Имя>' или имя формы."}
             weight_value = float(weight) if weight is not None else WEIGHTS.get(
                 f"{resolved_type}.name", 1.0)
             rows = [_alias_row(part, obj_uuid, resolved_type, resolved_name, resolved_uuid,

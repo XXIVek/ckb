@@ -659,6 +659,87 @@ def phase_targets_full():
     return uuid
 
 
+def phase_target_resolution(uuid):
+    """узел E: add_config_aliases / add_config_cross_reference разрешают цель содержимого
+    по target_type+target_name и заполняют target_uuid сами.
+
+    Раньше без явного target_uuid алиас/ссылка оставались с пустым target_key (слепая зона,
+    раздел 16 inventory), на них не действовал частичный уникальный индекс
+    uq_config_aliases_alias_target, а якорь ссылки на авто-сниппет гибнул при перегенерации.
+    Теперь цель берётся из той же функции, что и у зависимостей (_resolve_target_uuid), поэтому
+    ключ совпадает с ключом алиаса той же цели. Несуществующая названная цель отклоняется,
+    а не ложится связью вникуда (правило 5). Модуль формы адресуется и записью 'Form.<Имя>'.
+    """
+    built = generate_enrichment(uuid=uuid)
+    if not built.get("success"):
+        check("узел E: объект обогащён для проверки резолва цели", False, built.get("error"))
+        return
+    rows = q("SELECT target_type, target_name, target_uuid FROM v_config_alias_targets "
+             "WHERE parent_uuid = %s::uuid AND target_type IN ('Template','Form') "
+             "AND target_uuid IS NOT NULL ORDER BY target_type, target_name", (uuid,))
+    templates = [r for r in rows if r["target_type"] == "Template"]
+    forms = [r for r in rows if r["target_type"] == "Form"]
+    if not templates:
+        check("узел E: на объекте есть макет для проверки резолва цели", False, "макетов нет")
+        return
+    tmpl = templates[0]
+    created_alias_ids = []
+
+    term = "узел-E-алиас-по-имени-V34"
+    res = al.add_config_aliases(term, uuid=uuid, target_type="Template",
+                                target_name=tmpl["target_name"])
+    check("узел E: add_config_aliases заполняет target_uuid по имени цели (без target_uuid)",
+          bool(res.get("success")) and res.get("target_uuid") == tmpl["target_uuid"],
+          res.get("error") or res.get("target_uuid"))
+    created_alias_ids += [r["id"] for r in q(
+        "SELECT id FROM config_aliases WHERE parent_uuid = %s::uuid AND alias_name = %s",
+        (uuid, term))]
+    keyed = q("SELECT id, target_key FROM config_aliases WHERE parent_uuid = %s::uuid "
+              "AND alias_name = %s", (uuid, term))
+    check("узел E: алиас получает ненулевой target_key (частичный уникальный индекс действует)",
+          bool(keyed) and all(r["target_key"] for r in keyed),
+          [r.get("target_key") for r in keyed])
+
+    bad = al.add_config_aliases("узел-E-битая-цель-V34", uuid=uuid, target_type="Template",
+                                target_name="Нет-такого-макета-V34")
+    check("узел E: несуществующая названная цель отклоняется, а не ложится слепой зоной",
+          not bad.get("success"), bad.get("error"))
+    left = one("SELECT count(*) FROM config_aliases WHERE parent_uuid = %s::uuid "
+               "AND alias_name = %s", (uuid, "узел-E-битая-цель-V34"))
+    check("узел E: отказ по битой цели не создал строк в config_aliases", left == 0,
+          f"строк {left}")
+
+    if forms:
+        fname, fuuid = forms[0]["target_name"], forms[0]["target_uuid"]
+        mod = al.add_config_aliases("узел-E-модуль-формы-V34", uuid=uuid,
+                                    target_type="Module", target_name=f"Form.{fname}")
+        want = f"module:form:{fuuid}"
+        check("узел E: алиас на модуль формы записью Form.<Имя> резолвится в module:form:<uuid>",
+              bool(mod.get("success")) and mod.get("target_uuid") == want,
+              mod.get("error") or mod.get("target_uuid"))
+        created_alias_ids += [r["id"] for r in q(
+            "SELECT id FROM config_aliases WHERE parent_uuid = %s::uuid AND alias_name = %s",
+            (uuid, "узел-E-модуль-формы-V34"))]
+
+    reference = local_doc_reference()
+    if reference:
+        kind, doc_id, title = reference
+        ref = sn.add_config_cross_reference(uuid=uuid, local_doc_kind=kind, local_doc_id=doc_id,
+                                           target_type="Template",
+                                           target_name=tmpl["target_name"])
+        check("узел E: add_config_cross_reference заполняет target_uuid цели по имени",
+              bool(ref.get("success")) and ref.get("target_uuid") == tmpl["target_uuid"],
+              ref.get("error") or ref.get("target_uuid"))
+        if ref.get("id"):
+            sn.delete_config_cross_reference(ref["id"])
+
+    for aid in created_alias_ids:
+        al.delete_config_alias(aid, hard=True)
+    gone = one("SELECT count(*) FROM config_aliases WHERE id = ANY(%s)",
+               (created_alias_ids,)) if created_alias_ids else 0
+    check("узел E: тестовые алиасы сняты за собой", gone == 0, f"осталось {gone}")
+
+
 
 def phase_template_dataset_query(uuid):
     """Узел A: запрос набора данных макета СКД (<query> внутри <dataSet>) в авто-сниппете.
@@ -1199,6 +1280,9 @@ def main(argv=None):
         # реквизитов и табличных частей нет, и проверить Attribute/TabularSection нельзя
         full_uuid = phase_targets_full()
         if full_uuid:
+            # узел E: разрешение цели и заполнение target_uuid инструментами — на объекте,
+            # где есть макет и форма (цель содержимого обязана существовать)
+            phase_target_resolution(full_uuid)
             # узел A: запрос набора данных макета СКД - на объекте, где макет с СКД реально есть
             phase_template_dataset_query(full_uuid)
             # узел B: состав макета-СКД из сохранённого ext — на том же объекте, где макет есть

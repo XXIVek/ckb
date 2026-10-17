@@ -177,6 +177,9 @@ COALESCE(target_uuid,''))`. Целостность проверяет не сх�
 `validate_enrichment_flow.py`. Элемент формы принимается и в qualified-виде `<форма>.<элемент>`
 (так его отдаёт `v_form_elements`), и голым именем — оба варианта ведут в один `form_item:`-ключ.
 Модуль формы — цель `Module` с именем формы: он хранится в `form_ext.ext`, а не в `bsl_modules`.
+С узла E цель `Module` принимается в обеих записях одной цели — именем формы (`Module:Отчет`,
+как в `dependencies`) и qualified-видом `Form.<ИмяФормы>` (как `target_name` алиаса); резолвер
+снимает префикс `Form.` и разрешает обе в `module:form:<uuid формы>`.
 Адресация цели в инструментах — тройка `target_type` / `target_name` / `target_uuid`
 (для цели на сниппет — `target_snippet_id`); тот же формат `target_uuid` читают витрины.
 
@@ -440,24 +443,26 @@ include_query=True)`: состав конкретного макета (набо
    поставленные на авто-сниппеты, пропали после прогона `validate_enrichment_flow.py`). Значит
    якорь берут на стабильную цель (`Template` / `Form` / `Module` / `Attribute` по имени цели)
    или на ручной сниппет `is_verified=true` (подтверждено 14.10.2026: ссылки на `Template` и `Module`
-   и ручные сниппеты перегенерацию пережили, ссылки на авто-сниппеты — нет). Пробел контракта
-   **остаётся** (узел E; узел B его не закрыл):
-   `add_config_cross_reference_tool` и `add_config_aliases_tool` не заполняют `target_uuid` цели, а
-   `resolve_config_alias_tool` / `search_config_aliases_tool` его не показывают — точный ключ
-   цели виден только в карточке объекта, в карточке сниппета (`get_config_snippet_tool`) и в
-   SQL-сверках. `add_config_snippet_tool` `target_name` не принимает вовсе: основная цель
-   задаётся парой `target_type` + `target_uuid` (uuid цели берут из карточки объекта или из
-   `get_config_template_tool`). Адресация модуля формы при этом разная: в `dependencies` —
-   `Module:<ИмяФормы>` (например `Module:Отчет`), в `target_name` алиаса — `Form.<ИмяФормы>`
-   (`Form.Отчет`); форма `Module:Form.<ИмяФормы>` отклоняется как несуществующая цель, хотя
-   docstring инструмента обещает и такую запись (расхождение кода и docstring — узел E).
-   Пока цель не разрешается самим инструментом, `target_uuid` указывают **явно** — берут из
-   карточки объекта (`Template`/`Module`/`Attribute`), из `get_config_template_tool` или из
-   зависимостей ручного сниппета. Алиас или ссылка, добавленные только по `target_type` +
-   `target_name`, остаются с `target_key IS NULL`: на них не действует частичный уникальный
-   индекс (дубль не удержится), а раздел 16 `check_external_report_inventory.sql` показывает их
-   слепой зоной («алиасов с пустым target_key …»). Проверено 14.10.2026: 7 таких алиасов и одна
-   ссылка сняты (`hard=True`) и созданы заново с `target_uuid` — счётчик пустых ключей стал 0.
+   и ручные сниппеты перегенерацию пережили, ссылки на авто-сниппеты — нет). **Пробел контракта
+   закрыт узлом E (17.10.2026):** `add_config_aliases_tool` и `add_config_cross_reference_tool`
+   разрешают цель содержимого по `target_type` + `target_name` и заполняют `target_uuid` сами —
+   тем же резолвером стабильного ключа, что и зависимости (`src/enrichment_snippets.py::
+   _resolve_target_uuid`), поэтому ключ совпадает с ключом алиаса той же цели. Явный `target_uuid`
+   указывать не нужно; названная, но несуществующая цель **отклоняется** (правило 5), а не ложится
+   строкой с пустым `target_key`. Адресация модуля формы принята в обеих записях одной цели:
+   `Module:<ИмяФормы>` (как в `dependencies`) и `Form.<ИмяФормы>` (как в `target_name` алиаса) —
+   резолвер снимает префикс `Form.` и ведёт обе в `module:form:<uuid формы>` (расхождение кода и
+   docstring, перенесённое узлом B в узел E, устранено). `resolve_config_alias_tool` /
+   `search_config_aliases_tool` по-прежнему не показывают `target_uuid` — он виден в карточке
+   объекта, в карточке сниппета (`get_config_snippet_tool`) и в SQL-сверках.
+   `add_config_snippet_tool` `target_name` не принимает: основная цель задаётся парой
+   `target_type` + `target_uuid` (её берут из карточки объекта или `get_config_template_tool`).
+   Алиас/ссылка, добавленные только по `target_type` + `target_name`, больше не остаются слепой
+   зоной: раздел 16 `check_external_report_inventory.sql` обязан показывать «алиасов с пустым
+   target_key = 0». Регрессия узла E — фаза `phase_target_resolution` в
+   `validate_enrichment_flow.py` (резолв `Template` / `Module:Form.<Имя>` без явного `target_uuid`,
+   ненулевой `target_key`, отказ по битой цели без строк в БД, заполнение `target_uuid` у ссылки
+   `add_config_cross_reference`).
 
 10. **Только инструменты контракта.** Ответ оператору строится из ответов MCP-инструментов;
     прямые `psql.exe`, `information_schema` и чтение файлов выгрузки в анализе содержимого
