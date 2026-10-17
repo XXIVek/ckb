@@ -22,10 +22,11 @@ r"""tools/check_xml_format_layer.py — слой знаний формата XML
 идентификатора (ClassId) находится только по алиасу. Это не дефект проверки, а причина, по
 которой алиасы имени обязательны: случай фиксируется, чтобы ограничение не «исчезло» из правил.
 
-Слои (LAYERS): профиль свойств ExternalDataProcessor и профиль идентификаторов
-ClassId/ObjectId/TypeId/ValueId — оба категории xml-format; профиль версий UUID — категории
-platform (его сниппет намеренно размечен и xml-format, поэтому xml-format у него в «чужих»
-категориях не проверяется).
+Слои (LAYERS): профиль свойств ExternalDataProcessor, профиль идентификаторов
+ClassId/ObjectId/TypeId/ValueId и три слоя структуры выгрузки конфигурации (состав каталогов
+видов метаданных, индекс ConfigDumpInfo.xml, расположение uuid объекта конфигурации) — все
+категории xml-format; профиль версий UUID — категории platform (его сниппет намеренно размечен
+и xml-format, поэтому xml-format у него в «чужих» категориях не проверяется).
 
 Запуск:
     [Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $env:PYTHONIOENCODING='utf-8'
@@ -80,6 +81,39 @@ LAYERS = [
         # xml-format у этого сниппета — второй слой намеренно (идентификаторы описаны в XML),
         # поэтому xml-format в «чужих» категориях не проверяется
         "foreign": FOREIGN_BASE,
+    },
+    # --- структура выгрузки КОНФИГУРАЦИИ (узел V32, замер 17.10.2026 по BGU2) -------------
+    # Маркеры — замерные значения, а не условные теги: они и отличают профиль от любой другой
+    # строки той же категории (числа дают сами замеры, см. раздел «Структура конфигурации…» в
+    # docs/config-scenarios/01_configuration.md).
+    {
+        "name": "состав выгрузки конфигурации (каталоги видов метаданных)",
+        "anchor": "configuration-dump-layout-catalogs",
+        "category": "xml-format",
+        "markers": ("158 925 XML", "CommonModules 2380", "ParentConfigurations.bin",
+                    "Bots, WebSocketClients"),
+        "terms": ["CommonModules", "ParentConfigurations.bin", "WebSocketClients",
+                  "состав конфигурации"],
+        "foreign": FOREIGN_BASE + ["platform"],
+    },
+    {
+        "name": "индекс ConfigDumpInfo.xml (перечень объектов и версий)",
+        "anchor": "configdumpinfo-index-structure",
+        "category": "xml-format",
+        "markers": ("86 379", "ConfigVersions", "configVersion",
+                    "876c6886-ab84-4942-8098-65d03e2e5119"),
+        "terms": ["ConfigDumpInfo", "ConfigVersions", "configVersion", "версии метаданных"],
+        "foreign": FOREIGN_BASE + ["platform"],
+    },
+    {
+        "name": "uuid объекта конфигурации и отличие от внешнего объекта",
+        "anchor": "configuration-object-uuid-location",
+        "category": "xml-format",
+        "markers": ("<Catalog uuid=", "<CommonModule uuid=", "ContainedObject",
+                    "876c6886-ab84-4942-8098-65d03e2e5119"),
+        "terms": ["Catalog uuid", "uuid объекта конфигурации", "CommonModule uuid",
+                  "GeneratedType"],
+        "foreign": FOREIGN_BASE + ["platform"],
     },
 ]
 

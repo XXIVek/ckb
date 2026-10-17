@@ -100,9 +100,11 @@ MCP сервер `1c-configurations-core` (server_configurations_core.py) — э
 └───────────────────────────────────────────┘
 ```
 
-Таблиц `configuration`, `configuration_objects`, `object_attributes`, `register_dimensions`,
-`register_resources`, `enum_values`, а с узла V22 и `external_processing` в схеме **нет** — раздел «Структура базы данных» ниже
-описывает устаревшую схему и требует переработки (см. п. 11).
+Таблиц `configuration`, `object_attributes`, `register_dimensions`, `register_resources`,
+`enum_values`, а с узла V22 и `external_processing` в схеме **нет** — раздел «Структура базы данных» ниже
+описывает устаревшую схему и требует переработки (см. п. 11). `configuration_objects` в этом перечне
+больше не числится: с узла V33 (17.10.2026) она **есть** в шаге 2 установки и заполняется загрузчиком
+варианта `configuration` (индекс состава из `ConfigDumpInfo.xml`, без XML объектов).
 
 `uuid` в `attributes` и `tabular_sections` уникален **глобально** (`attributes_uuid_key`,
 `tabular_sections_uuid_key`), а не в пределах родителя. Для внешнего отчёта это безопасно
@@ -157,10 +159,11 @@ MCP сервер `1c-configurations-core` (server_configurations_core.py) — э
 |---|---|---|
 | 1 | `src/ddl_external_report.sql` (генерация: `src/generate_ddl.py`) | `external_report`, `attributes`, `tabular_sections`, `forms`, `form_ext`, `templates`, витрины `v_form_elements`, `v_form_events` |
 | 1b | `src/ddl_enrichment.sql` (узел V17) | `config_aliases`, `config_snippets`, `config_snippet_dependencies`, `config_cross_references`, витрины `v_enrichment_targets`, `v_enrichment_objects`; все FK — на шаг 1, поэтому шаг 1b идёт строго после него |
-| 2 | `create_1c_configurations_db.sql` | `configurations`, `config_extensions`, `bsl_modules`; таблица `external_processing` из файла удалена узлом V22 (заголовок обработки — строка `external_report` с `object_kind='external_processing'`) |
+| 2 | `create_1c_configurations_db.sql` | `configurations`, `config_extensions`, `bsl_modules`, `configuration_objects` (узел V33 — индекс состава конфигурации по `ConfigDumpInfo.xml`: `configuration_id`, `object_type`, `object_name`, `child_type`, `parent_name`, `depth`, `object_id`, `uuid`, `config_version`; уникальность по `name` и по `object_id` — одна строка на объект метаданных в базе); таблица `external_processing` из файла удалена узлом V22 (заголовок обработки — строка `external_report` с `object_kind='external_processing'`) |
 
 Для уже существующей БД вместо шага 1b — аддитивная `migrate_v17_enrichment.sql` (тот же SQL +
-заполнение `target_key`/`target_uuid` у заполненных ранее таблиц).
+заполнение `target_key`/`target_uuid` у заполненных ранее таблиц); вместо создания
+`configuration_objects` шагом 2 — аддитивная `migrate_v33_configuration_objects.sql` (узел V33).
 
 Правила, которые это обеспечивает (дефект устранён 13.10.2026, см. п. 17):
 
@@ -224,6 +227,10 @@ MCP сервер `1c-configurations-core` (server_configurations_core.py) — э
 `object_kind` + CHECK, `external_processing` и `bsl_modules.processing_id` удалены,
 `v_config_enrichment.object_kind` добавлена): 273 колонки, 56 индексов/уникальных ограничений,
 30 ограничений в `pg_constraint`, 4 витрины — расхождений нет, код возврата 0.
+Состояние 17.10.2026 после узлов V32/V33 (загрузка заголовка конфигурации и индекса состава;
+`configuration_objects` + её индексы, `migrate_v33_configuration_objects.sql`): 290 колонок,
+66 индексов/уникальных ограничений, 38 ограничений в `pg_constraint`, 4 витрины — расхождений нет,
+код возврата 0.
 
 ### Обычные формы (`form_type='Ordinary'`, содержимое — `Form.bin`)
 
@@ -279,10 +286,11 @@ ordinary-формы и её заголовок — декодер заголов
 
 ## 📊 Структура базы данных `ckb_1c_configurations` (живая схема)
 
-Проверено по `information_schema` 14.10.2026; фактические счётчики сверяет `python _cmp_ddl.py`.
-Таблиц `configuration` (ед. ч.), `configuration_objects`, `object_attributes`, `register_dimensions`,
+Проверено по `information_schema` 17.10.2026; фактические счётчики сверяет `python _cmp_ddl.py`.
+Таблиц `configuration` (ед. ч.), `object_attributes`, `register_dimensions`,
 `register_resources`, `enum_values` в схеме **нет** — прежнее описание этого раздела относилось к
-проектной схеме, которая так и не была реализована.
+проектной схеме, которая так и не была реализована. `configuration_objects` с узла V33 создаётся
+шагом 2 и входит в состав живой схемы (колонки — в таблице шага 2 выше).
 
 ### Шаг 1 — `src/ddl_external_report.sql` (генерируется `src/generate_ddl.py`)
 

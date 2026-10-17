@@ -13,8 +13,13 @@ psycopg2 (параметры запроса), поэтому экраниров�
   bool         - True/False/None;
   jsonb_object - jsonb-объект (synonym); пусто -> '{}'::jsonb, как в существующих записях;
   jsonb_array  - jsonb-массив (column_uuids, standardattributes, internalinfo_generatedtype);
+  jsonb_nullable - jsonb-объект/массив либо NULL (origin_manifest, узел V31): здесь пустое
+                   значение означает «провенанс не записан», и заменять его на '{}' — значит
+                   соврать, в отличие от synonym, где '{}' — штатное значение;
   json_text    - JSON-строка в текстовой колонке (attributes.type); пусто -> NULL;
   int          - целое (размеры, счётчики, идентификаторы родителя); пусто -> NULL;
+  timestamp    - метка времени строкой 'YYYY-MM-DD HH:MM:SS' (origin_recorded_at, узел V31);
+                 пусто -> NULL; PostgreSQL приводит параметр без типа к колонке сам;
   bytes        - двоичное содержимое в bytea (ext_bin); пусто -> NULL.
 
 Порядок вызова для одной загрузки (всё в одной транзакции): сначала ExternalReportRowWriter
@@ -42,6 +47,12 @@ class TableRowWriter:
     # ExternalReportRowWriter пишет 'external_report', ExternalProcessingRowWriter —
     # 'external_processing'. Для остальных писателей словарь пуст и поведение не меняется.
     CONSTANTS = {}
+    # Узел V33: размер страницы пакетной вставки. По умолчанию None — один execute_values
+    # на весь список (так писатели работали всегда, и для строк выгрузки это верно: их
+    # максимум — десятки). Единственный писатель, у которого строк сотни тысяч, —
+    # ConfigurationObjectRowWriter: одна команда на 122 000 кортежей держит весь SQL-текст
+    # в памяти и не даёт ничего наблюдать, поэтому он называет свою страницу.
+    PAGE_SIZE = None
 
     @classmethod
     def _adapt(cls, kind, value):
@@ -70,6 +81,24 @@ class TableRowWriter:
             return Json(value if isinstance(value, dict) else {})
         if kind == "jsonb_array":
             return Json(value if isinstance(value, list) else [])
+        if kind == "jsonb_nullable":
+            # узел V31: манифест провенанса. Пустое значение остаётся NULL: «провенанса нет»
+            # и «провенанс есть, но пустой» — разные состояния, и '{}' читалось бы как второе.
+            if value is None or value == "" or value == {} or value == []:
+                return None
+            if isinstance(value, (dict, list)):
+                return Json(value)
+            return None
+        if kind == "timestamp":
+            # узел V31: origin_recorded_at. Формат задаёт external_provenance._now(); сюда
+            # попадает либо готовая строка, либо datetime — оба варианта PostgreSQL принимает
+            # параметром без явного типа. Пустое значение — NULL, а не '0001-01-01'.
+            if value is None or value == "":
+                return None
+            if hasattr(value, "strftime"):
+                return value.strftime("%Y-%m-%d %H:%M:%S")
+            text = str(value).strip()
+            return text or None
         if kind == "json_text":
             if not value:
                 return None
@@ -128,14 +157,23 @@ class TableRowWriter:
 
     @classmethod
     def insert_many(cls, cursor, rows):
-        """Вставить пакет одним оператором (execute_values); вернуть число строк."""
+        """Вставить пакет (execute_values); вернуть число строк.
+
+        Узел V33: вставка идёт страницами по cls.PAGE_SIZE. При PAGE_SIZE=None (все
+        писатели, что были раньше) список отдаётся одним вызовом — их строк десятки, и
+        поведение не меняется. Индекс состава конфигурации (сотни тысяч строк) задаёт
+        свою страницу: одна команда на 122 000 кортежей держит весь SQL в памяти.
+        """
         if not rows:
             return 0
         columns = ", ".join(_quote(column) for column in cls.COLUMNS)
         template = "(" + ", ".join(["%s"] * len(cls.COLUMNS)) + ")"
         sql = f"INSERT INTO {_quote(cls.TABLE)} ({columns}) VALUES %s"
-        execute_values(cursor, sql, [cls.values(row) for row in rows],
-                       template=template, page_size=max(len(rows), 1))
+        values = [cls.values(row) for row in rows]
+        page_size = cls.PAGE_SIZE or max(len(values), 1)
+        for offset in range(0, len(values), page_size):
+            execute_values(cursor, sql, values[offset:offset + page_size],
+                           template=template, page_size=page_size)
         return len(rows)
 
     @classmethod
@@ -203,6 +241,15 @@ class ExternalReportRowWriter(TableRowWriter):
         # нет. NULL означает «привязка не заявлена», а не «отчёт универсальный». При
         # force=True загрузчик переносит прежнее значение на новую строку.
         "configuration_id": "int",
+        # узел V31: провенанс — ЧТО загрузили и ОТКУДА появилась строка. В отличие от
+        # configuration_id это НЕ данные оператора: значение описывает текущий вызов загрузки
+        # и при force=True пишется заново (не переносится). Заполняет их загрузчик из
+        # src/external_provenance.py, а не разбор XML: путь источника знает вызывающий.
+        "origin_kind": "text",
+        "origin_path": "text",
+        "origin_sha256": "text",
+        "origin_manifest": "jsonb_nullable",
+        "origin_recorded_at": "timestamp",
     }
 
 
@@ -249,6 +296,15 @@ class ExternalProcessingRowWriter(TableRowWriter):
         "auxiliary_form": "text",
         # привязка к конфигурации (configurations.id) заявляется оператором для обоих видов
         "configuration_id": "int",
+        # узел V31: провенанс — те же колонки общей таблицы-заголовка, что и у отчёта. Вид
+        # источника (каталог / .epf / собранный нами каталог разбора) заявляет вызывающий,
+        # а не выгрузка, поэтому набор колонок здесь совпадает с писателем отчёта полностью:
+        # различие между ними касается только свойств метаданных, которых у обработки нет.
+        "origin_kind": "text",
+        "origin_path": "text",
+        "origin_sha256": "text",
+        "origin_manifest": "jsonb_nullable",
+        "origin_recorded_at": "timestamp",
     }
 
 
@@ -488,6 +544,129 @@ class ConfigSnippetDependencyRowWriter(TableRowWriter):
         "target_type": "text",
         "target_name": "text",
         "target_uuid": "text",
+    }
+
+
+class ConfigurationRowWriter(TableRowWriter):
+    """Заголовок конфигурации (таблица configurations, узел V32).
+
+    Таблица создана шагом 2 (`create_1c_configurations_db.sql`) и до узла V32 ни одного
+    писателя не имела — поэтому список колонок сверялся с живой схемой
+    (`information_schema.columns`, 17.10.2026). В спецификации НЕТ:
+
+      * `id` (bigserial), `created_at`/`updated_at` (`DEFAULT NOW()`) — их ведёт схема;
+      * `app_module_id`, `session_module_id`, `data_proc_module_id`,
+        `ext_conn_module_id`, `mobile_functionality` — слепые зоны (решение D-D):
+        читались в `Configuration.xml`, но не разобраны, поэтому остаются NULL;
+      * `origin_path`, `origin_kind` — провенанс для конфигурации не вводится
+        (решение D-C по умолчанию, граница узла V31): путь источника в БД не пишется.
+
+    Колонки, которых в таблице нет вовсе (`version` есть, `update_address`/`help_url`/
+    `mobile_functions` — нет), писатель не выдумывает: в `configurations` ровно те
+    имена, что живые.
+    """
+
+    TABLE = "configurations"
+    COLUMNS = {
+        "name": "text",
+        "synonym": "text",
+        "comment": "text",
+        "version": "text",
+        "vendor_name": "text",
+        "uuid": "uuid",
+        "main_mode": "text",
+        "usage_purpose": "text",
+        "embedded_language": "text",
+        "main_roles": "text_array",
+        "default_language": "text",
+        "short_info": "text",
+        "detailed_info": "text",
+        "copyright": "text",
+        "vendor_url": "text",
+        "config_url": "text",
+        "update_url": "text",
+        "help_included": "bool",
+        "lock_mode_default": "text",
+        "modality_mode": "text",
+        "ext_comp_sync_mode": "text",
+        "interface_compat_mode": "text",
+        "compatibility_mode": "text",
+    }
+
+    # VARCHAR(N) живой схемы: значение длиннее — отказ с названными колонками, а не
+    # обрезка (молча укоротить реквизит = соврать о содержимом конфигурации).
+    MAX_LENGTHS = {
+        "name": 255,
+        "version": 50,
+        "vendor_name": 255,
+        "main_mode": 50,
+        "usage_purpose": 100,
+        "embedded_language": 50,
+        "default_language": 50,
+        "short_info": 255,
+        "copyright": 500,
+        "vendor_url": 500,
+        "config_url": 500,
+        "update_url": 500,
+        "lock_mode_default": 50,
+        "modality_mode": 100,
+        "ext_comp_sync_mode": 100,
+        "interface_compat_mode": 100,
+        "compatibility_mode": 50,
+    }
+
+    @classmethod
+    def overlong_fields(cls, row: dict) -> list:
+        """Поля, чьё значение не помещается в колонку VARCHAR(N).
+
+        Отдаёт [(колонка, лимит, длина)] — по возрастанию колонки. Пустой список означает,
+        что вставка пройдёт; вызывающий обязан отказать до транзакции и назвать колонки
+        (расширение типа — отдельная задача со сменой схемы, а не правка загрузчика).
+        """
+        out = []
+        for column, limit in sorted(cls.MAX_LENGTHS.items()):
+            value = row.get(column)
+            if isinstance(value, str) and len(value) > limit:
+                out.append((column, limit, len(value)))
+        return out
+
+
+class ConfigurationObjectRowWriter(TableRowWriter):
+    """Строка состава конфигурации (configuration_objects) — индекс ConfigDumpInfo.xml, узел V33.
+
+    Спецификация колонок — единственное место, где поля контракта парсера
+    (`src/config_dump_info_parser.py`: object_type, object_name, child_type, parent_name,
+    depth, name, object_id, uuid, config_version) становятся колонками: имена полей парсера
+    и имена колонок совпадают намеренно, чтобы маппинг было видно по тексту, а не по памяти.
+    `configuration_id` в контракт парсера не входит — его подставляет загрузчик после
+    вставки заголовка (снимать id из-под писателя нельзя: он знает только свою строку).
+
+    ON CONFLICT здесь нет и быть не должно: уникальность таблицы объявлена В ПРЕДЕЛАХ
+    конфигурации (`configuration_objects_name_unique (configuration_id, name)`,
+    `..._object_id_unique (configuration_id, object_id)` — замер pg_constraint), а
+    повторная загрузка сначала снимает строки состава по configuration_id (FK без ON DELETE,
+    `_remove_rows`). Держать здесь DO NOTHING значило бы молча терять строки при дубле —
+    ровно тот дефект, который узел V33 и закрывает: частичный индекс состава читался бы как
+    полный.
+
+    PAGE_SIZE задан намеренно: в эталонной выгрузке BGU2 индекс — 122 313 строк
+    (замер 17.10.2026). Одна команда на весь список держит в памяти SQL из 122 000
+    кортежей и не даёт сообщить о прогрессе.
+    """
+
+    TABLE = "configuration_objects"
+    PAGE_SIZE = 2000
+    COLUMNS = {
+        "configuration_id": "int",
+        "object_type": "text",
+        "object_name": "text",
+        "child_type": "text",
+        "parent_name": "text",
+        "depth": "int",
+        "name": "text",
+        "object_id": "text",
+        "uuid": "text",
+        "config_version": "text",
     }
 
 

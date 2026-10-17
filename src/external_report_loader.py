@@ -8,6 +8,18 @@ from pathlib import Path
 
 from external_db import transaction
 from external_meta_parser import parse_external_meta
+# узел V31: провенанс строки — ОТКУДА появилась эта запись и чем подтвердить, что источник
+# тот же. Логика (отпечатки, манифест, формулировки, сверка) держится в одном модуле по той
+# же причине, по которой там держат словарь тегов карантина: в двух местах тексты разъезжаются.
+from external_provenance import (
+    ORIGIN_CATALOG,
+    collect as collect_provenance,
+    columns_of as provenance_columns,
+    compare as compare_provenance,
+    manifest_of as provenance_manifest_of,
+    manifest_from_flat as provenance_manifest_from_flat,
+    resolve_origin,
+)
 from external_subdir_parser import parse_external_subdirs
 from external_table_writer import (
     AttributesRowWriter,
@@ -341,9 +353,25 @@ def find_external_object(uuid_val, obj_type="external_report"):
         # восстанавливается, поэтому её читаем здесь же — force=True переносит её на
         # новую строку. Колонка общая для обоих видов (узел V22).
         "COALESCE(t.configuration_id::text, '')",
+        # узел V31: провенанс строки — он нужен в карточке дубликата по той же причине, что и
+        # привязка: оператор сверяет, ТОТ ли источник грузили раньше, и видит, что при
+        # force=True будет записан новый. Манифест читается частями (->>), а не целиком:
+        # _psql_fields разделяет колонки символом '|', а JSON пути и причин содержит их.
+        "COALESCE(t.origin_kind, '')",
+        "COALESCE(t.origin_path, '')",
+        "COALESCE(t.origin_sha256, '')",
+        "COALESCE(t.origin_recorded_at::text, '')",
+        "COALESCE(t.origin_manifest->>'digest_scope', '')",
+        "COALESCE(t.origin_manifest->>'file_count', '')",
+        "COALESCE(t.origin_manifest->>'total_bytes', '')",
+        "COALESCE(t.origin_manifest->>'truncated', '')",
+        "COALESCE(t.origin_manifest->>'digest_reason', '')",
         f"(SELECT COUNT(*) FROM bsl_modules b WHERE b.{bsl_column} = t.id)",
     ]
     keys = ["id", "name", "uuid", "created_at", "object_kind", "configuration_id",
+            "origin_kind", "origin_path", "origin_sha256", "origin_recorded_at",
+            "origin_digest_scope", "origin_file_count", "origin_total_bytes",
+            "origin_truncated", "origin_digest_reason",
             "bsl_modules_count"]
 
     if info["has_children"]:
@@ -384,6 +412,11 @@ def find_external_object(uuid_val, obj_type="external_report"):
         found["configuration_id"] = int(found.get("configuration_id") or 0) or None
     except (TypeError, ValueError):
         found["configuration_id"] = None
+    # узел V31: манифест строки собирается из плоских полей самим модулем провенанса —
+    # форма манифеста ({digest_scope, file_count, ...}) принадлежит ему, и читатели
+    # (describe_lines, compare) работают с одной структурой. Пустой dict = манифеста нет,
+    # что отличается от «манифест есть, но без отпечатка» (у такого digest_reason заполнен).
+    found["origin_manifest"] = provenance_manifest_from_flat(found)
     found["object_type"] = obj_type
     # узел V22: одна таблица-заголовок на оба вида, а uuid уникален глобально. Строка
     # другого вида с тем же uuid — конфликт каталогов, а не дубликат: force=True снял бы
@@ -556,7 +589,8 @@ def read_external_meta(source_path):
     return {"success": True, "uuid": uuid_val, "name": name, "object_type": obj_type, "xml_path": ext_xml}
 
 
-def register_external_report(source_path, replace=None, force=None, xml_path=None, obj_type=None):
+def register_external_report(source_path, replace=None, force=None, xml_path=None, obj_type=None,
+                            origin=None, origin_kind=None):
     """Загрузить внешний отчёт/обработку из каталога выгрузки в ckb_1c_configurations.
 
     Блок-схема варианта 3: docs/config-scenarios/FLOWCHART_1c-configurations-core.md (узлы V1..V11).
@@ -574,6 +608,13 @@ def register_external_report(source_path, replace=None, force=None, xml_path=Non
     Пустой или некорректный uuid любого элемента, включая форму и макет, - ошибка
     загрузки (R3), откат. Отсутствующие Forms//Templates//Ext/, двоичная форма или
     двоичный макет - не ошибка, а предупреждение в карточке результата.
+    Провенанс (узел V31): origin/origin_kind - путь источника и его вид. Их заявляет
+    ВЫЗЫВАЮЩИЙ, а не разбор: загрузчик не может знать, передан ли ему каталог выгрузки,
+    названный оператор, или каталог разбора, который ibcmd собрал из .erf (узел V25 - его
+    путь после успешной загрузки удаляется). Значение по умолчанию - ('catalog',
+    source_path); для двоичного файла мост передаёт путь самого файла и вид 'binary_file'.
+    Не удалось вычислить отпечаток - колонки остаются NULL, загрузка продолжается, в
+    карточке появляется предупреждение (провенанс описывает источник, а не содержимое).
     """
     if not os.path.isdir(str(source_path)):
         return {"success": False,
@@ -622,6 +663,29 @@ def register_external_report(source_path, replace=None, force=None, xml_path=Non
     # Узел V22: предупреждения разбора корневого XML (пустой ClassId — вид подтверждён только
     # корневым элементом). Отказом это не является, но и молчать загрузчик не должен.
     warnings.extend(parsed.get("warnings") or [])
+
+    # Узел V31: провенанс считаем ДО записи строки (файловая операция вне транзакции) и
+    # НЕ из разбора: разбор знает только путь, который ему передали, — а это может быть и
+    # каталог выгрузки, названный оператором, и каталог разбора, собранный ibcmd из .erf
+    # (узел V25, после успеха он удаляется). Источник заявляет вызывающий: origin/origin_kind.
+    # Не вычислен — предупреждение, а не отказ: провенанс описывает источник, а не
+    # содержимое объекта, и отсутствие отпечатка не делает загруженные данные неверными.
+    origin_path, origin_kind = resolve_origin(origin, origin_kind, source_path)
+    provenance = collect_provenance(origin_kind, origin_path)
+    if provenance.get("success"):
+        warnings.extend(provenance.get("warnings") or [])
+        report_row.update(provenance_columns(provenance))
+    else:
+        warnings.append(
+            "Провенанс НЕ записан: "
+            + str(provenance.get("reason") or "неизвестная причина")
+            + f" (источник: {origin_path or 'не передан'}, вид: {origin_kind or 'не указан'}). "
+            "Колонки origin_* остались NULL: содержимое объекта при этом загружено полностью, "
+            "провенанс — слепок источника, а не данных объекта."
+        )
+        # provenance остаётся словарём отказа: compare() по нему назовёт причину, а
+        # columns_of() всё равно отдаёт пустые колонки (признак успеха — success=False).
+
     replaced = None
     existing = find_external_object(report_uuid, obj_type)
     if existing and existing.get("kind_mismatch"):
@@ -648,6 +712,9 @@ def register_external_report(source_path, replace=None, force=None, xml_path=Non
                 "success": False,
                 "already_exists": True,
                 "existing": existing,
+                # узел V31: тот же каталог или другой? ответ даёт отпечаток источника,
+                # а не сравнение версий (колонки version в таблице нет).
+                "provenance_match": compare_provenance(provenance, existing),
                 "error": (
                     f"Внешний объект ({_external_meta_info(obj_type)['title']}) с UUID {report_uuid} "
                     f"уже загружен в таблицу '{_external_meta_info(obj_type)['table']}' "
@@ -662,6 +729,10 @@ def register_external_report(source_path, replace=None, force=None, xml_path=Non
             "old_id": existing["id"],
             "old_name": existing.get("name", ""),
             "bsl_modules_deleted": removed.get("bsl_modules_deleted", 0),
+            # узел V31: force=True снимает старую строку вместе с её провенансом, новая
+            # строка получает провенанс текущего источника. Сравнение нужно оператору ДО
+            # подтверждения: оно и есть ответ на вопрос "изменилась ли выгрузка".
+            "provenance_match": compare_provenance(provenance, existing),
         }
         # узел V20 (решение оператора 14.10.2026): привязка к конфигурации — данные оператора,
         # а не выгрузки 1С, и обратно из XML они не восстанавливаются. Старая строка снята,
@@ -763,6 +834,10 @@ def register_external_report(source_path, replace=None, force=None, xml_path=Non
             "bsl_modules": len(bsl_rows),
         },
         "replaced": replaced,
+        # Узел V31: те же колонки, что легли в строку (все NULL = провенанс не записан,
+        # причина — в warnings). Формат — словарь колонок: карточка печатает его тем же
+        # describe_lines(), что и карточку дубликата, отдельной формы у провенанса нет.
+        "origin_columns": provenance_columns(provenance),
         "warnings": warnings,
     }
 

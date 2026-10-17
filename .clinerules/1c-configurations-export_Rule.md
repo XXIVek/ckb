@@ -21,17 +21,23 @@ MCP сервер `1c-configurations-export` (`server_configurations_export.py`) 
 (`EXPECTED_TOOLS["server_configurations_export.py"] == ["export_readiness_tool"]`). Добавление
 инструмента без обновления `EXPECTED_TOOLS` — провал проверки.
 
-Формат ответа (пример, 14.10.2026):
+Формат ответа (пример, 17.10.2026 — после узла V33; `configuration_objects` из перечня
+отсутствующих таблиц выпала, её создал V33):
 
 ```text
 ❌ Сценарий «экспорт изменений конфигурации» не реализован.
-Таблица конфигураций (configurations): строк 0; внешних объектов в базе: 2.
-Отсутствующие таблицы: configuration_objects, modified_objects, config_export_log
+Таблица конфигураций (configurations): строк 1; внешних объектов в базе: 2.
+Отсутствующие таблицы: modified_objects, config_export_log
 Причина не в обёртке: объекты выгрузки в текущей схеме только читаются из БД, ...
 Что нужно для экспорта (узел V18): таблица объектов конфигурации с их XML, ...
 Загрузка каталогов — 1c-configurations-core (load_1c_catalog_tool);
 обогащение сохранённого содержимого — 1c-configurations-enrichment.
 ```
+
+> Проверка границы — раздел 11 `tools/check_v32_zero_configuration.py`: `configuration_objects`
+> **не должна** встречаться в перечне отсутствующих, сценарий V18 при этом обязан оставаться
+> нереализованным. Прежний пример (14.10.2026) перечислял `configuration_objects` среди
+> отсутствующих — после V33 он стал неверным и его нельзя возвращать в текст.
 
 ## ❌ Что удалено и почему
 
@@ -43,8 +49,12 @@ MCP сервер `1c-configurations-export` (`server_configurations_export.py`) 
 удалены модули `src/config_export_manager.py`, `src/config_change_tracker.py`,
 `src/config_tools.py`, `src/config_aliases.py`, `src/config_snippets_manager.py`,
 `src/config_tools_1c_configurations.py` и генератор `generate_servers.py`. Таблиц `modified_objects`,
-`config_export_log`, `configuration_objects`, `object_attributes`, `enum_values` в схеме нет
-(полный перечень расхождений показывает `python _cmp_ddl.py`).
+`config_export_log`, `object_attributes`, `enum_values` в схеме нет (полный перечень расхождений
+показывает `python _cmp_ddl.py`). **Снято узлом V33 (17.10.2026):** таблица `configuration_objects`
+в схеме **есть** — перечень объектов метаданных по `ConfigDumpInfo.xml` (`configuration_id`,
+`object_type`, `name`, `uuid`, `parent_name`, `config_version`, `depth`); её создают шаг 2
+установки и `migrate_v33_configuration_objects.sql`. XML объектов в ней не хранится, поэтому
+экспорта это ещё не даёт.
 
 Исторический «стандартный цикл экспорта» (mark → count → export → clear) применять нельзя:
 инструментов цикла нет. Плановый контракт цикла вернётся вместе с V18.
@@ -53,7 +63,7 @@ MCP сервер `1c-configurations-export` (`server_configurations_export.py`) 
 
 | Компонент | Содержание |
 |---|---|
-| Хранение объектов конфигурации | таблица объектов (`type`, `name`, `uuid`, исходный XML или путь к нему) — сейчас `configurations` пуста и дочерних таблиц объектов нет |
+| Хранение объектов конфигурации | **частично снято узлом V33:** таблица `configuration_objects` есть, в ней перечень объектов метаданных по индексу состава (`ConfigDumpInfo.xml`) — но **без их XML**. Для экспорта нужен исходный XML объекта или путь к нему, поэтому компонент считается незакрытым: перечень ≠ содержимое |
 | Отслеживание изменений | таблица изменённых объектов + флаг «изменён/снят», чтобы выгружать только изменённое |
 | Сборка XML | генератор XML по схеме выгрузки + сравнение с исходным файлом (иначе нельзя доказать корректность) |
 | Порядок выгрузки | только после успешной сборки — запись в файлы и журнал экспорта |

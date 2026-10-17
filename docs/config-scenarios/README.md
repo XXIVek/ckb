@@ -9,7 +9,7 @@
 | # | Сценарий | `variant` | Файл | Статус |
 |---|----------|-----------|------|--------|
 | 0 | Общий ствол и контракт | — | [FLOWCHART_1c-configurations-core.md](FLOWCHART_1c-configurations-core.md) | ✅ действует |
-| 1 | Полная конфигурация | `configuration` | [01_configuration.md](01_configuration.md) | ❌ заглушка (описание целевого поведения) |
+| 1 | Полная конфигурация | `configuration` | [01_configuration.md](01_configuration.md) | ⚠️ узлы V32+V33: реализована загрузка **заголовка** (`Configuration.xml` → `configurations`, `src/configuration_loader.py`) и **индекса состава** (`ConfigDumpInfo.xml` → `configuration_objects`, `src/config_dump_info_parser.py`); XML объектов и содержимое видов не реализованы. В файле — замер реальной выгрузки (42 каталога видов метаданных, индекс `ConfigDumpInfo.xml`) и открытые вопросы модели |
 | 2 | Расширение конфигурации | `extension` | [02_extension.md](02_extension.md) | ❌ заглушка (описание целевого поведения) |
 | 3 | Внешняя обработка | `external_processing` | [03_external_processor.md](03_external_processor.md) | ✅ реализован узлом V22: заголовок в `external_report` с `object_kind='external_processing'` |
 | 4 | Внешний отчет | `external_report` | [04_external_report.md](04_external_report.md) | ✅ реализован с дочерними данными (V12/V13/V14/V14.1); состав ordinary-формы — узел V15 |

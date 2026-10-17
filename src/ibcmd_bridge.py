@@ -438,7 +438,13 @@ def convert_and_load(binary_path, config_file=None, db_path=None, work_dir=None,
     config_note, state_after = _context_note(db_path, exported["type_names"], config_now)
 
     from config_load_router import load_catalog
-    load_result = load_catalog(exported["layout_dir"], force=bool(force))
+    # Узел V31: источник заявляет вызывающий. Для двоичного файла несущим является ОН сам,
+    # а не каталог разбора: каталог разбора после успешной загрузки удаляется (узел V25), и
+    # его отпечаток ничего не говорил бы о поставке — сверить с ним следующий вызов было бы
+    # нельзя. Поэтому origin = исходный файл, а не exported["layout_dir"].
+    from external_provenance import ORIGIN_BINARY_FILE
+    load_result = load_catalog(exported["layout_dir"], force=bool(force),
+                               origin=binary_path, origin_kind=ORIGIN_BINARY_FILE)
     answer = _merge_conversion(load_result, ib, binary_path, kind, db_path, prepared, config_now,
                               config_note, state_after, exported, timings, conv_dir, keep_layout)
     return answer

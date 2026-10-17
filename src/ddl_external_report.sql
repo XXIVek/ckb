@@ -6,7 +6,17 @@
 -- узел V22 того же дня: external_report — ОДНА таблица-заголовок внешнего объекта выгрузки,
 -- вид строки различает колонка object_kind ('external_report' | 'external_processing');
 -- таблица external_processing и колонка bsl_modules.processing_id удалены: второй заголовок
--- для того же понятия при пустой таблице только порождает расхождения)
+-- для того же понятия при пустой таблице только порождает расхождения),
+-- 16.10.2026 (узел V31, вариант 2 плана правок: происхождение строки — origin_kind,
+-- origin_path, origin_sha256, origin_manifest, origin_recorded_at. Словарь вида источника,
+-- вычисление digest'а, манифест и текст карточки — src/external_provenance.py; колонки
+-- заполняет загрузчик по факту своего входа (в отличие от configuration_id, который заявляет
+-- оператор и который force=True переносит): происхождение — слепок ТЕКУЩЕГО источника, и
+-- force=True его перезаписывает. NULL = «провенанс не записан» (строки до V31 или источник,
+-- который не удалось прочитать) — это предупреждение в карточке, а не отказ загрузки.
+-- Digest каталога — поимённый listing (путь, размер, sha256 файла, сортировка по пути),
+-- а не склейка содержимого: два разных каталога не должны давать один отпечаток, и по
+-- listing видно, какой именно файл каталога изменился между двумя состояниями.)
 -- База: ckb_1c_configurations
 -- Источник истины: src/generate_ddl.py — правки вносить в него, этот файл перегенерируется.
 -- external_report и его индекс создаются через IF NOT EXISTS, чтобы скрипт применялся
@@ -63,6 +73,34 @@ CREATE TABLE IF NOT EXISTS external_report (
     -- local_doc_id (ссылка без FK, проверку делает инструмент). Индекс оставлен намеренно:
     -- перепривязка ищется обратным запросом «кто привязан к конфигурации N».
     configuration_id INTEGER,
+    -- узел V31 (вариант 2, 16.10.2026): провенанс строки — из какого именно входа загружен
+    -- объект и чем подтверждён её состав. Смысл узла: «каталог выгрузки — транспорт, БД —
+    -- источник истины» (правило 10 1C_Rule.md) пока не верифицируем: карточка объекта не
+    -- отвечала, из чего именно он загружен, и «тот же ли это источник» приходилось решать по
+    -- имени. Пять колонок закрывают три вопроса: ЧТО это за вход (origin_kind), ГДЕ он
+    -- (origin_path), ЧЕМ подтверждён его состав (origin_sha256 + origin_manifest), КОГДА это
+    -- записано (origin_recorded_at).
+    -- Словарь origin_kind и разбор digest'а — src/external_provenance.py (единственный
+    -- источник для загрузчика, карточки и SQL-сверок): 'catalog' (каталог XML-выгрузки),
+    -- 'binary_file' (файл .erf/.epf; для него несущий файл — сам файл, а не каталог разбора,
+    -- который потом удаляется), 'authored_layout' (наш сгенерированный layout — тот, что
+    -- пойдёт в ibcmd import; узел V29 умел создавать объект, но не оставлял доказательства).
+    -- Отличие от configuration_id (узел V20): происхождение пишет ЗАГРУЗЧИК по факту своего
+    -- входа, а не оператор, и force=True этот слепок ПЕРЕЗАПИСЫВАЕТ — описание текущего
+    -- источника, а не заявление оператора, которое надо беречь.
+    -- NULL в любой из колонок = «провенанс не записан»: так остаются строки, загруженные до
+    -- узла V31, и строки, источник которых не удалось прочитать (несущий файл не читается,
+    -- listing обрезан по MAX_MANIFEST_FILES). Такой отказ — предупреждение в карточке
+    -- загрузки, а не отказ загрузки (правило R15): объект загружен, и сказать об этом надо
+    -- прямо; пустые колонки при этом означают «не вычислено», а не «источника не было».
+    -- Пару (origin_kind, origin_path) держит CHECK: вид без пути — строка, по которой нельзя
+    -- ничего проверить. Формат digest'а держит CHECK по hex: 64 символа — это SHA256, и
+    -- число из другого алгоритма сравнение осмысленным не делает.
+    origin_kind TEXT,
+    origin_path TEXT,
+    origin_sha256 TEXT,
+    origin_manifest JSONB,
+    origin_recorded_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     -- узел V22: словарь видов замкнут — нового вида без строки загрузчика и словаря
@@ -70,10 +108,31 @@ CREATE TABLE IF NOT EXISTS external_report (
     -- чистая установка и миграция migrate_v22_object_kind.sql давали один и тот же объект
     -- (сверка _cmp_ddl.py).
     CONSTRAINT external_report_object_kind_check
-        CHECK (object_kind IN ('external_report', 'external_processing'))
+        CHECK (object_kind IN ('external_report', 'external_processing')),
+    -- узел V31: словарь видов источника замкнут (NULL разрешён — это «провенанс не записан»:
+    -- строки, загруженные до V31, и случай, когда источник не удалось прочитать). Имена
+    -- ограничений заданы явно, чтобы чистая установка и migrate_v31_provenance.sql давали
+    -- один и тот же объект (сверка _cmp_ddl.py читает pg_get_constraintdef).
+    CONSTRAINT external_report_origin_kind_check
+        CHECK (origin_kind IS NULL
+               OR origin_kind IN ('catalog', 'binary_file', 'authored_layout')),
+    -- провенанс либо записан парой (вид + путь), либо отсутствует целиком: вид без пути —
+    -- строка, по которой нельзя ничего проверить, а путь без вида не говорит, что именно
+    -- сравнивать (файл или listing каталога несравнимы между собой).
+    CONSTRAINT external_report_origin_pair_check
+        CHECK ((origin_kind IS NULL) = (origin_path IS NULL)),
+    -- digest обязан быть SHA256: 64 hex-символа. Сравнение чисел из разных алгоритмов
+    -- означало бы «совпало» там, где сравнивать нечего.
+    CONSTRAINT external_report_origin_sha256_check
+        CHECK (origin_sha256 IS NULL OR origin_sha256 ~ '^[0-9a-f]{64}$')
 );
 CREATE INDEX IF NOT EXISTS idx_external_report_uuid ON external_report(uuid);
 CREATE INDEX IF NOT EXISTS idx_external_report_configuration_id ON external_report(configuration_id);
+-- узел V31: обратный запрос «не загружен ли уже этот файл/каталог» (сверка провенанса перед
+-- force=True, поиск строки по digest'у источника) — тот же мотив, что у индекса
+-- configuration_id: без индекса вопрос «где битые и где совпадающие провенансы» считался бы
+-- полным сканированием таблицы.
+CREATE INDEX IF NOT EXISTS idx_external_report_origin_sha256 ON external_report(origin_sha256);
 
 -- Узел V20.1: внешнего ключа external_report.configuration_id -> configurations(id) здесь НЕТ
 -- (он добавлялся узлом V20 защищённым DO-блоком в двух местах и был снят по решению оператора).

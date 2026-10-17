@@ -16,8 +16,10 @@
 --        + витрины v_enrichment_targets / v_enrichment_objects (узел V17). FK шага 1b смотрят
 --        в таблицы шага 1, поэтому порядок 1 -> 1b -> 2 обязателен.
 --   2) psql -v ON_ERROR_STOP=1 -d ckb_1c_configurations -f create_1c_configurations_db.sql
---        configurations, config_extensions, bsl_modules (этот файл). Таблица
---        external_processing удалена узлом V22: заголовок обработки — строка external_report.
+--        configurations, config_extensions, bsl_modules, configuration_objects (этот файл).
+--        Таблица external_processing удалена узлом V22: заголовок обработки — строка
+--        external_report. configuration_objects добавлена узлом V33 (перечень объектов
+--        метаданных из ConfigDumpInfo.xml); для уже созданных БД — migrate_v33_....sql.
 --
 -- Граница владения (зафиксирована 13.10.2026 по живой БД: information_schema, pg_constraint,
 -- pg_indexes). Причина, почему раньше было два разных определения external_report:
@@ -147,6 +149,53 @@ CREATE TABLE IF NOT EXISTS bsl_modules (
 );
 
 -- --------------------------------------------
+-- ТАБЛИЦА Д. configuration_objects (объекты метаданных конфигурации, узел V33)
+-- Источник — `ConfigDumpInfo.xml` (индекс выгрузки), а НЕ разбор 158 925 XML: индекс
+-- содержит полный перечень объектов и их дочерних элементов с идентификаторами.
+-- Замер 17.10.2026 по BGU2: 122 164 записи `<Metadata>`, из них 86 379 с каноническим
+-- uuid v4, 35 713 составного вида `<uuid>.<N>` и 72 вида `<uuid>.1c` (Predefined);
+-- `configVersion` (40 hex-символов) есть у 67 887 записей, у 54 277 его нет — это
+-- ожидаемое состояние индекса, а не потеря разбора. Дублей `name` и `id` в файле нет.
+--
+-- Иерархия (`parent_name`, `depth`) строится из ИМЕНИ, а не из вложенности XML:
+-- вложенность есть только у части записей (54 277 из 122 164), а родитель в индексе
+-- обязан существовать для всех остальных — проверено: правило даёт существующего родителя
+-- для 110 461 из 110 461 не-верхних записей (0 пропусков). Правило:
+--   чётное число сегментов (`A.B.Attribute.C`) -> родитель = отсечь пару `вид.имя`;
+--   нечётное (`A.B.ManagerModule`, `A.B.Form.F.Form`) -> родитель = отсечь последний сегмент.
+-- Если бы имя объекта содержало точку, правило дало бы промах — промахов нет, значит на
+-- этой выгрузке имена точек не содержат. Проверка работает инвариантом в тестах.
+-- --------------------------------------------
+CREATE TABLE IF NOT EXISTS configuration_objects (
+    id BIGSERIAL PRIMARY KEY,
+    -- FK без ON DELETE, как у config_extensions и bsl_modules: снятие заголовка
+    -- сопровождается явным DELETE в configuration_loader._remove_rows (каскада нет).
+    configuration_id INT NOT NULL REFERENCES configurations(id),
+    -- имя записи индекса целиком (`Catalog.Товары.TabularSection.Цены.Attribute.Валютa`);
+    -- TEXT, а не VARCHAR(N): длина имени на BGU2 доходит до 120+ символов, лимит выдумывать нельзя.
+    name TEXT NOT NULL,
+    object_type TEXT NOT NULL,      -- первый сегмент — вид метаданных (Catalog, Report, ...)
+    object_name TEXT NOT NULL,      -- второй сегмент — имя объекта верхнего уровня
+    child_type TEXT,                -- вид дочернего элемента (Attribute, Form, ManagerModule, ...);
+                                    -- NULL у записей верхнего уровня
+    parent_name TEXT,               -- родитель по правилу выше; NULL у верхнего уровня
+    depth SMALLINT NOT NULL DEFAULT 0,   -- 0 = объект, 1 = его элемент, 2 = элемент элемента
+    -- атрибут `id` из индекса КАК ЕСТЬ: три формы (v4, `<uuid>.<N>`, `<uuid>.1c`),
+    -- поэтому колонка TEXT, а не UUID: привести всё к uuid — значит соврать о половине записей.
+    object_id TEXT NOT NULL,
+    -- канонический uuid — только когда `id` им является (86 379 из 122 164 на BGU2);
+    -- для составных идентификаторов здесь NULL, и это не потеря данных: object_id сохранён.
+    uuid UUID,
+    config_version TEXT,            -- configVersion из индекса (признак изменения, узел V18/Q5)
+    created_at TIMESTAMP DEFAULT NOW(),
+    -- Дублей name/id в индексе нет (замер), поэтому ограничения жёсткие: нарушение —
+    -- дефект входного файла, а не штатное состояние.
+    CONSTRAINT configuration_objects_name_unique UNIQUE (configuration_id, name),
+    CONSTRAINT configuration_objects_object_id_unique UNIQUE (configuration_id, object_id),
+    CONSTRAINT configuration_objects_depth_non_negative CHECK (depth >= 0)
+);
+
+-- --------------------------------------------
 -- ИНДЕКСЫ (только для таблиц этого файла; индексы внешнего отчёта — в src/ddl_external_report.sql)
 -- --------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_configurations_name ON configurations(name);
@@ -156,6 +205,23 @@ CREATE INDEX IF NOT EXISTS idx_bsl_modules_parent_uuid ON bsl_modules(parent_uui
 CREATE INDEX IF NOT EXISTS idx_bsl_modules_module_type ON bsl_modules(module_type);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_bsl_modules_parent_file
     ON bsl_modules(parent_uuid, file_path) WHERE parent_uuid IS NOT NULL;
+
+-- Индексы configuration_objects (узел V33). Перечень объекта читают по конфигурации и по
+-- виду, дочерние элементы — по parent_name, поиск по идентификатору — по object_id/uuid.
+CREATE INDEX IF NOT EXISTS idx_config_objects_config
+    ON configuration_objects(configuration_id);
+CREATE INDEX IF NOT EXISTS idx_config_objects_type
+    ON configuration_objects(configuration_id, object_type);
+CREATE INDEX IF NOT EXISTS idx_config_objects_object_name
+    ON configuration_objects(configuration_id, object_name);
+CREATE INDEX IF NOT EXISTS idx_config_objects_parent
+    ON configuration_objects(configuration_id, parent_name);
+CREATE INDEX IF NOT EXISTS idx_config_objects_object_id
+    ON configuration_objects(configuration_id, object_id);
+-- Частичный: у 35 785 записей из 122 164 канонического uuid нет (составные идентификаторы),
+-- индекс по NULL-значениям смысла не имеет.
+CREATE INDEX IF NOT EXISTS idx_config_objects_uuid
+    ON configuration_objects(uuid) WHERE uuid IS NOT NULL;
 
 -- --------------------------------------------
 -- УЗЕЛ V20 (14.10.2026): привязка внешнего объекта к конфигурации, заявленная оператором.

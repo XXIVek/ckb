@@ -10,6 +10,14 @@
   * load_catalog()         - маршрутизация на загрузчик варианта (R2, R7);
   * format_load_result()   - единый формат четырёх исходов (R8).
 
+Узел V32 (17.10.2026): вариант «конфигурация» больше не заглушка — Configuration.xml
+разбирается в справочник заголовков `configurations` (src/configuration_meta_parser.py +
+src/configuration_loader.py, запись строки — ConfigurationRowWriter). Ни исходов, ни
+инструментов при этом не прибавилось: те же четыре исхода, тот же format_load_result,
+контракт core остаётся четырьмя инструментами (решение D-B). Вариант «расширение»
+остаётся заглушкой. Провенанс (колонки origin_*, узел V31) у строк конфигурации НЕ
+ведётся: колонок нет, схему этот узел не менял — границу называет карточка.
+
 Точка входа MCP: server_configurations_core.py::load_1c_catalog_tool
 (тонкая обёртка: разбор аргументов -> load_catalog -> format_load_result).
 """
@@ -18,6 +26,19 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from external_report_loader import detect_external_object_type, register_external_report
+# Узел V32: заголовок конфигурации пишется своим загрузчиком (своя таблица-справочник,
+# свои коллизии `name`), но точкой входа остаётся `load_catalog` — отдельного
+# MCP-инструмента для конфигураций нет (решение D-B, контракт core остаётся 4).
+from configuration_loader import OBJECTS_TABLE, register_configuration
+# Узел V31: формулировки провенанса принадлежат модулю провенанса, а не карточке. Карточка
+# объекта, карточка дубликата и сводка печатают один и тот же текст по одному описанию —
+# по той же причине, по которой словарь тегов карантина держат в одном модуле (узел Q3).
+from external_provenance import (
+    STATE_RECORDED,
+    describe_lines as provenance_describe_lines,
+    state_of as provenance_state_of,
+    verdict_lines as provenance_verdict_lines,
+)
 
 VARIANT_CONFIGURATION = "configuration"
 VARIANT_EXTENSION = "extension"
@@ -47,7 +68,12 @@ VARIANT_TABLES = {
 # Узел V22: «внешняя обработка» снята из заглушек — заголовок и содержимое пишутся теми же
 # универсальными таблицами, что и отчёт (отдельный писатель строки заголовка —
 # ExternalProcessingRowWriter).
-NOT_IMPLEMENTED_VARIANTS = (VARIANT_CONFIGURATION, VARIANT_EXTENSION)
+# Узел V32: «конфигурация» снята с заглушки — заголовок разбирается из Configuration.xml
+# в справочник configurations (src/configuration_loader.py). «Расширение» остаётся
+# заглушкой: разбора ConfigurationExtensionPurpose в таблицы config_extensions нет, а
+# дочерние таблицы attributes/tabular_sections всё ещё рассчитаны на внешний объект
+# (глобальный UNIQUE(uuid), п. 13 правил core).
+NOT_IMPLEMENTED_VARIANTS = (VARIANT_EXTENSION,)
 
 CONFIGURATION_XML_NAME = "configuration.xml"
 
@@ -169,6 +195,11 @@ def _normalize(result, detection):
     result.setdefault("table", detection["table"])
     if result.get("success"):
         result["status"] = "reloaded" if result.get("replaced") else "loaded"
+    elif result.get("name_conflict"):
+        # узел V32: `name` в configurations уникален (configurations_name_key) — uuid другой,
+        # а имя занято. Отдельный исход, а не «дубликат»: force=True снял бы ЧУЖУЮ
+        # конфигурацию (по образцу kind_conflict узла V22).
+        result["status"] = "name_conflict"
     elif result.get("kind_conflict"):
         # узел V22: uuid занят строкой другого вида — это не дубликат и не перезагрузка
         result["status"] = "kind_conflict"
@@ -179,11 +210,22 @@ def _normalize(result, detection):
     return result
 
 
-def load_catalog(source_path, force=False):
+def load_catalog(source_path, force=False, origin=None, origin_kind=None):
     """Единая точка входа загрузки (R2): анализ и загрузка одним вызовом.
 
     force=True - перезаписать существующую запись с тем же UUID без запроса
     подтверждения (R4, R5).
+
+    Узел V31: origin/origin_kind - путь источника и его вид для провенанса строки. Их
+    заявляет вызывающий, а не разбор: разбор видит только каталог, который ему указали, и
+    не отличит каталог XML-выгрузки от каталога разбора, собранного ibcmd из .erf (узел V25)
+    или обратной сборкой (узлы V29, V18). По умолчанию (вызов от `load_1c_catalog_tool`)
+    источником считается сам `source_path` вида `catalog` — см. external_provenance.resolve_origin.
+
+    Узел V32: вариант «конфигурация» идёт своим загрузчиком (таблица-справочник
+    `configurations`, а не заголовок внешнего объекта). Провенанс для него НЕ передаётся:
+    колонок origin_* у `configurations` нет, и в этом узле их не заводили (решение D-C) —
+    карточка называет это границей, а не «не записанным провенансом».
     """
     detection = detect_load_variant(source_path)
     if not detection.get("success"):
@@ -198,6 +240,20 @@ def load_catalog(source_path, force=False):
             force=bool(force),
             xml_path=detection["xml_path"],
             obj_type=variant,
+            origin=origin,
+            origin_kind=origin_kind,
+        )
+        return _normalize(result, detection)
+
+    if variant == VARIANT_CONFIGURATION:
+        # Узел V32: заголовок конфигурации из Configuration.xml. Дочерних таблиц у этого
+        # узла нет (объекты метаданных — V18), поэтому загрузчик пишет ровно одну строку
+        # справочника, а предупреждения разбора (что в выгрузке есть, а в БД не ляжет)
+        # идут в карточку тем же полем `warnings`, что и у внешних объектов.
+        result = register_configuration(
+            source_path,
+            force=bool(force),
+            xml_path=detection["xml_path"],
         )
         return _normalize(result, detection)
 
@@ -207,8 +263,52 @@ def load_catalog(source_path, force=False):
     return _error(f"Неизвестный вариант загрузки: {variant}")
 
 
+def _configuration_card(existing):
+    """Карточка уже загруженной конфигурации (узел V32).
+
+    Отдельная, а не общая с внешними объектами: у строки `configurations` нет ни вида
+    (`object_kind`), ни привязки к конфигурации (она и есть конфигурация), ни провенанса
+    (колонок `origin_*` нет, решение D-C). Зато есть то, чего нет у внешних объектов:
+    число привязанных внешних объектов и число строк с тем же uuid — `uuid` в этой таблице
+    уникальным не является, уникальным является `name`.
+    """
+    cfg_id = existing.get("id")
+    lines = [
+        f"  ID существующей записи: {cfg_id}",
+        f"  Название: {existing.get('name', '')}",
+        f"  UUID: {existing.get('uuid', '')}",
+        f"  Версия: {existing.get('version') or 'в выгрузке не указана'}",
+        f"  Режим запуска / совместимость: {existing.get('main_mode') or '—'} / "
+        f"{existing.get('compatibility_mode') or '—'}",
+        f"  Дата загрузки: {existing.get('created_at', '')}",
+        f"  BSL-модулей с configuration_id={cfg_id}: {existing.get('bsl_modules_count', 0)} "
+        "(у XML-выгрузки конфигурации модулей нет: пары ClassId/ObjectId в InternalInfo корня — "
+        "предопределённые ссылки платформы, строками bsl_modules они не являются)",
+        f"  Расширений в config_extensions: {existing.get('extensions_count', 0)} "
+        "(вариант «расширение» — заглушка, строки заполняет только SQL)",
+        f"  Привязано внешних объектов: {existing.get('bound_external_objects', 0)} "
+        "(состояния читает config_enrichment_stats_tool без uuid)",
+        "  Провенанс: для строк конфигурации НЕ ведётся — колонок origin_* у configurations нет "
+        "(узел V31 описывает только заголовки внешних объектов; узел V32 схему не менял).",
+        f"  Таблица: {VARIANT_TABLES[VARIANT_CONFIGURATION]}",
+    ]
+    duplicate_rows = existing.get("duplicate_rows") or 0
+    if duplicate_rows > 1:
+        # find_configuration отдаёт первую по id строку и число строк с тем же uuid:
+        # выборка по uuid обязана быть однозначной, а молчать о дубле заголовка нельзя.
+        ids = ", ".join(str(i) for i in (existing.get("duplicate_ids") or []))
+        lines.append(
+            f"⚠️ В таблице {duplicate_rows} строк с тем же uuid (id: {ids or '—'}): uuid в "
+            "configurations не уникален (уникален name) — выборка по uuid дала бы несколько строк."
+        )
+    return lines
+
+
 def _existing_card(existing, table):
     """Карточка уже загруженного объекта (узел V5, исход 'дубликат')."""
+    if existing.get("row_kind") == "configuration":
+        # узел V32: строка справочника конфигураций описывается своей карточкой.
+        return _configuration_card(existing)
     lines = [
         f"  ID существующей записи: {existing.get('id')}",
         f"  Название: {existing.get('name', '')}",
@@ -227,6 +327,11 @@ def _existing_card(existing, table):
                      f"(заявлена оператором, будет перенесена при force=True)")
     else:
         lines.append("  Привязка к конфигурации: не заявлена (NULL — это не «универсальный»)")
+    # узел V31: провенанс строки — второй ответ того же вопроса, что и привязка, но про
+    # источник: ОТКУДА и из какого состояния файлов эта строка появилась. В карточке
+    # дубликата это и есть ответ на «тот ли источник я держу в руках»: строка могла быть
+    # загружена из другого каталога или из двоичного файла.
+    lines.extend(provenance_describe_lines(existing, indent="  "))
     # V13: все счётчики дочерних данных одной строкой (формы, их описания, макеты).
     parts = [f"{label} {existing[key]}" for key, label in (
         ("attributes_count", "реквизитов"),
@@ -259,15 +364,55 @@ def format_load_result(result):
         lines.append(f"Название: {result.get('name', '')}")
         replaced = result.get("replaced")
         if replaced:
-            lines.append(
-                f"♻️ Удалена предыдущая запись ID={replaced.get('old_id')} "
-                f"(BSL-модулей удалено: {replaced.get('bsl_modules_deleted', 0)})"
-            )
-            # узел V20: привязка к конфигурации — данные оператора, а не выгрузки; то, что она
-            # перенесена, должно быть видно в карточке перезагрузки.
-            if replaced.get("configuration_id"):
-                lines.append(f"   Привязка к конфигурации перенесена: "
-                             f"configuration_id={replaced['configuration_id']}")
+            if result.get("variant") == VARIANT_CONFIGURATION:
+                # узел V32: снимается строка справочника конфигураций. Вместе с ней снимаются
+                # расширения и модули, ссылающиеся на неё (FK объявлены без ON DELETE, поэтому
+                # их снимает явный DELETE в _remove_rows), а привязки внешних объектов
+                # остаются числами: внешнего ключа нет (узел V20.1), значит они становятся
+                # битыми. Число снятых детей берётся из `children_deleted` загрузчика —
+                # выдумывать его карточка не вправе. Про битые привязки говорит предупреждение
+                # загрузчика (оно же перечисляет объекты), здесь — только счётчики снятия.
+                children_deleted = replaced.get("children_deleted") or {}
+                lines.append(
+                    f"♻️ Удалена предыдущая запись ID={replaced.get('old_id')} "
+                    f"(расширений снято: {children_deleted.get('config_extensions', 0)}, "
+                    f"BSL-модулей снято: {children_deleted.get('bsl_modules', 0)})"
+                )
+                # Узел V32: привязки внешних объектов к снятой строке остаются числами
+                # configuration_id без строки — внешнего ключа нет (узел V20.1), значит они
+                # стали битыми. Карточка обязана это назвать: оператор иначе узнает о битой
+                # ссылке только из карточки объекта. Число и имена берём из ответа загрузчика
+                # (`bound_external_objects`, `bound_external_object_names`), выдумывать их
+                # карточка не вправе.
+                bound_objects = int(replaced.get("bound_external_objects") or 0)
+                if bound_objects:
+                    names = ", ".join(
+                        str(name) for name in replaced.get("bound_external_object_names") or []
+                    )
+                    lines.append(
+                        f"⚠️ Привязка к конфигурации станет битой: привязано внешних "
+                        f"объектов {bound_objects} ({names}). Перепривяжите их "
+                        f"`set_object_configuration_tool(uuid=…, "
+                        f"configuration_id={result.get('id')})` или снимите (внешнего ключа нет, "
+                        "узел V20.1)"
+                    )
+                # Провенанса у строки конфигурации нет (решение D-C): вердикт сравнения
+                # источника здесь не вычисляется и выдумывать его нельзя.
+            else:
+                lines.append(
+                    f"♻️ Удалена предыдущая запись ID={replaced.get('old_id')} "
+                    f"(BSL-модулей удалено: {replaced.get('bsl_modules_deleted', 0)})"
+                )
+                # узел V20: привязка к конфигурации — данные оператора, а не выгрузки; то, что она
+                # перенесена, должно быть видно в карточке перезагрузки.
+                if replaced.get("configuration_id"):
+                    lines.append(f"   Привязка к конфигурации перенесена: "
+                                 f"configuration_id={replaced['configuration_id']}")
+                # узел V31: старая строка снята вместе со своим провенансом, новая получила
+                # провенанс текущего источника. Вердикт сравнения (его считал загрузчик ДО
+                # удаления) остаётся в карточке: это ответ на «изменялась ли выгрузка»,
+                # который узел V19 не умеет дать по колонке version (её нет).
+                lines.extend(provenance_verdict_lines(replaced.get("provenance_match"), indent="   "))
         # V13: полные счётчики сохранённых дочерних данных (узел V13 норматива).
         written = {
             "attributes": result.get("attributes_written"),
@@ -289,6 +434,61 @@ def format_load_result(result):
                     b=written["bsl_modules"] or 0,
                 )
             )
+        # узел V32: конфигурация пишет строку справочника — счётчики детей внешнего
+        # объекта к ней не относятся. Вместо них печатаются те части выгрузки, которые в БД
+        # НЕ легли. Молчать об этом нельзя: «✅ загружено» без этих строк читается как
+        # «конфигурация загружена целиком».
+        counts = result.get("counts") or {}
+        if result.get("variant") == VARIANT_CONFIGURATION:
+            child_counts = counts.get("child_objects") or {}
+            if child_counts:
+                by_type = ", ".join(
+                    f"{tag} {count}" for tag, count in sorted(child_counts.items())
+                )
+                # Узел V33: фраза «состав конфигурации в БД не сохраняется» после появления
+                # configuration_objects стала неверной целиком — различать надо по источнику.
+                # `<ChildObjects>` Configuration.xml по-прежнему никуда не раскладывается
+                # (таблиц объектов метаданных по ним нет, узел V18), а перечень состава из
+                # ConfigDumpInfo.xml пишется в configuration_objects — про него ниже своя
+                # строка с фактическими числами.
+                lines.append(
+                    f"Состав из <ChildObjects> Configuration.xml: объектов "
+                    f"{sum(child_counts.values())} — по типам: {by_type}; эти записи в БД не "
+                    "раскладываются (таблиц объектов метаданных по ним в схеме нет, узел V18)"
+                )
+            # Узел V33: что реально легло в configuration_objects. Карточка обязана назвать
+            # и индекс: «✅ Загружено» без этой строки читается как «записан только
+            # заголовок», хотя загрузчик писал ещё и перечень состава (или не писал — и
+            # почему, тоже говорит здесь же).
+            if result.get("index_found"):
+                index_counts = result.get("index_counts") or {}
+                lines.append(
+                    f"Индекс состава (ConfigDumpInfo.xml): разобрано записей "
+                    f"{index_counts.get('entries_total', 0)}, записано в {OBJECTS_TABLE} "
+                    f"{result.get('configuration_objects_written', 0)}; типов "
+                    f"{result.get('index_types', 0)}, максимальная глубина "
+                    f"{index_counts.get('max_depth', 0)}, ссылок на отсутствующего родителя "
+                    f"{index_counts.get('parent_unresolved', 0)}"
+                )
+            else:
+                lines.append(
+                    f"Индекс состава (ConfigDumpInfo.xml) в каталоге не найден — "
+                    f"{OBJECTS_TABLE} по этой конфигурации не заполнялась (узел V33)"
+                )
+        if counts.get("properties_total"):
+            # Что из Properties не имеет колонки в схеме, называется числом, а не молчанием:
+            # «✅ Загружено» без этой строки читается как «свойства сохранены все».
+            lines.append(
+                f"Свойства Configuration.xml: найдено {counts.get('properties_total', 0)}, "
+                f"известных схеме {counts.get('properties_mapped', 0)}, "
+                f"без колонки {counts.get('properties_unstored', 0)} (из них с непустым "
+                f"значением {len(counts.get('properties_unstored_nonempty') or [])})"
+            )
+            # Узел V32 ссылка вела на check_configuration_inventory.sql, которого на диске
+            # нет: перечень колонок оставался обещанием. Перечень отдаёт сам разбор
+            # (`not_filled_columns`), значит печатать надо его, а не указатель вникуда.
+            for column, reason in sorted((result.get("not_filled_columns") or {}).items()):
+                lines.append(f"   не заполняется: {column} — {reason}")
         # Модуль формы по правилам V13 хранится в form_ext.ext, а не в bsl_modules:
         # если у формы есть модуль, но в bsl_modules он не попал - это не ошибка.
         found = result.get("child_found") or {}
@@ -305,6 +505,13 @@ def format_load_result(result):
                     f"ℹ️ {label.capitalize()}: найдено в каталоге {found_count}, "
                     f"сохранено {saved_count} — причину см. в предупреждениях ниже."
                 )
+        # узел V31: что легло в колонки origin_* — тем же описанием, что и в карточке
+        # дубликата (одна формулировка на оба места). Если провенанс не записан, причину
+        # уже называет предупреждение ниже, и вторить ему советом «как записать» в карточке
+        # загрузки не нужно: действие там же, что и при отказе.
+        origin_columns = result.get("origin_columns") or {}
+        if provenance_state_of(origin_columns) == STATE_RECORDED:
+            lines.extend(provenance_describe_lines(origin_columns, indent="  "))
         for warning in result.get("warnings") or []:
             lines.append(f"⚠️ {warning}")
         return "\n".join(lines)
@@ -321,29 +528,79 @@ def format_load_result(result):
 
     if status == "duplicate":
         existing = result.get("existing") or {}
-        lines = [f"⚠️ Уже загружено — загрузка НЕ выполнена: объект с UUID {existing.get('uuid', result.get('uuid', ''))} уже есть в таблице {table}."]
+        is_configuration = result.get("variant") == VARIANT_CONFIGURATION
+        lines = [
+            "⚠️ Уже загружено — загрузка НЕ выполнена: "
+            + ("конфигурация с UUID" if is_configuration else "объект с UUID")
+            + f" {existing.get('uuid', result.get('uuid', ''))} уже есть в таблице {table}."
+        ]
         lines.extend(_existing_card(existing, table))
+        # узел V31: «тот ли это источник, что я держу в руках» — вопрос, который раньше
+        # оставался без ответа (колонки version в таблице нет, узел V19). Отвечает
+        # сравнение отпечатков, его считает загрузчик ДО отказа; карточка печатает
+        # готовый вердикт теми же словами, что и карточка перезагрузки.
+        lines.extend(provenance_verdict_lines(result.get("provenance_match")))
         lines.append("")
         lines.append(f"ℹ️ {result.get('error', 'Такой объект уже загружен.')}")
         lines.append(
             "ℹ️ Если версия объекта менялась при том же UUID — это тот же случай (R5)."
         )
-        lines.append(
-            f"Подтвердите перезагрузку: load_1c_catalog_tool(source_path=..., force=True) — "
-            f"запись ID={existing.get('id')} и её BSL-модули будут удалены, объект загрузится заново."
-        )
-        lines.append(
-            f"Либо удалите запись отдельно: delete_external_report_tool(source_path=...) или "
-            f"delete_external_report_tool(report_id={existing.get('id')})."
-        )
+        if is_configuration:
+            # узел V32: у конфигурации нет ни провенанса (решение D-C), ни инструмента
+            # удаления (решение D-B) — прежний текст обещал бы delete_external_report_tool,
+            # которого для конфигурации не существует, и молчал бы о её расширениях.
+            lines.append(
+                f"Подтвердите перезагрузку: load_1c_catalog_tool(source_path=..., force=True) — "
+                f"запись ID={existing.get('id')}, её расширения и BSL-модули будут удалены, "
+                "конфигурация загрузится заново."
+            )
+            lines.append(
+                "ℹ️ Привязки внешних объектов к этому id (external_report.configuration_id) "
+                "после force=True числятся битыми до перепривязки: set_object_configuration_tool "
+                "принимает только id существующего заголовка (V20.1)."
+            )
+            lines.append(
+                "ℹ️ Инструмента удаления конфигурации в контракте нет: строку справочника "
+                "снимает только SQL валидатора (решение D-B)."
+            )
+        else:
+            lines.append(
+                f"Подтвердите перезагрузку: load_1c_catalog_tool(source_path=..., force=True) — "
+                f"запись ID={existing.get('id')} и её BSL-модули будут удалены, объект загрузится заново."
+            )
+            lines.append(
+                f"Либо удалите запись отдельно: delete_external_report_tool(source_path=...) или "
+                f"delete_external_report_tool(report_id={existing.get('id')})."
+            )
+        return "\n".join(lines)
+
+    if status == "name_conflict":
+        # узел V32: имя конфигурации уникально глобально (configurations_name_key), а дубликат
+        # ищется по UUID — значит под другим UUID существует ДРУГАЯ конфигурация с тем же
+        # именем. force=True здесь не предлагается: он снял бы чужую запись.
+        # загрузчик кладёт конфликтующую строку в общий ключ `existing` (тот же контракт,
+        # что у `duplicate` и `kind_conflict`) — читать обязан быть он, а не выдуманный ключ.
+        conflict = result.get("existing") or {}
+        lines = [f"❌ Не могу загрузить: {result.get('error', 'имя уже занято другой конфигурацией')}"]
+        if result.get("hint"):
+            lines.append(f"   {result['hint']}")
+        if conflict:
+            lines.append("   Строка, занявшая имя:")
+            lines.extend(_configuration_card(conflict))
+        # force=True здесь не предлагается — это уже сказано в hint загрузчика;
+        # повторять ту же мысль второй строкой в той же карточке не нужно.
+        lines.append("   Действие: загрузите другой каталог, измените <Name> в Configuration.xml "
+                     "или снимите занявшую строку (delete_configuration(cfg_id=...)) — и повторите запрос.")
         return "\n".join(lines)
 
     if status == "not_implemented":
         lines = [f"❌ Не могу загрузить: {result.get('error', 'сценарий не реализован')}"]
         if result.get("hint"):
             lines.append(f"   {result['hint']}")
-        lines.append("   Реализованы варианты «внешний отчёт» и «внешняя обработка»; "
-                     "конфигурация и расширение — заглушки (см. раздел 5 норматива загрузки).")
+        lines.append("   Реализованы варианты «внешний отчёт» и «внешняя обработка» (V22), файл "
+                     "внешнего объекта (.erf/.epf) — отдельным инструментом (V25), заголовок "
+                     "конфигурации — с узла V32 (состав выгрузки не сохраняется). Вариант "
+                     "«расширение» остаётся заглушкой (см. раздел 5 норматива загрузки).")
         return "\n".join(lines)
 
     lines = [f"❌ Не могу загрузить: {result.get('error', 'неизвестная ошибка')}"]
