@@ -25,8 +25,6 @@
 | [ANALYSIS_2026-10-13_content_inventory.md](ANALYSIS_2026-10-13_content_inventory.md) | инвентарь «что видно из БД без распаковки `Form.bin`», что находимо поиском, список слепых зон |
 | [TOOLS_REVISION_2026-10-13.md](TOOLS_REVISION_2026-10-13.md) | ревизия инструментов: что оставляем, что переносим, что удаляем; политика артефактов и зависимостей (`v8unpack` — опциональна) |
 | [../CONFIGURATIONS_ENRICHMENT_PLAN.md](../CONFIGURATIONS_ENRICHMENT_PLAN.md) | стратегия обогащения (алиасы/сниппеты/зависимости/связи с `local_doc`), схема и порядок реализации V17 |
-| [../PROMPT_2026-10-13_analysis.md](../PROMPT_2026-10-13_analysis.md) | промпт сессии 13.10.2026: SQL-анализ, ревизия инструментов, стратегия enrichment (задачи 1–3, выполнены) |
-| [../PROMPT_2026-10-13_v15_implementation.md](../PROMPT_2026-10-13_v15_implementation.md) | промпт для нового окна: узел V15 (разметка ordinary-формы в `form_ext.items`), точки встраивания, контракт ключей, проверки, задел на V17 |
 
 
 ## 🔄 Как использовать

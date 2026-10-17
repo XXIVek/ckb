@@ -337,7 +337,7 @@ FormItem       ФормаОтчета.ГруппаПериод → form_item:e13
 | V17.6 Пилот | прогон на `Test1_Otchet` + `Test2_Otchet`, фиксация фактических счётчиков в разделе 7 этого документа | варианты 17–24 `search`, разделы 15–16 `inventory` | ✅ 13.10.2026, повтор 14.10.2026 |
 | V17.7 Карточка объекта | `describe_object()` + `_describe_sections()` + `type_brief()` в `src/enrichment_generator.py`; вывод в `config_enrichment_stats_tool(uuid=…, card=True)` (`server_configurations_enrichment.py`); фаза `phase_object_card` в `validate_enrichment_flow.py` | 87 проверок rc=0; карточка `Test1_Otchet` даёт реквизиты с читаемыми типами, ТЧ с числом колонок, форму с составом из `v_form_elements`, макет с `DataCompositionSchema`, модули и перечень сниппетов | ✅ 14.10.2026 (офлайн + вызов тех же функций слоя MCP-инструментов); живой вызов через хост MCP — после его перезапуска |
 | V17.8 Защита от дублей | частичный уникальный индекс `uq_config_snippet_deps_stable_target` (`src/generate_ddl.py`, `migrate_v17_enrichment.sql`) + свёртка дублей в `src/enrichment_snippets.py` | фаза «дубль цели в двух написаниях» валидатора: зависимость одна, `duplicate_dependencies` возвращён оператору | ✅ 14.10.2026 |
-| V17.9 Уборка мёртвого кода | удалены 18 внеконтрактных инструментов core-MCP, 6 внеконтрактных инструментов export-MCP, `src/config_tools.py`, `src/config_aliases.py`, `src/config_snippets_manager.py`, `src/config_export_manager.py`, `src/config_change_tracker.py`, `src/config_tools_1c_configurations.py`, `generate_servers.py`; `EXPECTED_TOOLS` в `tools/check_mcp_tool_wiring.py`; `.clinerules/1c-configurations-export_Rule.md` переписан под реализованное состояние (текст исторического промта перенесён в `docs/PROMPT_2026-10-13_analysis.md`) | `python tools/check_mcp_tool_wiring.py` rc=0 (core 3, enrichment 16, export 1), `python validate_project.py` rc=0 | ✅ 14.10.2026 |
+| V17.9 Уборка мёртвого кода | удалены 18 внеконтрактных инструментов core-MCP, 6 внеконтрактных инструментов export-MCP, `src/config_tools.py`, `src/config_aliases.py`, `src/config_snippets_manager.py`, `src/config_export_manager.py`, `src/config_change_tracker.py`, `src/config_tools_1c_configurations.py`, `generate_servers.py`; `EXPECTED_TOOLS` в `tools/check_mcp_tool_wiring.py`; `.clinerules/1c-configurations-export_Rule.md` переписан под реализованное состояние (историческая стенограмма сессии удалена как не-норматив) | `python tools/check_mcp_tool_wiring.py` rc=0 (core 3, enrichment 16, export 1), `python validate_project.py` rc=0 | ✅ 14.10.2026 |
 | V17.10 Счётчики разделов карточки | `_section_header()` в `server_configurations_enrichment.py` (заголовок берёт полное число из `counts`, при усечении печатает «всего N, показано M — увеличьте limit»); `form_elements` / `form_events` в `describe_stats()` (`src/enrichment_generator.py`) по тем же витринам, что и разделы карточки; три проверки в `phase_object_card` (`validate_enrichment_flow.py`) | дефект найден при живом прогоне карточки с `limit=4`: «ЭЛЕМЕНТЫ ФОРМ (4)» при 6 (у `Test2_Otchet` — при 10) элементах, т. е. карточка отрицала часть состава, найденного той же карточкой. После исправления: `validate_enrichment_flow.py` rc=0 (87 проверок), карточка через функции слоя MCP-инструментов с `limit=4` — «всего 6, показано 4» / «всего 10, показано 4», `counts.form_elements` = 6 и 10 совпадают с `v_form_elements` | ✅ 14.10.2026 |
 
 | V17.11 Узел A: запрос набора данных макета СКД | `src/enrichment_generator.py`: `DATASET_BLOCK_RE` / `DATASET_NAME_RE` / `DATASET_QUERY_RE` / `QUERY_KEYWORD_RE` (признак запроса по `SELECT` **или «ВЫБРАТЬ»**), `_unescape_xml`, `_strip_cdata`, `template_dataset_queries()`, цикл макетов в `build_snippets` (`source_kind='template_query'`, цель `Template` + uuid макета, `source_uuid='template:<uuid>'`); комментарий писателя в `src/external_table_writer.py` (там же устранено расхождение `template_ext` ↔ `template_query`: код писал `template_ext`, правила и `list_config_snippets_tool` ожидали `template_query`) | `validate_enrichment_flow.py` rc=0 — **94 проверки, 0 провалено** (новая фаза `phase_template_dataset_query`, 7 проверок; ожидания выводятся из сохранённого `templates.ext` тем же генератором); `check_external_report_search.sql` rc=0 (ПОИСК 21: FTS по «ВЫБРАТЬ», поиск по имени набора и по фрагменту кода, покрытие «макет с `<query>` = 1 → со сниппетом = 1 → с целью `Template` = 1»); `check_external_report_inventory.sql` rc=0 (15e: слепая зона «макет с `<query>` без сниппета» = 0). Схема БД не менялась, `_cmp_ddl.py` не требуется | ✅ 14.10.2026 (офлайн-слой); живой вызов через хост MCP — после его перезапуска |
@@ -488,7 +488,9 @@ FormItem       ФормаОтчета.ГруппаПериод → form_item:e13
 | `templates` | содержимое макета, в т. ч. запросы СКД (узел A) | да |
 | `bsl_modules` | модули `Ext/` | да |
 | `config_*` (обогащение) | производные от содержимого | **нет**: генерация идемпотентна, снимается и пишется заново |
-| `configurations`, `config_extensions` | варианты 1, 2 — заглушки | нет, пока варианты не реализованы. Таблица `external_processing` удалена узлом V22: заголовок внешней обработки — строка `external_report` с `object_kind='external_processing'`, и она версионируется наравне с отчётом |
+| `configurations` | заголовок конфигурации (узел V32, 17.10.2026) | **нет**: одна строка на `name`, версионность V19 на справочник заголовков не распространяется (раздел 12); `force=True` пересоздаёт строку, привязки внешним объектам при этом становятся битыми и требуют перепривязки |
+| `configuration_objects` | индекс состава из `ConfigDumpInfo.xml` (узел V33) | **нет**: производные данные, снимаются и пишутся заново вместе с заголовком; XML объектов не хранятся |
+| `config_extensions` | вариант 2 (расширение) — заглушка | нет, пока вариант не реализован. Таблица `external_processing` удалена узлом V22: заголовок внешней обработки — строка `external_report` с `object_kind='external_processing'`, и она версионируется наравне с отчётом |
 
 ### Три варианта (историческая постановка 14.10.2026; от В-1 отказались — принята версионность
 в таблицах, см. «Принятая модель» выше)
@@ -1031,13 +1033,13 @@ placeholder — иначе это два разных ответа на один
 Это минимальный формат, который вообще удаётся доказать: в нём всё лишнее — гипотеза, а каждое
 утверждение о формате опирается на пробу импорта.
 
-Постановка этапа: `docs/PROMPT_2026-10-16_v29_zero_external_processing.md`.
+Постановка этапа — раздел 15 этого документа (критерии A1–A8); реализация —
+`src/external_object_author.py` + `src/ibcmd_bridge.py`, проверка — `validate_create_external_processing.py`.
 
 ### 15.2. Норматив формата — профиль свойств и пробы импорта, а не xsd
 
 Заметки `xsd-docs/` и сами схемы `xsd-schemas/2.20/` нормативом не считаются: они противоречат и
-живой выгрузке, и ответам платформы (постановка узла —
-`docs/PROMPT_2026-10-16_v29_zero_external_processing.md`, раздел «НЕ ДЕЛАТЬ»). Норматив — четыре
+живой выгрузке, и ответам платформы (граница «НЕ ДЕЛАТЬ» зафиксирована в разделе 15 этого документа). Норматив — четыре
 источника:
 
 | Источник | Что даёт |

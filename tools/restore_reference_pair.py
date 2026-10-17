@@ -30,7 +30,9 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from config_load_router import format_load_result, load_catalog  # noqa: E402
 
-# Эталонный набор: управляемая и обычная формы (см. docs/PROMPT_2026-10-13_analysis.md, раздел 1).
+# Эталонный набор: управляемая (Test1_Otchet) и обычная (Test2_Otchet) формы.
+# Перечень эталонов и порядок их восстановления — .clinerules/1c-configurations-enrichment_Rule.md,
+# раздел «Проверки» (этот скрипт загружает ровно эти два каталога).
 REFERENCE_CATALOGS = [
     r"C:\1C_LLM\LoadDoc\Test1_Otchet",
     r"C:\1C_LLM\LoadDoc\Test2_Otchet",

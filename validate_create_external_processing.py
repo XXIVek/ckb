@@ -5,7 +5,9 @@
     python validate_create_external_processing.py --fast   # офлайн: структура XML, без ibcmd и БД
     python validate_create_external_processing.py          # полный прогон: ibcmd import + загрузка в БД
 
-Полный режим принимает критерии A1–A8 из docs/PROMPT_2026-10-16_v29_zero_external_processing.md.
+Полный режим принимает критерии A1–A8 узла V29: постановка и замеры — раздел 15
+docs/CONFIGURATIONS_ENRICHMENT_PLAN.md и позиция V22/V29 в .clinerules/1c-configurations-core_Rule.md;
+реализация — src/external_object_author.py + src/ibcmd_bridge.py.
 Скрипт работает через те же модули, что и MCP (src/ibcmd_bridge.py, src/config_load_router.py),
 но не через stdio-транспорт MCP; живые вызовы инструментов — отдельный шаг (см. план узла V29).
 

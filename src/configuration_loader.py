@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 """Загрузчик заголовка конфигурации и индекса её состава (узлы V32, V33).
 
-Граница узла (docs/PROMPT_2026-10-17_v32_zero_configuration.md, разделы 2–3):
+Граница узла (FLOWCHART_1c-configurations-core.md, правило R7 +
+.clinerules/1c-configurations-core_Rule.md, позиции V32/V33):
 
   * реализуется ровно R1-переход `configuration`: в корне каталога есть `Configuration.xml`
     → одна строка в `configurations`. Таблиц `configuration_child_*`/`config_languages`/

@@ -95,7 +95,6 @@ MCP сервер `1c-configurations-export` (`server_configurations_export.py`) 
 
 - `docs/CONFIGURATIONS_ENRICHMENT_PLAN.md`, раздел 8 (п. 1 «Не чиним 1c-configurations-export») —
   почему экспорт отнесён к V18;
-- `docs/PROMPT_2026-10-13_analysis.md` — историческая постановка задачи (не актуальные правила);
 - `.clinerules/1c-configurations-core_Rule.md`, раздел «Порядок создания БД „с нуля“» — граница
   владения таблицами, к которой должен добавляться V18.
 

@@ -314,8 +314,9 @@ ordinary-формы и её заголовок — декодер заголов
 
 | Таблица | Колонки (живая схема) | Состояние |
 |---|---|---|
-| `configurations` | `id, name, synonym, comment, version, vendor_name, uuid, main_mode, usage_purpose, embedded_language, main_roles, app_module_id, session_module_id, data_proc_module_id, ext_conn_module_id, mobile_functionality, default_language, short_info, detailed_info, copyright, vendor_url, config_url, update_url, help_included, lock_mode_default, modality_mode, ext_comp_sync_mode, interface_compat_mode, compatibility_mode, created_at, updated_at` | 0 строк; вариант загрузки «конфигурация» — заглушка |
-| `config_extensions` | `id, configuration_id, name, synonym, comment, version, vendor_name, uuid, created_at, updated_at` | 0 строк; вариант «расширение» — заглушка |
+| `configurations` | `id, name, synonym, comment, version, vendor_name, uuid, main_mode, usage_purpose, embedded_language, main_roles, app_module_id, session_module_id, data_proc_module_id, ext_conn_module_id, mobile_functionality, default_language, short_info, detailed_info, copyright, vendor_url, config_url, update_url, help_included, lock_mode_default, modality_mode, ext_comp_sync_mode, interface_compat_mode, compatibility_mode, created_at, updated_at` | заголовок конфигурации пишет загрузчик варианта 1 (узел V32, `src/configuration_loader.py`): замер 17.10.2026 — 1 строка (BGU2). Уникальность по `name` (`configurations_name_key`), повторная загрузка — `⚠️ name_conflict`, `force=True` пересоздаёт. **Содержимое видов метаданных не загружается** (п. 25); колонок `origin_*` нет (решение D-C, п. 24) |
+| `configuration_objects` | `id, configuration_id, name, object_type, object_name, child_type, parent_name, depth, object_id, uuid, config_version, created_at` | индекс состава из `ConfigDumpInfo.xml` (узел V33): замер 17.10.2026 — 122 164 строки на 1 заголовок. XML самих объектов **не хранится** — перечень ≠ содержимое, узел V18 это не закрывает (п. 26) |
+| `config_extensions` | `id, configuration_id, name, synonym, comment, version, vendor_name, uuid, created_at, updated_at` | 0 строк; вариант «расширение» — заглушка (R7) |
 | `bsl_modules` | `id, configuration_id, module_name, file_path, code, object_type, object_name, report_id, created_at, parent_uuid, parent_type, module_type, code_size, truncated` | модули `Ext/` пишутся с `parent_uuid`/`parent_type`/`module_type` для отчётов **и** обработок (узел V22: `parent_type` = `external_processing`); FK на `report_id` нет — очистка явная (п. 10). Колонка `processing_id` удалена узлом V22 |
 
 Таблица `external_processing` (`id, configuration_id, name, synonym, comment, version, uuid, class_id, created_at, updated_at`) **удалена узлом V22** (14.10.2026): она была пуста (0 строк), давала второй заголовок для того же понятия и требовала дублирующих FK для дочерних таблиц; заголовок внешней обработки — строка `external_report` с `object_kind='external_processing'`. Для уже созданных БД — `migrate_v22_object_kind.sql` (п. 22).
@@ -340,8 +341,10 @@ ordinary-формы и её заголовок — декодер заголов
 `get_bsl_module_code_tool`, `search_bsl_code_tool`, `get_enum_values_tool`,
 `read_config_file_tool`, `batch_index_from_dump_tool`) и псевдонимы точки входа
 (`register_external_report_tool`, `analyze_config_load_tool`) удалены: они обращались к базе
-`configurations`, которой на сервере нет (п. 8), и к отсутствующим таблицам схемы
-(`configuration`, `configuration_objects`, `object_attributes`, `enum_values`).
+`configurations`, которой на сервере нет (п. 8), и к отсутствующим на тот момент таблицам схемы
+(`configuration`, `object_attributes`, `enum_values`). `configuration_objects` на 14.10.2026 тоже не
+было — её добавил лишь узел V33 (17.10.2026) с другим назначением (индекс состава), и удалённые
+инструменты к ней не возвращаются.
 
 | Нужен был инструмент | Чем пользоваться |
 |---|---|
@@ -349,7 +352,7 @@ ordinary-формы и её заголовок — декодер заголов
 | диагностика выбора варианта (`analyze_config_load_tool`) | `load_1c_catalog_tool` вернёт `❌` с одной причиной; диагностика вне контракта не нужна |
 | список и карточка объекта (`list_configurations_tool`, `get_configuration_tool`, `get_object_structure_tool`) | `config_enrichment_stats_tool(uuid=…, card=True)` из enrichment-MCP; SQL `check_external_report_inventory.sql` |
 | поиск объектов и BSL-кода (`search_config_objects_tool`, `search_bsl_code_tool`) | `search_config_aliases_tool`, `search_config_snippets_tool`, `search_docs_tool` (documentation) |
-| чтение XML/JSON, перечислений, индексация из дампа | не реализовано: варианты 1–2 (конфигурация, расширение) — заглушки; внешняя обработка реализована узлом V22 той же точкой входа `load_1c_catalog_tool` |
+| чтение XML/JSON, перечислений, индексация из дампа | индекс состава конфигурации из `ConfigDumpInfo.xml` реализован узлом V33 (`configuration_objects`), заголовок — узлом V32; содержимое видов метаданных и индексация перечислений — не реализованы; расширение (вариант 2) — заглушка; внешняя обработка реализована узлом V22 той же точкой входа `load_1c_catalog_tool` |
 
 ### Определение варианта загрузки (правило R1)
 
@@ -357,7 +360,7 @@ ordinary-формы и её заголовок — декодер заголов
 
 | `variant` | Признак в корне каталога | Целевая таблица | Статус |
 |-----------|--------------------------|-----------------|--------|
-| `configuration` | `Configuration.xml` без `ConfigurationExtensionPurpose` | `configurations` | ❌ заглушка |
+| `configuration` | `Configuration.xml` без `ConfigurationExtensionPurpose` | `configurations` + `configuration_objects` | ⚠️ частично: заголовок (V32) + индекс состава (V33); содержимое видов метаданных — нет |
 | `extension` | `Configuration.xml` + `ConfigurationExtensionPurpose` | `config_extensions` | ❌ заглушка |
 | `external_report` | XML с элементом `ExternalReport` | `external_report` | ✅ реализован |
 | `external_processing` | XML с элементом `ExternalDataProcessor` | `external_report` + `object_kind='external_processing'` | ✅ реализован (узел V22) |
@@ -649,7 +652,8 @@ ordinary-формы. БД после живой загрузки: `items` 10, `a
 `v_form_elements` — Ordinary 10 (10 с типом, 3 с источником данных, 4 с подписью), `v_form_events` —
 Ordinary 1, сирот 0. Негативные исходы тоже живые: `Test3_Otchet_Null` → `✅ загружено` (ID=236,
 нули по всем счётчикам) и удаление `delete_external_report_tool(source_path=…)` → «Дочерних строк по
-parent_uuid не было»; `BGU2` → `❌ сценарий «конфигурация» не реализован`; несуществующий путь →
+parent_uuid не было»; `BGU2` → `✅ загружено` (заголовок конфигурации + индекс состава, узлы V32/V33 —
+см. п. 25–26); `TSD_R` → `❌ сценарий «расширение» не реализован`; несуществующий путь →
 `❌ Каталог не найден`. **Эталонная пара сейчас: `Test1_Otchet` → `id=271`, `Test2_Otchet` → `id=272`** (после
 прогонов `validate_external_children.py`, `validate_enrichment_flow.py` и восстановления
 `tools/restore_reference_pair.py` + генерации обогащения 14.10.2026; id меняются при каждом
@@ -1044,21 +1048,27 @@ SQL-подтверждение — `check_external_report_fill.sql` раздел
 оба сервера теперь ведутся вручную). Состав инструментов проверяется статически:
 `tools/check_mcp_tool_wiring.py` с `EXPECTED_TOOLS` (core 3, enrichment 18, export 1) встроен в
 `validate_project.py` — лишний или исчезнувший инструмент даёт код возврата 1.
-Разделы «Структура базы данных» этого файла приведены к живой схеме: таблиц `configuration`,
-`configuration_objects`, `object_attributes`, `enum_values` в `ckb_1c_configurations` нет
-(есть пустая `configurations` и `config_extensions` — шаг 2 установки, для загрузки внешних
-отчётов не используются); фактические счётчики схемы сверяет `python _cmp_ddl.py`.
+Разделы «Структура базы данных» этого файла приведены к живой схеме: таблиц `configuration` (ед. ч.),
+`object_attributes`, `enum_values` в `ckb_1c_configurations` нет. Таблица `configurations` с узла V32
+заполняется заголовком конфигурации из `Configuration.xml` (BGU2), `config_extensions` по-прежнему
+пуста (вариант 2 — заглушка); `configuration_objects` создаётся шагом 2 и заполняется индексом состава
+с узла V33. Для загрузки внешних отчётов эти таблицы не используются; фактические счётчики схемы
+сверяет `python _cmp_ddl.py`.
 
-### 12. Варианты «конфигурация» и «расширение» не реализованы
+### 12. Вариант «расширение» не реализован; вариант «конфигурация» — частично (заголовок и индекс)
 
-**Файлы:** `src/config_load_router.py` (заглушки), `src/external_report_loader.py`
-**Статус:** ⚠️ Плановая незавершённость, зафиксирована в нормативе (правило R7, раздел 6):
-варианты `configuration`, `extension` возвращают `❌ сценарий не реализован`. Вариант
-`external_processing` снят с заглушки узлом V22 (14.10.2026) и грузится теми же таблицами, что
-и отчёт, — см. п. 22. Дочерние данные внешнего объекта (узел V12) и содержимое подкаталогов
-`Forms/`, `Templates/`, `Ext/` (узел V13) с 12.10.2026 **сохраняются для обоих внешних видов** —
-см. п. 9 и п. 14. Снять оставшиеся заглушки можно только после проектирования соответствующих
-вариант-схем и снятия ограничений п. 13.
+**Файлы:** `src/config_load_router.py` (маршрутизация, заглушка варианта 2),
+`src/configuration_loader.py` + `src/configuration_meta_parser.py` + `src/config_dump_info_parser.py`
+(вариант 1, узлы V32/V33)
+**Статус:** ⚠️/✅ Разделено узлами V32/V33 (17.10.2026), см. п. 25–26. Вариант `configuration`
+загружает заголовок `configurations` из `Configuration.xml` (V32) и индекс состава
+`configuration_objects` из `ConfigDumpInfo.xml` (V33) — `load_1c_catalog_tool(BGU2)` даёт
+`✅ загружено`. Не реализовано содержимое видов метаданных (реквизиты, формы, макеты, модули объектов
+конфигурации) — оно упирается в полиморфизм схемы (п. 13). Вариант `extension` по-прежнему возвращает
+`❌ сценарий не реализован`. Вариант `external_processing` снят с заглушки узлом V22 (14.10.2026),
+см. п. 22; дочерние данные внешнего объекта (V12/V13) сохраняются для обоих внешних видов (п. 9, п. 14).
+Снять содержимое видов конфигурации можно только после проектирования вариант-схем и снятия
+ограничений п. 13.
 
 ### 13. Схема дочерних таблиц была рассчитана только на внешний отчёт
 
@@ -1479,4 +1489,131 @@ stdio-транспорта — офлайн-вызов той же обёртк�
 `layout -i <.erf>` отвечает «не является файлом макета»); варианты `configuration`/`extension`
 (п. 12); автоматическая классификация «универсальный / привязанный» (п. 21) — отсутствие `cfg:`
 имён не является основанием для вывода о принадлежности объекта конфигурации.
+
+### 24. Строка внешнего объекта не хранила, откуда она загружена (узел V31)
+
+**Файлы:** `migrate_v31_provenance.sql`, `src/external_provenance.py` (новый),
+`src/external_table_writer.py` (`ExternalReportRowWriter`, `ExternalProcessingRowWriter`),
+`src/external_report_loader.py::register_external_report`, `tools/check_v31_provenance.py` (новый)
+**Проблема:** правка внешнего объекта идёт строками БД (правило 10 `1C_Rule.md`), каталог XML — лишь
+транспорт. После загрузки каталог мог быть перемещён или удалён, и по строке `external_report` нельзя
+было понять, из какого входа она появилась: из каталога, из двоичного `.erf`/`.epf` или создана у нас.
+**Статус:** ✅ **Реализовано 17.10.2026 (узел V31).** Модель (правило R15 норматива; имена колонок,
+CHECK и функций — по живой схеме и `src/external_provenance.py`, а не по памяти):
+- `external_report` дополнен колонками `origin_kind`, `origin_path`, `origin_sha256`,
+  `origin_manifest` (jsonb-состав входа), `origin_recorded_at`. Словарь `origin_kind` замкнут CHECK
+  `external_report_origin_kind_check`: `NULL` (провенанс не записан) либо `catalog` / `binary_file` /
+  `authored_layout` (константы `ORIGIN_CATALOG`/`ORIGIN_BINARY_FILE`/`ORIGIN_AUTHORED_LAYOUT`).
+  Ещё два CHECK: `external_report_origin_pair_check` — `(origin_kind IS NULL) = (origin_path IS NULL)`
+  (вид без пути и путь без вида запрещены), `external_report_origin_sha256_check` — `origin_sha256`
+  `NULL` либо `^[0-9a-f]{64}$`. Индекс — `idx_external_report_origin_sha256` (btree по `origin_sha256`,
+  НЕ частичный по `origin_kind`). Источник DDL — `src/generate_ddl.py` → `src/ddl_external_report.sql`
+  (перегенерирован), для живых БД — аддитивная `migrate_v31_provenance.sql`;
+- провенанс заполняет **загрузчик по факту своего входа**, а не оператор: `load_catalog` и
+  `register_external_report` принимают `origin`/`origin_kind` (путь источника и его вид). Дальше
+  `external_provenance.resolve_origin` (пустой вид ⇒ `catalog`, путь ⇒ сам `source_path`) →
+  `collect` (для файла — `sha256_of_file`, для каталога — канонический digest поимённого listing
+  `listing_digest` + `manifest`) → `columns_of` (раскладывает в колонки строки) → `compare`
+  (сверяет текущий провенанс с уже сохранённым, ключ ответа `provenance_match`). `ibcmd_bridge`
+  заявляет `origin=binary_path, origin_kind=ORIGIN_BINARY_FILE` (узел V25). Состояния —
+  `STATE_RECORDED`/`STATE_NOT_RECORDED` (`state_of`). `authored_layout` — резерв за нашим собранным
+  layout (узлы V29/V18), текущий загрузчик его не проставляет;
+- `force=True` **заново вычисляет и перезаписывает** провенанс (в отличие от `configuration_id`,
+  который переносится — R11): строка описывает текущее содержимое, поэтому источник текущего актуален;
+- отказ вычислить отпечаток (пустой путь, нет файла, каталог разбора не сохранён) — предупреждение в
+  карточке, **а не отказ загрузки**: `collect` возвращает `success=False`, `columns_of` отдаёт пустые
+  колонки, состояние читается как `not_recorded`;
+- **провенанс только у `external_report`.** У `configurations`/`configuration_objects` колонок `origin_*`
+  нет (решение D-C): заголовок конфигурации — единственная строка на `name`, индекс состава —
+  производные данные, пересоздаваемые при каждой загрузке. Версионности состояний нет (узел V19 не
+  реализован, п. 19).
+**Проверка:** `python tools/check_v31_provenance.py` (колонки + три CHECK + индекс `origin_sha256` в
+живой схеме; каталог → `origin_kind='catalog'`; `.epf` → `binary_file` с `sha256` файла; `force=True`
+перезаписывает; у `configurations`/`configuration_objects` `origin_*` нет). `_cmp_ddl.py` rc=0 (замер
+290 колонок, 66 индексов/уникальных ограничений, 38 ограничений, 4 витрины — см. замер V32/V33).
+
+### 25. Заголовок конфигурации не загружался: вариант 1 оставался заглушкой (узел V32)
+
+**Файлы:** `src/configuration_loader.py` (новый), `src/config_load_router.py`,
+`src/external_table_writer.py` (новый писатель `ConfigurationRowWriter`),
+`tools/check_v32_zero_configuration.py` (новый), `tools/restore_reference_pair.py`.
+Схема узлом V32 **не меняется**: заголовок пишется в таблицу `configurations`, созданную шагом 2
+(`create_1c_configurations_db.sql`), отдельной миграции V32 нет — колонок `source_format`/`fingerprint`/
+`captured_at` и CHECK `configurations_source_format_check` в схеме нет (проверено замером живой схемы).
+**Проблема:** `configurations` была пуста (0 строк), а `load_catalog` для варианта `configuration`
+возвращал `❌ сценарий не реализован`. Из-за этого привязка внешнего объекта к конфигурации (V20/V20.1)
+не работала end-to-end: `set_object_configuration_tool` отклонял любой `configuration_id`, потому что
+строки заголовка в справочнике не существовали.
+**Статус:** ✅ **Реализовано 17.10.2026 (узел V32) в объёме «заголовок + индекс состава», не содержимое.**
+Модель (правило R16 норматива):
+- `load_catalog` для варианта `configuration` читает корневой `Configuration.xml` и пишет **одну строку
+  заголовка** в `configurations` (колонки шага 2: `name`, `synonym`, `comment`, `version`, `vendor_name`,
+  `uuid`, режимы и модули — только то, что отдаёт XML; `configuration_objects` заполняет узел V33);
+- уникальность — по `name` (`configurations_name_key`): повторная загрузка той же конфигурации — это
+  **не** новый `id`; при совпадении `name` инструмент возвращает `⚠️ name_conflict` с карточкой
+  занятой строки и подсказкой `force=True` (R5: сначала вопрос оператору). `force=True` снимает старую
+  строку заголовка и её индекс состава и пишет заново; `uuid` при этом **не** является ключом
+  (в отличие от `external_report`): ключ — имя;
+- `configuration_id` привязок при этом **не** каскадируется (внешнего ключа нет, V20.1): после
+  `force=True` привязки к удалённому заголовку становятся битыми и требуют перепривязки — это называется
+  прямо (состояние `dangling`, п. 21);
+- **содержимое метаданных не загружается**: формы, модули, реквизиты объектов конфигурации в `attributes`
+  /`forms`/`bsl_modules` не пишутся; для видов метаданных вариантов `configuration`/`extension`
+  обогащения нет;
+- `extension` остаётся заглушкой (`❌ сценарий не реализован`): глобальный `UNIQUE (uuid)` в
+  `attributes`/`tabular_sections` (п. 13) не снят, отдельного индекса для расширения нет.
+**Проверка:** `python tools/check_v32_zero_configuration.py` (заголовок BGU2 читается из
+`Configuration.xml`; `id` стабилен при повторной загрузке по `name`; `name_conflict` удерживает запись;
+`force=True` пересоздаёт заголовок и снимает индекс состава; привязки после `force=True` становятся
+`dangling` и перепривязываются; эталонная пара `Test1`/`Test2` и `Test3` не тронуты; тестовый заголовок
+удаляется за собой). `export_readiness_tool()` при этом обязан **не** перечислять `configuration_objects`
+среди отсутствующих таблиц (замер 17.10.2026 после V33), а сценарий V18 — оставаться нереализованным.
+
+### 26. Индекс состава конфигурации отсутствовал: перечень объектов метаданных нельзя было построить (узел V33)
+
+**Файлы:** `create_1c_configurations_db.sql`, `migrate_v33_configuration_objects.sql` (новый),
+`src/config_dump_info_parser.py` (`parse_config_dump_info`, `find_config_dump_info`),
+`src/external_table_writer.py` (`ConfigurationObjectRowWriter`), `src/configuration_loader.py`
+(`register_configuration` вызывает разбор и писателя в той же транзакции), `src/config_load_router.py`,
+`docs/config-scenarios/FLOWCHART_1c-configurations-core.md`, `tools/check_v32_zero_configuration.py`
+(раздел 11)
+**Проблема:** в `ckb_1c_configurations` не было таблицы объектов конфигурации, поэтому «что вообще
+есть в этой конфигурации» отвечал только обход файлов выгрузки. `export_readiness_tool()` честно
+перечислял `configuration_objects` среди отсутствующих (узел V18).
+**Статус:** ✅ **Реализовано 17.10.2026 (узел V33).** Модель (правило R16 норматива):
+- таблица `configuration_objects` создаётся шагом 2 (`create_1c_configurations_db.sql`); для живых БД —
+  аддитивная `migrate_v33_configuration_objects.sql`. Колонки: `name`, `configuration_id`, `object_type`,
+  `object_name`, `child_type`, `parent_name`, `depth`, `object_id`, `uuid`, `config_version`,
+  `created_at`;
+  уникальность — по `configuration_id + object_id` (`configuration_objects_object_id_unique`)
+  **и** по `configuration_id + name` (`configuration_objects_name_unique`, `name` — полное
+  точечное имя объекта метаданных); одна строка на объект метаданных в базе. Индексы:
+  `idx_config_objects_{config,object_id,object_name,parent,type,uuid}`; FK
+  `configuration_objects_configuration_id_fkey`, CHECK `configuration_objects_depth_non_negative`;
+- источник — **только `ConfigDumpInfo.xml`** (индекс состава): `src/config_dump_info_parser.py::parse_config_dump_info`
+  читает `ConfigVersions` и `Metadata name|id|configVersion`, иерархию дочерних элементов через точку
+  (`Catalogs.ОсновныеСредства.Формы.СведенияОВидах` → `depth`, `parent_name`), два стиля идентификаторов
+  (v4 и составной `<uuid>.1`). Замер 17.10.2026 по `C:\1C_LLM\LoadDoc\BGU2`: 86 379 пар `name`/`id`,
+  45 видов, 67 887 значений `configVersion`;
+- **соотношение 86 379 и 122 164 (замер живой БД 17.10.2026, чтобы числа не читались противоречием):**
+  слой знаний `configdumpinfo-index-structure` мерил 86 379 — это ровно записи с «чистым» uuid в
+  `object_id` (сами объекты метаданных, `object_id NOT LIKE '%.%'`). Загрузчик дополнительно разворачивает
+  дочерние элементы точечной иерархии с составным `object_id` `<uuid>.N` — их 35 785. Итого в таблице
+  86 379 + 35 785 = 122 164 строки. Распределение по `depth`: 0 → 11 703, 1 → 68 070, 2 → 42 307,
+  3 → 78, 4 → 6. Числа 86 379 (объекты) и 122 164 (объекты + дочерние элементы) измеряют разное:
+  первое — перечень объектов метаданных, второе — полное число строк индекса с иерархией. В текстах
+  нельзя подставлять одно число вместо другого;
+- **XML самих объектов в таблице не хранится** — это перечень (индекс), а не содержимое. Поэтому узел V18
+  (экспорт изменений) остаётся нереализованным: компонентов «хранение XML + отслеживание изменений +
+  сборка XML» это не закрывает; `export_readiness_tool()` убирает `configuration_objects` из перечня
+  отсутствующих таблиц, но вывод о неготовости сценария не меняет;
+- индекс состава заполняется вместе с заголовком (шаг V32) в одной транзакции и снимается вместе с ним
+  (`force=True`); `uuid` объекта метаданных разрешается из `<Вид uuid=…>` файла объекта и сверяется с
+  `ConfigDumpInfo.xml` (слой знаний `xml-format`, якорь `configuration-object-uuid-location`).
+**Проверка:** `python tools/check_v32_zero_configuration.py` раздел 11 (число строк индекса совпадает с
+разобранным `ConfigDumpInfo.xml`; дублей по `object_id` и по `object_type+object_name` нет; `depth` /
+`parent_name` соответствуют точечной иерархии; `configuration_objects` **нет** в перечне отсутствующих
+таблиц у `export_readiness_tool()`, сценарий V18 — по-прежнему не реализован). `python _cmp_ddl.py`
+rc=0 — 290 колонок, 66 индексов/уникальных ограничений, 38 ограничений в `pg_constraint`, 4 витрины,
+расхождений нет (замер 17.10.2026 после V31+V32+V33).
 

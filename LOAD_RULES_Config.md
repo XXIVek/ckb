@@ -24,7 +24,7 @@
 
 | Условие в корне каталога | Вариант | Целевая таблица | Статус |
 |---|---|---|---|
-| есть `Configuration.xml`, `ConfigurationExtensionPurpose` нет | конфигурация | `configurations` | ❌ заглушка |
+| есть `Configuration.xml`, `ConfigurationExtensionPurpose` нет | конфигурация | `configurations` (заголовок, узел V32) + `configuration_objects` (индекс состава из `ConfigDumpInfo.xml`, узел V33) | ⚠️ частично: заголовок и индекс состава реализованы (V32/V33); содержимое видов (реквизиты, формы, макеты, модули объектов конфигурации) — не реализовано |
 | есть `Configuration.xml` + `ConfigurationExtensionPurpose` | расширение | `config_extensions` | ❌ заглушка |
 | есть XML с элементом `ExternalReport` | внешний отчёт | `external_report` | ✅ реализован |
 | есть XML с элементом `ExternalDataProcessor` | внешняя обработка | `external_report` c `object_kind='external_processing'` (узел V22) | ✅ реализован |
@@ -236,7 +236,7 @@
 
 ```text
 C:\1C_LLM\LoadDoc\
-├── BGU2\                  ← конфигурация (заглушка)
+├── BGU2\                  ← конфигурация (заголовок V32 + индекс состава V33; содержимое видов — нет)
 ├── TSD_R\                 ← расширение (заглушка)
 ├── TSD_0\                 ← внешняя обработка (реализован, узел V22)
 ├── Test1_Otchet\          ← внешний отчёт: реквизиты, ТЧ, форма, макет, Ext/objectmodule.bsl
@@ -251,7 +251,7 @@ C:\1C_LLM\LoadDoc\
 
 | Сценарий | Документ | Статус реализации |
 |---|---|---|
-| Полная конфигурация | [01_configuration.md](docs/config-scenarios/01_configuration.md) | ❌ не реализован |
+| Конфигурация | [01_configuration.md](docs/config-scenarios/01_configuration.md) | ⚠️ частично: заголовок (`Configuration.xml` → `configurations`, узел V32) и индекс состава (`ConfigDumpInfo.xml` → `configuration_objects`, узел V33) загружаются; содержимое видов метаданных (реквизиты, формы, макеты, модули объектов конфигурации) — не реализовано |
 | Расширение | [02_extension.md](docs/config-scenarios/02_extension.md) | ❌ не реализован |
 | Внешняя обработка | [03_external_processor.md](docs/config-scenarios/03_external_processor.md) | ✅ реализован узлом V22: заголовок в `external_report` с `object_kind='external_processing'`, содержимое `Forms/`, `Templates/`, `Ext/` и обогащение V17 работают так же, как для отчёта |
 | Внешний отчёт | [04_external_report.md](docs/config-scenarios/04_external_report.md) | ✅ реализован, включая дочерние данные (V12) и содержимое `Forms/`, `Templates/`, `Ext/` (V13); имена инструментов в документе устарели, норматив — FLOWCHART |
@@ -263,4 +263,31 @@ C:\1C_LLM\LoadDoc\
 | external_report | `forms`/`form_ext` = число каталогов `Forms/`, `templates` с заполненным `ext` или `ext_bin` = число каталогов `Templates/` | 0 — допустимо, если каталогов в выгрузке нет (`Test3_Otchet_Null`, `Test4_Otchet_Regress`) |
 | external_report | `bsl_modules` = число распознанных модулей `Ext/*.bsl` | модуль ФОРМ обязан быть в `form_ext.ext`, а не в `bsl_modules` (R9) |
 | external_report | `attributes` ≥ число `<Attribute>` + колонок ТЧ, `column_uuids` разрешаются полностью | битых ссылок и дублей быть не должно |
-| configuration / extension | — | метрики появятся вместе с реализацией вариантов 1–2. Внешняя обработка (узел V22) подчиняется тем же метрикам, что и внешний отчёт: заголовок в той же таблице `external_report`, вид различает `object_kind` |
+| configuration (заголовок, V32) | `configurations` = 1 строка на `Configuration.xml`; коллизия имени — отдельный статус `name_conflict` (`force=True` не предлагается); `force=True` пересоздаёт строку: id меняется, привязка `external_report.configuration_id` становится `dangling` | провенанс строк конфигурации НЕ ведётся (решение D-C, граница V31) |
+| configuration (индекс состава, V33) | `configuration_objects` = число записей `ConfigDumpInfo.xml` (`entries_total`); отсутствие `ConfigDumpInfo.xml` — предупреждение, а не отказ; таблица индексов не создана — отказ с требованием применить `migrate_v33_configuration_objects.sql` | индекс — производные данные выгрузки, без версионности; повторная загрузка снимает строки и пишет заново |
+| extension | — | метрики появятся вместе с реализацией варианта 2 (остаётся заглушкой) |
+| external_report / external_processing (провенанс, V31) | `origin_kind`/`origin_path`/`origin_sha256` заполнены у строки, загруженной после V31; карточка дубликата и `force=True` обязаны назвать, из какого входа загружена снимаемая строка | провенанс есть только у внешних объектов; у строк конфигурации его нет (D-C); версионности состояний нет (V19 не реализован). Внешняя обработка (узел V22) подчиняется тем же метрикам, что и внешний отчёт: заголовок в той же таблице `external_report`, вид различает `object_kind` |
+
+## Провенанс строки внешнего объекта (узел V31)
+
+Провенанс отвечает на вопрос «из какого входа появилась эта строка БД». Его заполняет **загрузчик**
+по факту своего вызова, а не оператор: в отличие от `configuration_id` (узел V20, который `force=True`
+переносит), провенанс `force=True` **перезаписывает** — это слепок текущего источника.
+
+| Колонка `external_report` | Что пишет загрузчик |
+|---|---|
+| `origin_kind` | вид входа: `catalog` (каталог XML-выгрузки) / `binary_file` (файл `.erf`/`.epf`) / `authored_layout` (наш собранный layout). Словарь замкнут CHECK; NULL = «провенанс не записан» |
+| `origin_path` | путь этого входа (для `.erf`/`.epf` — сам файл, а не каталог разбора: последний удаляется после успеха и источником не является) |
+| `origin_sha256` | digest несущего входа: файла либо поимённого listing каталога (не склейка содержимого) |
+| `origin_manifest` | состав входа (`{kind, scope, …}`, для каталога — `files[]` и признак `truncated`) |
+
+Границы:
+
+- **`force=True` обязан назвать источник снимаемой строки** — иначе оператор не понимает, тот ли это вход;
+- **провенанс есть только у внешних объектов.** У строк `configurations`/`configuration_objects` колонок
+  `origin_*` нет (решение D-C), и ответ загрузки говорит об этом прямо;
+- **отказ вычислить отпечаток — не отказ загрузки**: колонки остаются NULL, в карточке — предупреждение;
+- **версионности состояний нет** (узел V19 не реализован): провенанс — это источник текущей строки, а не история.
+
+Норматив: `src/external_provenance.py` (docstring), `migrate_v31_provenance.sql`, модель —
+`docs/EXTERNAL_OBJECT_EDIT_PLAN.md` раздел 16; проверка — `tools/check_v31_provenance.py`.

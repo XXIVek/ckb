@@ -1,6 +1,7 @@
 # Инвентарь содержимого БД: что видно без распаковки `Form.bin`
 
-> Отчёт по задаче 1 сессии 13.10.2026 (`docs/PROMPT_2026-10-13_analysis.md`, раздел 4).
+> Отчёт по инвентаризации содержимого БД (сессия 13.10.2026). Норматив поведения —
+> `docs/config-scenarios/FLOWCHART_1c-configurations-core.md`; числовые разделы — `check_external_report_inventory.sql`.
 > Источник чисел — вывод `check_external_report_inventory.sql` (`_v15_inventory_out.txt`),
 > инварианты — `check_external_report_fill.sql` (`_v15_fill_out.txt`),
 > находимость — `check_external_report_search.sql` (`_v15_search_out.txt`).
