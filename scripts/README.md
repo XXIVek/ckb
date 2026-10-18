@@ -17,38 +17,38 @@ python scripts\index_config.py <путь_к_конфигурации> [опци�
 
 **1. Полная индексация всех типов объектов:**
 ```powershell
-python scripts\index_config.py "C:\1C_LLM\LoadDoc\BGU2"
+python scripts\index_config.py "C:\1C_LLM\LoadDoc\Configurations\XML_files\BGU2"
 ```
 
 **2. Только регистрация (без индексации):**
 ```powershell
-python scripts\index_config.py "C:\1C_LLM\LoadDoc\BGU2" --register-only
+python scripts\index_config.py "C:\1C_LLM\LoadDoc\Configurations\XML_files\BGU2" --register-only
 # или
-python scripts\index_config.py "C:\1C_LLM\LoadDoc\BGU2" -r
+python scripts\index_config.py "C:\1C_LLM\LoadDoc\Configurations\XML_files\BGU2" -r
 ```
 
 **3. Индексация только определённых типов:**
 ```powershell
 # Только справочники и документы
-python scripts\index_config.py "C:\1C_LLM\LoadDoc\BGU2" --types catalog,document
+python scripts\index_config.py "C:\1C_LLM\LoadDoc\Configurations\XML_files\BGU2" --types catalog,document
 # или с коротким флагом
-python scripts\index_config.py "C:\1C_LLM\LoadDoc\BGU2" -t catalog,document
+python scripts\index_config.py "C:\1C_LLM\LoadDoc\Configurations\XML_files\BGU2" -t catalog,document
 ```
 
 **4. Индексация всех типов кроме указанных:**
 ```powershell
 # Без перечислений (быстрее)
-python scripts\index_config.py "C:\1C_LLM\LoadDoc\BGU2" --skip enum
+python scripts\index_config.py "C:\1C_LLM\LoadDoc\Configurations\XML_files\BGU2" --skip enum
 # или
-python scripts\index_config.py "C:\1C_LLM\LoadDoc\BGU2" -s enum
+python scripts\index_config.py "C:\1C_LLM\LoadDoc\Configurations\XML_files\BGU2" -s enum
 
 # Без перечислений и констант
-python scripts\index_config.py "C:\1C_LLM\LoadDoc\BGU2" --skip enum,constant
+python scripts\index_config.py "C:\1C_LLM\LoadDoc\Configurations\XML_files\BGU2" --skip enum,constant
 ```
 
 **5. Быстрая проверка структуры (только справочники):**
 ```powershell
-python scripts\index_config.py "C:\1C_LLM\LoadDoc\BGU2" -t catalog
+python scripts\index_config.py "C:\1C_LLM\LoadDoc\Configurations\XML_files\BGU2" -t catalog
 ```
 
 ### Поддерживаемые типы объектов

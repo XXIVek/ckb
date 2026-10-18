@@ -125,6 +125,12 @@ CREATE TABLE IF NOT EXISTS config_extensions (
 -- tabular_sections (parent_uuid + parent_type). Модули ФОРМ здесь не пишутся: их
 -- содержимое хранится в form_ext.ext (см. src/generate_ddl.py). Для живой БД эти
 -- колонки добавлены миграцией migrate_v13_forms_templates_bsl.sql.
+-- Узел V19: модуль тоже версионируется — правка кода модуля создаёт новую ревизию той же
+-- строки (M2). На модулях внешнего объекта это сказывается уже сейчас: правка кода в БД
+-- (правило 10 1C_Rule.md) перестаёт затирать прежнее состояние. Внешний ключ parent_uuid
+-- здесь был только колонкой (FK на external_report в живой схеме нет, очистка явная — п. 10
+-- правил core), поэтому снимать нечего; состав детей текущего состояния задаёт манифест
+-- родителя по file_path (uuid у модулей в выгрузке нет — граница file_path, M3).
 -- --------------------------------------------
 CREATE TABLE IF NOT EXISTS bsl_modules (
     id SERIAL PRIMARY KEY,
@@ -139,13 +145,27 @@ CREATE TABLE IF NOT EXISTS bsl_modules (
     -- отчётам, и к обработкам: заголовки объединены в одну таблицу, колонка processing_id и
     -- её FK удалены. Переименование report_id -> external_object_id отнесено к узлу V23
     -- (переименование самой таблицы-заголовка), здесь колонка не переименовывается.
+    -- Узел V19: при двух ревизиях объекта id родителя меняется, поэтому report_id — только
+    -- подсказка, а связь состояния читает манифест родителя по file_path.
     report_id INT,
     parent_uuid UUID,
     parent_type TEXT NOT NULL DEFAULT 'external_report',
     module_type VARCHAR(50),
     code_size INTEGER,
     truncated BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at TIMESTAMP DEFAULT NOW()
+    created_at TIMESTAMP DEFAULT NOW(),
+    -- узел V19 (M1): цепочка состояний модуля. Ключ состояния — (parent_uuid, file_path,
+    -- revision_no): uuid у модуля нет, поэтому идентификатор модуля — путь внутри выгрузки.
+    -- Строки конфигураций (configuration_id) тоже получают revision_no = 1: индекс состава
+    -- пересоздаётся загрузчиком, а модули конфигурации историей не живут.
+    revision_no INTEGER NOT NULL DEFAULT 1,
+    changed_at TIMESTAMP,
+    changed_by TEXT,
+    CONSTRAINT bsl_modules_revision_no_positive CHECK (revision_no >= 1),
+    CONSTRAINT bsl_modules_changed_by_known
+        CHECK (changed_by IS NULL OR changed_by IN ('load', 'edit', 'restore')),
+    CONSTRAINT bsl_modules_changed_pair_check
+        CHECK ((changed_at IS NULL) = (changed_by IS NULL))
 );
 
 -- --------------------------------------------
@@ -203,8 +223,37 @@ CREATE INDEX IF NOT EXISTS idx_configurations_name ON configurations(name);
 CREATE INDEX IF NOT EXISTS idx_bsl_modules_config ON bsl_modules(configuration_id);
 CREATE INDEX IF NOT EXISTS idx_bsl_modules_parent_uuid ON bsl_modules(parent_uuid);
 CREATE INDEX IF NOT EXISTS idx_bsl_modules_module_type ON bsl_modules(module_type);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_bsl_modules_parent_file
-    ON bsl_modules(parent_uuid, file_path) WHERE parent_uuid IS NOT NULL;
+-- Узел V19: частичный уникальный индекс V13 (parent_uuid, file_path) получает границу
+-- revision_no — цепочка состояний модуля идентифицируется путём внутри выгрузки (у модуля
+-- нет uuid, M1/M3). Старый индекс uq_bsl_modules_parent_file снимает migrate_v19_revisions.sql.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_bsl_modules_parent_file_revision
+    ON bsl_modules(parent_uuid, file_path, revision_no) WHERE parent_uuid IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_bsl_modules_parent_uuid_revision
+    ON bsl_modules(parent_uuid, revision_no) WHERE parent_uuid IS NOT NULL;
+-- Отдельный индекс по (parent_uuid, file_path) не заводится: разрешение модуля по пути
+-- из манифеста родителя всегда ищет строки с parent_uuid IS NOT NULL, и частичный
+-- уникальный индекс выше его обслуживает. Живая схема (замер 18.10.2026) его не содержит.
+
+-- ---------------------------------------------------------------------------
+-- Узел V19: v_current_bsl_modules — текущее состояние модулей (M1).
+--   * модули внешнего объекта: max(revision_no) в цепочке (parent_uuid, file_path);
+--   * модули конфигурации (parent_uuid IS NULL) историей не живут — отдаются как есть.
+-- Читается только src/current_revision.py (единая точка доступа S1–S5).
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE VIEW v_current_bsl_modules AS
+SELECT m.id,
+       m.configuration_id, m.module_name, m.file_path, m.code,
+       m.object_type, m.object_name, m.report_id, m.created_at,
+       m.parent_uuid, m.parent_type, m.module_type, m.code_size,
+       m.truncated, m.revision_no, m.changed_at, m.changed_by
+FROM bsl_modules m
+WHERE m.parent_uuid IS NULL
+   OR NOT EXISTS (
+        SELECT 1 FROM bsl_modules n
+        WHERE n.parent_uuid = m.parent_uuid
+          AND n.file_path = m.file_path
+          AND n.revision_no > m.revision_no
+   );
 
 -- Индексы configuration_objects (узел V33). Перечень объекта читают по конфигурации и по
 -- виду, дочерние элементы — по parent_name, поиск по идентификатору — по object_id/uuid.

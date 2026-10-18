@@ -19,6 +19,8 @@ except Exception:
     pass
 
 LOAD = pathlib.Path(r"C:\1C_LLM\LoadDoc")
+# С 18.10.2026 XML-выгрузки конфигураций консолидованы в Configurations\XML_files\<имя>.
+CFG_XML = LOAD / "Configurations" / "XML_files"
 VER5 = re.compile(r"<xr:(TypeId|ValueId)[^>]*>\s*([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-5[0-9a-fA-F]{3}-"
                   r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})", re.I)
 V1_CLASS = ("9cd510cd-abfc-11d4-9434-004095e12fc7", "9fcd25a0-4822-11d4-9414-008048da11f9")
@@ -32,7 +34,7 @@ def context_lines(text, pos, before=6, after=2):
 
 
 print("=== 1. ClassId с v1: где именно и какой элемент метаданных ===")
-for cfg in (LOAD / "BGU2", LOAD / "TSD_R"):
+for cfg in (CFG_XML / "BGU2", LOAD / "TSD_R"):
     root = cfg / "Configuration.xml"
     if not root.is_file():
         continue
@@ -45,7 +47,7 @@ for cfg in (LOAD / "BGU2", LOAD / "TSD_R"):
 
 print("\n=== 2. TypeId/ValueId версии 5 (name-based) ===")
 hits = 0
-for cfg in (LOAD / "BGU2", LOAD / "TSD_R"):
+for cfg in (CFG_XML / "BGU2", LOAD / "TSD_R"):
     for path in sorted(cfg.glob("*/*.xml")):
         text = path.read_text(encoding="utf-8", errors="replace")
         for m in VER5.finditer(text):
@@ -61,7 +63,7 @@ for cfg in (LOAD / "BGU2", LOAD / "TSD_R"):
 if not hits:
     print("  в выборке */*.xml не найдено (значит v5 был в корневом Configuration.xml"
           " или в файле вне выборки) — ищем по корневаем:")
-    for cfg in (LOAD / "BGU2", LOAD / "TSD_R"):
+    for cfg in (CFG_XML / "BGU2", LOAD / "TSD_R"):
         root = cfg / "Configuration.xml"
         if not root.is_file():
             continue
@@ -71,7 +73,7 @@ if not hits:
             print(context_lines(text, m.start(), before=18, after=1))
 
 print("\n=== 3. Catalog.ИдентификаторыОбъектовМетаданных: реквизиты и типы ===")
-iom = LOAD / "BGU2" / "Catalogs" / "ИдентификаторыОбъектовМетаданных.xml"
+iom = CFG_XML / "BGU2" / "Catalogs" / "ИдентификаторыОбъектовМетаданных.xml"
 if iom.is_file():
     text = iom.read_text(encoding="utf-8", errors="replace")
     print(f"  файл: {iom.name}, размер {len(text)} симв.")

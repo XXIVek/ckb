@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 r"""_v33_probe.py — офлайн-проверка узла V33: индекс объектов конфигурации.
 
-Загружает C:\1C_LLM\LoadDoc\BGU2 общей точкой входа `load_catalog` (Configuration.xml ->
+Загружает C:\1C_LLM\LoadDoc\Configurations\XML_files\BGU2 общей точкой входа `load_catalog`
+(Configuration.xml ->
 вариант configuration -> register_configuration -> ConfigDumpInfo.xml) и сверяет то, что
 легло в `configuration_objects`, с контрактом парсера.
 
@@ -60,7 +61,9 @@ from config_load_router import format_load_result, load_catalog  # noqa: E402
 from configuration_loader import delete_configuration  # noqa: E402
 from external_db import connect  # noqa: E402
 
-BGU2 = r"C:\1C_LLM\LoadDoc\BGU2"
+# XML-выгрузка BGU2: с 18.10.2026 конфигурационные выгрузки консолидованы в
+# C:\1C_LLM\LoadDoc\Configurations\XML_files\<имя> (файлы .cf — в Configurations\).
+BGU2 = r"C:\1C_LLM\LoadDoc\Configurations\XML_files\BGU2"
 DOTTED_ID_RE = r"^[0-9a-fA-F-]{36}\."
 CONFIG_VERSION_RE = r"^[0-9a-fA-F]{40}$"
 

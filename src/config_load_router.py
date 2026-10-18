@@ -342,6 +342,22 @@ def _existing_card(existing, table):
     ) if key in existing]
     if parts:
         lines.append("  Дочерние данные: " + ", ".join(parts))
+    # Узел V19 (M1, M5): карточка дубликата обязана назвать ревизию, которую увидит
+    # последующая работа (это id строки из витрины текущего состояния), и сколько состояний
+    # у объекта в истории. Различие «манифеста нет» и «манифест пуст» — не деталь схемы:
+    # у строки, загруженной до V19, состав не заявлен, и посчитанные по строкам текущей
+    # ревизии числа нельзя выдавать за заявленный состав (иначе 0 прочитался бы как «детей
+    # нет»). Флаг и число считает src/current_revision.py — тот же канал, что и витрины.
+    revision_no = existing.get("revision_no")
+    if revision_no:
+        history = existing.get("history_revisions") or revision_no
+        if existing.get("manifest_missing"):
+            manifest_note = ("манифест состава НЕ записан (строка загружена до узла V19): "
+                             "числа детей посчитаны по строкам текущей ревизии, это не "
+                             "заявленный состав")
+        else:
+            manifest_note = (f"манифест состава: {existing.get('manifest_members', 0)} членов")
+        lines.append(f"  Ревизия: {revision_no} из {history} состояний; {manifest_note}")
     lines.append(f"  Таблица: {table}")
     return lines
 
@@ -433,6 +449,22 @@ def format_load_result(result):
                     t=written["templates"] or 0,
                     b=written["bsl_modules"] or 0,
                 )
+            )
+        # Узел V19 (M1, M3, M7): карточка называет ревизию, которую записала эта загрузка, и
+        # состав, заявленный манифестом. Это не справка о схеме, а ответ на вопрос оператора
+        # «что стало с историей»: force=True снимает цепочку состояний (M7), поэтому строка
+        # всегда ревизия 1 — молчать об этом нельзя, иначе ожидалась бы «ревизия 2».
+        revision_no = result.get("revision_no")
+        if revision_no is not None:
+            members = result.get("manifest_members") or {}
+            total = sum(int(count or 0) for count in members.values())
+            detail = ", ".join(
+                f"{kind} {int(members.get(kind) or 0)}" for kind in sorted(members)
+            )
+            lines.append(
+                f"Ревизия: {revision_no} (история прежних состояний снята этой загрузкой — M7); "
+                f"манифест состава: {total} членов"
+                + (f" ({detail})" if detail else " (состав пуст — детей у объекта нет)")
             )
         # узел V32: конфигурация пишет строку справочника — счётчики детей внешнего
         # объекта к ней не относятся. Вместо них печатаются те части выгрузки, которые в БД

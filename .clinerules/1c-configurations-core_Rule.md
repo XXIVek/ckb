@@ -398,7 +398,7 @@ load_1c_catalog_tool(source_path=..., force=True)   # ♻️ старая зап
 # Пути обязаны быть абсолютными: ibcmd рвёт относительный по рабочему каталогу процесса.
 # Имена параметров - как в коде: file_path/config_file/db_path/work_dir/force/keep_layout.
 load_external_object_file_tool(file_path=r"C:\1C_LLM\LoadDoc\БП3\СравнениеУСНИ90_2.erf",
-                               config_file=r"C:\1C_LLM\LoadDoc\БП3\BP3_1Cv8.cf")
+                               config_file=r"C:\1C_LLM\LoadDoc\Configurations\BP3_1Cv8.cf")
 #   ❌ нет файла / чужое расширение / нет ibcmd / не создалась ИБ / config load не удался /
 #      разбор не дал <база>.xml - стадия conversion, до load_catalog не дошло (R13). Каталог
 #      <база>/ опционален: объект с пустым содержимым его не создаёт (замер узла V29), это не
@@ -567,7 +567,9 @@ delete_external_report_tool(source_path=...)  # или uuid=..., или report_i
 4. **Удаление внешнего объекта — `delete_external_report_tool(source_path | uuid | report_id,
    object_type?)`**; `delete_config_tool` удалён 14.10.2026 вместе с внеконтрактными
    инструментами (п. 11)
-5. **Источники конфигураций:** `C:\1C_LLM\LoadDoc` (вне проекта)
+5. **Источники конфигураций:** `C:\1C_LLM\LoadDoc` (вне проекта); с 18.10.2026 полные
+   конфигурации консолидованы в `C:\1C_LLM\LoadDoc\Configurations` — см. раздел
+   «Путь к источникам конфигураций»
 6. **Правим только в базе данных (принято оператором 15.10.2026).** Создание, редактирование и
    удаление внешнего объекта выполняется **только строками БД** `ckb_1c_configurations`
    (`external_report`, `attributes`, `tabular_sections`, `forms`, `form_ext`, `templates`,
@@ -586,7 +588,25 @@ delete_external_report_tool(source_path=...)  # или uuid=..., или report_i
 
 ## 📁 Путь к источникам конфигураций
 
-Выгрузки конфигураций хранятся вне проекта: `C:\1C_LLM\LoadDoc`
+Выгрузки хранятся вне проекта: `C:\1C_LLM\LoadDoc`. С 18.10.2026 источники **полных
+конфигураций** консолидованы в `C:\1C_LLM\LoadDoc\Configurations` — ровно два входа:
+
+```text
+C:\1C_LLM\LoadDoc\Configurations\
+├── NULL_1Cv8.cf  BGU2_1Cv8.cf  BP3_1Cv8.cf  KomMag_1Cv8.cf
+├── UNF3_1Cv8.cf  UT11_1Cv8.cf  ZUP31_1Cv8.cf   ← файлы .cf: вход `ibcmd config load`
+└── XML_files\
+    ├── Config_NULL\                              ← фикстура «нулевой» конфигурации (V32/V33)
+    └── BGU2\ BP3\ KomMag\ UNF3\ UT11\ ZUP31\    ← XML-выгрузки: вход load_1c_catalog_tool
+```
+
+Правило выбора входа: `XML_files\<имя>` — каталог для `load_1c_catalog_tool` (правило R1),
+`<имя>_1Cv8.cf` — параметр `config_file` для `load_external_object_file_tool` /
+`ibcmd config load` (узел V25). Внешние объекты и расширения НЕ переезжали: `Test*`, `TSD_0`,
+`TSD_R`, внешние бинари `.erf`/`.epf`/`.cfe` (в том числе в `LoadDoc\БП3\`) остаются в корне
+`LoadDoc`. Прежние пути `LoadDoc\BGU2`, `LoadDoc\Config_NULL\...`, `LoadDoc\БП3\BP3_1Cv8.cf`
+с 18.10.2026 не существуют; исторические замеры в нормативах сохраняют прежнюю запись там,
+где она описывает факт конкретной даты.
 
 ## 📖 Ссылки на документацию
 
@@ -1603,7 +1623,8 @@ CHECK и функций — по живой схеме и `src/external_provenan
 - источник — **только `ConfigDumpInfo.xml`** (индекс состава): `src/config_dump_info_parser.py::parse_config_dump_info`
   читает `ConfigVersions` и `Metadata name|id|configVersion`, иерархию дочерних элементов через точку
   (`Catalogs.ОсновныеСредства.Формы.СведенияОВидах` → `depth`, `parent_name`), два стиля идентификаторов
-  (v4 и составной `<uuid>.1`). Замер 17.10.2026 по `C:\1C_LLM\LoadDoc\BGU2`: 86 379 пар `name`/`id`,
+  (v4 и составной `<uuid>.1`). Замер 17.10.2026 по выгрузке BGU2 (на момент замера —
+  `C:\1C_LLM\LoadDoc\BGU2`; с 18.10.2026 — `C:\1C_LLM\LoadDoc\Configurations\XML_files\BGU2`): 86 379 пар `name`/`id`,
   45 видов, 67 887 значений `configVersion`;
 - **соотношение 86 379 и 122 164 (замер живой БД 17.10.2026, чтобы числа не читались противоречием):**
   слой знаний `configdumpinfo-index-structure` мерил 86 379 — это ровно записи с «чистым» uuid в

@@ -8,6 +8,22 @@ from pathlib import Path
 
 from external_db import transaction
 from external_meta_parser import parse_external_meta
+# Узел V19 (M1–M5, S1–S5): версионность состояний. Единая точка доступа к «текущему» —
+# src/current_revision.py: имена витрин, разрешение состава детей манифестом, простановка
+# штампа ревизии и сборка самого манифеста. Загрузчик НЕ имеет права писать свой
+# max(revision_no) и свой формат ключей: ровно та же причина, по которой фильтр карантина
+# держат в src/quarantine.py (сторожит tools/_v19_read_sites.py).
+from current_revision import (
+    CHANGED_BY_LOAD,
+    FIRST_REVISION,
+    MANIFEST_KEYS,
+    build_children_manifest,
+    current_child_count_sql,
+    current_view,
+    manifest_member_count_sql,
+    manifest_missing_sql,
+    stamp_revision_rows,
+)
 # узел V31: провенанс строки — ОТКУДА появилась эта запись и чем подтвердить, что источник
 # тот же. Логика (отпечатки, манифест, формулировки, сверка) держится в одном модуле по той
 # же причине, по которой там держат словарь тегов карантина: в двух местах тексты разъезжаются.
@@ -338,13 +354,27 @@ def find_external_object(uuid_val, obj_type="external_report"):
 
     info = _external_meta_info(obj_type)
     table = info["table"]
-    bsl_column = info["bsl_column"]
+    # Узел V19 (M5, S1): карточка описывает ТЕКУЩЕЕ состояние объекта, поэтому строку читают
+    # из витрины current_view(), а не из базовой таблицы. Писать здесь свой max(revision_no)
+    # нельзя: uuid больше не уникален (уникальна пара uuid, revision_no), и выборка без
+    # фильтра ревизий отдала бы произвольную строку цепочки, а не текущую.
+    header_view = current_view(table)
 
     columns = [
         "t.id",
         "REPLACE(COALESCE(t.name, ''), '|', ' ')",
         "COALESCE(t.uuid::text, '')",
         "COALESCE(t.created_at::text, '')",
+        # узел V19 (M1, M7): номер текущего состояния и длина всей цепочки. Нужны оба числа:
+        # force=True снимает историю целиком (M7), и оператор обязан видеть, сколько ревизий
+        # будет снято, ДО подтверждения перезагрузки.
+        "COALESCE(t.revision_no::text, '')",
+        f"(SELECT COUNT(*) FROM {table} h WHERE h.uuid = t.uuid)",
+        # узел V19 (M3, A1): заявлен ли состав детей. «манифеста нет» (NULL — строки,
+        # загруженные до V19) и «манифест пуст» (состав снят целиком) — разные утверждения,
+        # и карточка обязана различать их, а не выдавать 0 как факт о составе.
+        f"COALESCE(({manifest_missing_sql('t.uuid')})::text, 'true')",
+        f"COALESCE({manifest_member_count_sql('t.uuid')}, 0)",
         # узел V22: вид строки заголовка. uuid в таблице глобален (UNIQUE), поэтому он не
         # может принадлежать и отчёту, и обработке: если найденная строка другого вида,
         # оператор указал каталог не того объекта — это не дубликат для force=True.
@@ -366,9 +396,13 @@ def find_external_object(uuid_val, obj_type="external_report"):
         "COALESCE(t.origin_manifest->>'total_bytes', '')",
         "COALESCE(t.origin_manifest->>'truncated', '')",
         "COALESCE(t.origin_manifest->>'digest_reason', '')",
-        f"(SELECT COUNT(*) FROM bsl_modules b WHERE b.{bsl_column} = t.id)",
+        # узел V19 (M5): состав детей считается не «по parent_uuid», а по манифесту текущей
+        # ревизии родителя — иначе в счётчик попали бы строки всех ревизий и уже снятые дети.
+        current_child_count_sql("bsl_modules", "t.uuid", include_without_manifest=True),
     ]
-    keys = ["id", "name", "uuid", "created_at", "object_kind", "configuration_id",
+    keys = ["id", "name", "uuid", "created_at", "revision_no", "history_revisions",
+            "manifest_missing", "manifest_members",
+            "object_kind", "configuration_id",
             "origin_kind", "origin_path", "origin_sha256", "origin_recorded_at",
             "origin_digest_scope", "origin_file_count", "origin_total_bytes",
             "origin_truncated", "origin_digest_reason",
@@ -382,11 +416,16 @@ def find_external_object(uuid_val, obj_type="external_report"):
             ("form_ext", "form_ext_count"),
             ("templates", "templates_count"),
         ):
-            columns.append(f"(SELECT COUNT(*) FROM {child_table} c WHERE c.parent_uuid = t.uuid)")
+            # include_without_manifest=True — оговорка для снимков до V19: их состав никогда
+            # не заявлялся, и ноль от строгого подсчёта по манифесту прочитался бы как
+            # «детей нет». Число, полученное так, карточка обязана назвать числом без
+            # заявленного состава (src/current_revision.py, manifest_missing_sql).
+            columns.append(current_child_count_sql(
+                child_table, "t.uuid", include_without_manifest=True))
             keys.append(key)
 
     safe_uuid = str(uuid_val).replace("'", "''")
-    sql = f"SELECT {', '.join(columns)} FROM {table} t WHERE t.uuid = '{safe_uuid}'::uuid LIMIT 1"
+    sql = f"SELECT {', '.join(columns)} FROM {header_view} t WHERE t.uuid = '{safe_uuid}'::uuid LIMIT 1"
 
     rows = _psql_fields(sql)
     if isinstance(rows, dict) and "error" in rows:
@@ -396,7 +435,10 @@ def find_external_object(uuid_val, obj_type="external_report"):
 
     values = rows[0]
     int_keys = {"id", "bsl_modules_count", "attributes_count", "tabular_sections_count",
-                "forms_count", "form_ext_count", "templates_count"}
+                "forms_count", "form_ext_count", "templates_count",
+                # узел V19: номер текущей ревизии, длина цепочки и число заявленных членов
+                # состава — числа, а не текст; пустое значение читается нулём.
+                "revision_no", "history_revisions", "manifest_members"}
     found = {}
     for key, value in zip(keys, values):
         if key in int_keys:
@@ -412,6 +454,13 @@ def find_external_object(uuid_val, obj_type="external_report"):
         found["configuration_id"] = int(found.get("configuration_id") or 0) or None
     except (TypeError, ValueError):
         found["configuration_id"] = None
+    # узел V19 (M3, A1): «манифеста нет» (NULL — строки, загруженные до V19) и «манифест
+    # пуст» (состав снят целиком) — разные состояния, и числом членов это не разрешается:
+    # у отсутствующего манифеста members = 0 ровно как у пустого. Различие отдаёт отдельный
+    # флаг, посчитанный src/current_revision.py::manifest_missing_sql.
+    found["manifest_missing"] = (
+        str(found.get("manifest_missing") or "true").strip().lower() != "false"
+    )
     # узел V31: манифест строки собирается из плоских полей самим модулем провенанса —
     # форма манифеста ({digest_scope, file_count, ...}) принадлежит ему, и читатели
     # (describe_lines, compare) работают с одной структурой. Пустой dict = манифеста нет,
@@ -427,17 +476,25 @@ def find_external_object(uuid_val, obj_type="external_report"):
 
 
 def delete_external_object(obj_id=None, uuid_val=None, obj_type="external_report"):
-    """Удалить внешний отчёт/обработку вместе со всеми связанными данными (V13).
+    """Удалить внешний отчёт/обработку вместе со всеми связанными данными (V13, V19).
 
-    Очистка явная, а не только каскадом:
-      * bsl_modules - явный DELETE по report_id И по parent_uuid (колонка processing_id
-        удалена узлом V22 вместе с таблицей external_processing; FK на bsl_modules.report_id
-        в схеме отсутствует, каскада нет);
-      * form_ext, forms, templates - явный DELETE по parent_uuid. Для forms/
-        form_ext/templates FK parent_uuid -> external_report(uuid) ON DELETE CASCADE
-        есть, но явный порядок (сначала form_ext, затем forms) делает счётчики
-        удалённых строк прозрачными и не зависит от наличия каскада;
-      * attributes, tabular_sections - остаются на каскаде по FK parent_uuid.
+    Узел V19 (инвариант 6 принятой модели): внешний ключ `parent_uuid ->
+    external_report(uuid)` из схемы снят — при двух ревизиях одного uuid `uuid` не уникален,
+    поэтому каскада больше нет ни у одной дочерней таблицы. Очистка обязанна быть явной и
+    обязана снимать строки ВСЕХ ревизий: удаляется объект, а не одна его ревизия (M7 —
+    загрузка каталога историю сбрасывает, удаление — тем более). После удаления по любой
+    границе сирот по всем `revision_no` быть не должно.
+
+    Порядок снятия:
+      * bsl_modules - явный DELETE по report_id И по parent_uuid (колонки processing_id нет,
+        узел V22; FK на bsl_modules.report_id в схеме не было никогда);
+      * form_ext -> forms (у form_ext есть FK form_id -> forms(id) ON DELETE CASCADE, но
+        явный порядок держит счётчики честными), затем templates, attributes,
+        tabular_sections — все по parent_uuid, то есть все ревизии;
+      * строки заголовка — по uuid, а не по id: одна цепочка состояний одного объекта
+        снимается целиком, иначе следующая загрузка каталога упала бы на
+        `UNIQUE (uuid, revision_no)`.
+    Строки обогащения (config_*) FK не имеют — снимаются явно по parent_uuid (узел V17).
     """
     info = _external_meta_info(obj_type)
     table = info["table"]
@@ -474,11 +531,16 @@ def delete_external_object(obj_id=None, uuid_val=None, obj_type="external_report
         if isinstance(del_res, dict) and "error" in del_res:
             return {"success": False, "error": f"Не удалось удалить BSL-модули: {del_res['error']}"}
 
-    # V13: формы, их содержимое и макеты удаляем явно и в правильном порядке:
-    # form_ext -> forms (FK form_id -> forms(id)), затем templates.
+    # V13/V19: формы, их содержимое, макеты, реквизиты и табличные части снимаем ЯВНО и в
+    # правильном порядке: form_ext -> forms (FK form_id -> forms(id) остаётся), затем
+    # templates, attributes, tabular_sections. Узел V19: FK parent_uuid ->
+    # external_report(uuid) снят, каскада нет ни у одной из этих таблиц, поэтому молчаливая
+    # ставка на каскад оставила бы сирот по всем revision_no (инвариант 6 модели).
+    # Условие `parent_uuid = uuid` снимает строки всех ревизий — удаляется объект целиком.
     children_deleted = {}
     if info["has_children"] and obj_uuid:
-        for child_table in ("form_ext", "forms", "templates"):
+        for child_table in ("form_ext", "forms", "templates",
+                            "attributes", "tabular_sections"):
             counted = _run_psql(f"SELECT COUNT(*) FROM {child_table} WHERE parent_uuid = '{obj_uuid}'::uuid")
             count = counted[0]["result"] if isinstance(counted, list) and counted else 0
             if count:
@@ -487,14 +549,6 @@ def delete_external_object(obj_id=None, uuid_val=None, obj_type="external_report
                     return {"success": False,
                             "error": f"Не удалось удалить связанные строки {child_table}: {gone['error']}"}
             children_deleted[child_table] = count
-
-        # V13: реквизиты и табличные части удалит каскад по FK parent_uuid, но их количество
-        # оператору показываем так же честно - считаем до удаления родителя.
-        for child_table in ("attributes", "tabular_sections"):
-            counted = _run_psql(
-                f"SELECT COUNT(*) FROM {child_table} WHERE parent_uuid = '{obj_uuid}'::uuid")
-            children_deleted[child_table] = (
-                counted[0]["result"] if isinstance(counted, list) and counted else 0)
 
     # V17: строки обогащения (config_aliases, config_snippets, config_snippet_dependencies,
     # config_cross_references) НЕ имеют FK на объект выгрузки - каскада нет, удаляем явно по
@@ -530,11 +584,18 @@ def delete_external_object(obj_id=None, uuid_val=None, obj_type="external_report
                             "error": f"Не удалось удалить связанные строки {child_table}: {gone['error']}"}
             children_deleted[child_table] = count
 
-    del_res = _run_psql(f"DELETE FROM {table} WHERE id = {obj_id}")
+    # Узел V19 (M7, инвариант 6): снимается цепочка состояний объекта ЦЕЛИКОМ, а не одна
+    # ревизия: при удалении по id осталась бы история того же uuid, и следующая загрузка
+    # каталога упала бы на UNIQUE (uuid, revision_no). Поэтому заголовок удаляется по uuid
+    # (все revision_no); по id — только если uuid строки неизвестен (старые снимки без
+    # заполненной колонки uuid, что для внешнего объекта невозможно: R3 требует uuid).
+    where_header = (f"uuid = '{obj_uuid}'::uuid" if obj_uuid else f"id = {obj_id}")
+    del_res = _run_psql(f"DELETE FROM {table} WHERE {where_header}")
     if isinstance(del_res, dict) and "error" in del_res:
         return {"success": False, "error": del_res["error"]}
 
-    check = _psql_fields(f"SELECT t.id FROM {table} t WHERE t.id = {obj_id} LIMIT 1")
+    check_where = (f"t.uuid = '{obj_uuid}'::uuid" if obj_uuid else f"t.id = {obj_id}")
+    check = _psql_fields(f"SELECT t.id FROM {table} t WHERE {check_where} LIMIT 1")
     if isinstance(check, dict) and "error" in check:
         return {"success": False, "error": check["error"]}
     if check:
@@ -548,7 +609,10 @@ def delete_external_object(obj_id=None, uuid_val=None, obj_type="external_report
         "table": table,
         "bsl_modules_deleted": bsl_deleted,
         "children_deleted": children_deleted,
-        "children_cascaded": info["has_children"],
+        # Узел V19: ключ `children_cascaded` переименован — каскада по parent_uuid в схеме
+        # больше нет (внешний ключ снят), поэтому утверждать о каскаде было бы неправдой.
+        # Снятые строки перечислены в `children_deleted` по каждой дочерней таблице.
+        "children_removed_by_parent_uuid": bool(info["has_children"] and obj_uuid),
     }
 
 
@@ -759,7 +823,38 @@ def register_external_report(source_path, replace=None, force=None, xml_path=Non
     template_rows = subdirs["templates"]
     bsl_rows = subdirs["bsl_modules"]
 
-    
+    # Узел V19 (M1, M3, M7): заголовок и все его дети одной загрузки пишутся ОДНОЙ ревизией.
+    # Штамп (revision_no, changed_at, changed_by) у всей цепочки состояния общий: состояние
+    # описывается моментом, когда оно появилось, а не моментом вставки каждой строки, поэтому
+    # changed_at считается один раз и передаётся всем спискам тем же значением.
+    # Явная загрузка каталога историю сбрасывает (M7): строки прежнего uuid сняты до вставки
+    # (delete_external_object снимает цепочку целиком), поэтому первая строка новой цепочки —
+    # revision_no = FIRST_REVISION. Продолжить цепочку ревизий может только правка состояния
+    # в БД, а не повторная загрузка выгрузки.
+    # Манифест состава собирается по контрактам разбора ДО транзакции: загрузчик знает полный
+    # состав до первой вставки, и ровно тот же состав он вставит (одна транзакция, иначе —
+    # полный откат). Считать состав запросом после вставки означало бы описать состояние тем,
+    # что в него попало, и не заметить молча не вставшую строку. Канал — src/current_revision.py,
+    # тот же модуль, которым состав потом читают (S1): имена ключей и формат элемента
+    # `parent_type|file_path` задаёт он, а не это место.
+    revision_no = FIRST_REVISION
+    children_manifest = build_children_manifest(
+        attribute_rows=attribute_rows,
+        tabular_section_rows=tabular_section_rows,
+        form_rows=form_rows,
+        template_rows=template_rows,
+        bsl_rows=bsl_rows,
+    )
+    report_row["children_manifest"] = children_manifest
+    changed_at = stamp_revision_rows([report_row], revision_no=revision_no)
+    # form_ext_rows штампуются здесь же, хотя form_id им подставляется внутри транзакции:
+    # описание формы относится к ревизии своей формы (uq_form_ext_form_id_revision), другой
+    # ревизии у этой загрузки нет.
+    for child_rows in (attribute_rows, tabular_section_rows, form_rows,
+                       template_rows, bsl_rows, form_ext_rows):
+        stamp_revision_rows(child_rows, revision_no=revision_no, changed_at=changed_at)
+    manifest_members = {key: len(values or ()) for key, values in children_manifest.items()}
+
     # V9/V12/V13/V22: основная запись и ВСЕ дочерние данные пишутся ОДНОЙ транзакцией.
     # Не загрузилось - откат: в БД не остаётся ни основной записи, ни дочерних данных.
     # Писатель заголовка выбирается по виду: обе строки идут в одну таблицу external_report,
@@ -824,6 +919,15 @@ def register_external_report(source_path, replace=None, force=None, xml_path=Non
         "form_ext_written": written_form_ext,
         "templates_written": written_templates,
         "bsl_modules_written": written_bsl,
+        # Узел V19 (M1, M3, M7): какая ревизия записана этой загрузкой и сколько членов
+        # состава заявлено манифестом. history_revisions здесь = 1 не как догадка: явная
+        # загрузка каталога снимает цепочку состояний до вставки (M7), поэтому у новой
+        # строки истории быть не может. Члены считаются по собранному манифесту, а не по
+        # строкам БД: карточка загрузки описывает то, что в неё вошло, а совпадение манифеста
+        # с фактическими строками проверяет tools/check_v19_revisions.py.
+        "revision_no": revision_no,
+        "manifest_members": manifest_members,
+        "history_revisions": 1,
         "child_refs": child_counts,
         # Найдено на диске (до записи в БД): нужно карточке, чтобы объяснить,
         # почему часть данных не сохранилась (нет каталога, двоичная форма, ошибка разбора).

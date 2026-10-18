@@ -26,10 +26,66 @@ psycopg2 (параметры запроса), поэтому экраниров�
 (он возвращает ID), затем AttributesRowWriter и TabularSectionsRowWriter, FormsRowWriter
 (insert_ids - id нужны для form_ext.form_id), FormExtRowWriter, TemplatesRowWriter и
 BslModuleRowWriter. Модули форм в bsl_modules не пишутся - они в form_ext.ext (V13).
+
+Узел V19 (M1, M2): семь таблиц внешнего объекта версионированы, поэтому писатели
+этих таблиц объявляют ревизионные колонки `revision_no`/`changed_at`/`changed_by`
+(словарь, значения и имена витрин - `src/current_revision.py`, единая точка
+доступа). Граница «таблица версионируется или нет» задаётся одним фактом -
+набором колонок писателя: `configurations`/`configuration_objects` (вне узла V19,
+M8) этих колонок не объявляют, и `versioned()` для них отвечает False. Писатель
+дополняет отсутствующие ревизионные колонки значениями `revision_defaults()`
+(загрузка = ревизия 1), поэтому ни `insert`, ни `insert_many` не могут вставить
+строку без ревизии; вызывающий (загрузчик) проставляет общую метку на всю
+загрузку через контракт - она переопределяет defaults (M2). Манифест состава
+детей (`children_manifest`) - колонка только строки заголовка: формат собирает
+`current_revision.build_children_manifest`, а не вызывающий код.
+
 """
 import json
 
 from psycopg2.extras import Json, execute_values
+
+# Узел V19: имена колонок ревизии, значения по умолчанию и имена витрин «текущего»
+# живёт в src/current_revision.py (S1-S5). Писатель не имеет права придумывать ни
+# колонку, ни номер ревизии - он берёт словарь оттуда же, откуда его читают витрины.
+from current_revision import (
+    REVISION_COLUMNS,
+    revision_defaults,
+)
+
+# Ревизионные колонки в спецификациях версионированных писателей (M1). Порядок -
+# тот же, что в DDL (шаг 1 src/generate_ddl.py): integer / timestamp / text.
+# Манифест состава детей (M3) - отдельная колонка строки заголовка
+# (`children_manifest`), он добавлен только в ExternalReportRowWriter: у детей
+# манифеста нет, их состав разрешают манифест родителя и `form_ext`/`column_uuids`.
+REVISION_COLUMNS_KINDS = {
+    "revision_no": "int",
+    "changed_at": "timestamp",
+    "changed_by": "text",
+}
+
+# Манифест состава детей (M3) — колонка только строки заголовка. Вид `jsonb_nullable`
+# выбран намеренно: NULL означает «манифест не записан» (строки, загруженные до V19),
+# тогда как пустой состав — это jsonb с пятью пустыми перечнями. Разница принципиальная:
+# `build_children_manifest` всегда отдаёт словарь с пятью ключами, то есть записанный
+# пустой состав проходит как значение, а отсутствующий (ключа нет в контракте) — как NULL.
+MANIFEST_COLUMN_KIND = "jsonb_nullable"
+
+
+def versioned_columns(columns):
+    """Спецификация колонок версионируемой таблицы: колонки строки + колонки ревизии (M1).
+
+    Единственный способ собрать спецификацию для семи версионируемых таблиц: имена и виды
+    колонок ревизии берутся из `REVISION_COLUMNS_KINDS`, а писатель неверсионируемой таблицы
+    (`configurations`, `configuration_objects`, `config_*`) эту функцию не вызывает — именно
+    отсутствие колонок в спецификации и означает «таблица не версионируется» (M8). Порядок
+    колонок INSERT при этом не важен (значения идут по спецификации), но добавлены они в
+    конце, чтобы текст спецификации читался как описание содержательных полей строки.
+    """
+    spec = dict(columns)
+    spec.update(REVISION_COLUMNS_KINDS)
+    return spec
+
 
 
 def _quote(identifier):
@@ -132,14 +188,47 @@ class TableRowWriter:
         raise ValueError(f"Неизвестный вид колонки: {kind}")
 
     @classmethod
+    def versioned(cls):
+        """Версионируется ли таблица этого писателя (узел V19, M1).
+
+        Граница задаётся одним фактом — наличием в спецификации колонок ревизии. Писатель
+        неверсионируемой таблицы (`configurations`, `configuration_objects`, `config_*`) этих
+        колонок не объявляет (M8), поэтому и ответа «True» у него быть не может. Спрашивать
+        строкой «external_report» в вызывающем коде нельзя: таблица одна на два вида внешних
+        объектов, а `form_ext` вообще не имеет своей uuid-цепочки.
+        """
+        return all(column in cls.COLUMNS for column in REVISION_COLUMNS)
+
+    @classmethod
+    def revision_row(cls, row):
+        """Дополнить контракт колонками ревизии, если вызывающий их не проставил.
+
+        Ни одна вставка в версионируемую таблицу не может остаться без ревизии: `revision_no`
+        в схеме имеет DEFAULT, а вот пары `changed_at`/`changed_by` — нет, и CHECK
+        `<таблица>_changed_pair_check` отклоняет половину штампа. Значения по умолчанию
+        (`revision_defaults`) означают «это загрузка» (ревизия 1, changed_by='load').
+        Проставленное вызывающим значение сохраняет силу: загрузчик обязан задать ОДИН момент
+        на всю загрузку (`stamp_revision_rows`), иначе строка заголовка и её дети получили бы
+        разные метки одного и того же события (M2).
+        """
+        if not cls.versioned():
+            return row
+        return revision_defaults(row)
+
+    @classmethod
     def values(cls, row):
         """Кортеж значений по колонкам спецификации (порядок = порядок COLUMNS).
 
         Колонки из CONSTANTS берутся из класса, а не из разобранной строки (узел V22).
+        Узел V19: для версионируемых таблиц контракт предварительно дополняется колонками
+        ревизии (`revision_row`) — поэтому ни `insert`, ни `insert_many`, ни
+        `insert_many_skip_duplicates` не могут вставить строку без ревизии.
         """
+        row = cls.revision_row(row)
         return tuple(cls._adapt(kind, cls.CONSTANTS[column] if column in cls.CONSTANTS
                                 else row.get(column))
                      for column, kind in cls.COLUMNS.items())
+
 
     @classmethod
     def insert_sql(cls):
@@ -216,7 +305,10 @@ class ExternalReportRowWriter(TableRowWriter):
 
     TABLE = "external_report"
     CONSTANTS = {"object_kind": "external_report"}
-    COLUMNS = {
+    # Узел V19 (M1, M3): строка заголовка версионируется (цепочка состояний одного uuid) и
+    # несёт манифест состава детей текущего состояния. Колонки ревизии добавляет
+    # `versioned_columns` — иначе спецификация одной таблицы переписывалась бы в двух местах.
+    COLUMNS = versioned_columns({
         "uuid": "uuid",
         "object_kind": "text",
         "name": "text",
@@ -250,7 +342,11 @@ class ExternalReportRowWriter(TableRowWriter):
         "origin_sha256": "text",
         "origin_manifest": "jsonb_nullable",
         "origin_recorded_at": "timestamp",
-    }
+        # узел V19 (M3): состав детей текущего состояния. Заполняет загрузчик через
+        # `current_revision.build_children_manifest`, а не разбор XML: полный состав известен
+        # до первой вставки, и ровно тот же состав пишется той же транзакцией.
+        "children_manifest": MANIFEST_COLUMN_KIND,
+    })
 
 
 class ExternalProcessingRowWriter(TableRowWriter):
@@ -279,7 +375,9 @@ class ExternalProcessingRowWriter(TableRowWriter):
 
     TABLE = "external_report"
     CONSTANTS = {"object_kind": "external_processing"}
-    COLUMNS = {
+    # Узел V19: та же таблица состояний, что и у отчёта (узел V22), поэтому и колонки
+    # ревизии, и манифест состава детей здесь те же самые (M1, M3).
+    COLUMNS = versioned_columns({
         "uuid": "uuid",
         "object_kind": "text",
         "name": "text",
@@ -305,14 +403,20 @@ class ExternalProcessingRowWriter(TableRowWriter):
         "origin_sha256": "text",
         "origin_manifest": "jsonb_nullable",
         "origin_recorded_at": "timestamp",
-    }
+        # узел V19 (M3): манифест состава детей — общая колонка таблицы-заголовка (узел V22).
+        "children_manifest": MANIFEST_COLUMN_KIND,
+    })
 
 
 class AttributesRowWriter(TableRowWriter):
-    """Реквизиты объекта и колонки табличных частей - одна таблица attributes."""
+    """Реквизиты объекта и колонки табличных частей - одна таблица attributes.
+
+    Узел V19 (M1): реквизит и колонка ТЧ живут цепочкой состояний по своему uuid; снятие
+    ребёнка выражается НЕ строкой attributes, а отсутствием в манифесте родителя (A1).
+    """
 
     TABLE = "attributes"
-    COLUMNS = {
+    COLUMNS = versioned_columns({
         "uuid": "uuid",
         "parent_uuid": "uuid",
         "name": "text",
@@ -340,14 +444,19 @@ class AttributesRowWriter(TableRowWriter):
         "choice_form": "text",
         "link_by_type": "text",
         "choice_history_on_input": "text",
-    }
+    })
 
 
 class TabularSectionsRowWriter(TableRowWriter):
-    """Табличные части (tabular_sections); их колонки - в attributes, связь - column_uuids."""
+    """Табличные части (tabular_sections); их колонки - в attributes, связь - column_uuids.
+
+    Узел V19 (M3): column_uuids самой табличной части — уже её собственный манифест колонок,
+    поэтому второй перечень колонок на строке родителя не заводят; цепочка состояний у ТЧ —
+    по её uuid.
+    """
 
     TABLE = "tabular_sections"
-    COLUMNS = {
+    COLUMNS = versioned_columns({
         "uuid": "uuid",
         "parent_uuid": "uuid",
         "internalinfo_generatedtype": "jsonb_array",
@@ -358,19 +467,23 @@ class TabularSectionsRowWriter(TableRowWriter):
         "fill_checking": "text",
         "standardattributes": "jsonb_array",
         "column_uuids": "jsonb_array",
-    }
+    })
 
 
 class FormsRowWriter(TableRowWriter):
     """Регистрация формы из Forms/<Имя>.xml (таблица forms).
 
     uuid формы берётся только из файла регистрации: в корневом XML внешнего объекта
-    формы заданы именами без uuid. Уникальность - (parent_uuid, uuid), поэтому одна и та
-    же форма может быть сохранена для разного родителя (варианты configuration/extension).
+    формы заданы именами без uuid.
+
+    Узел V19 (M1): уникальность прежнего узла V13 (parent_uuid, uuid) заменена на
+    (uuid, revision_no) — цепочка состояний одной формы, а не одна строка на форму.
+    Состав формы (её элементы, события, модуль) относится к описанию формы той же
+    ревизии, поэтому `form_ext` получает тот же `revision_no`, что и строка формы.
     """
 
     TABLE = "forms"
-    COLUMNS = {
+    COLUMNS = versioned_columns({
         "uuid": "uuid",
         "parent_uuid": "uuid",
         "parent_type": "text",
@@ -380,19 +493,24 @@ class FormsRowWriter(TableRowWriter):
         "form_type": "text",
         "include_help_in_contents": "bool",
         "use_purposes": "jsonb_array",
-    }
+    })
 
 
 class FormExtRowWriter(TableRowWriter):
     """Содержимое формы (таблица form_ext): свойства Forms/<Имя>/Ext/Form.xml и её модуль.
 
-    Одна строка на форму (uq_form_ext_form_id). ext - текст модуля формы
-    (Forms/<Имя>/Ext/Form/Module.bsl), ext_bin - содержимое бинарной формы Form.bin.
-    form_id проставляет загрузчик после вставки строки в forms.
+    ext - текст модуля формы (Forms/<Имя>/Ext/Form/Module.bsl), ext_bin - содержимое
+    бинарной формы Form.bin. form_id проставляет загрузчик после вставки строки в forms.
+
+    Узел V19 (M1): у описания формы своей uuid-цепочки нет — граница состояния это пара
+    (form_id, revision_no) (uq_form_ext_form_id_revision), то есть описание относится к
+    ревизии самой формы. Поэтому загрузчик обязан проставить тот же `revision_no`, что и у
+    строки формы: витрина v_current_form_ext разрешает описание именно по совпадению
+    revision_no с текущей строкой формы.
     """
 
     TABLE = "form_ext"
-    COLUMNS = {
+    COLUMNS = versioned_columns({
         "form_id": "int",
         "form_uuid": "uuid",
         "parent_uuid": "uuid",
@@ -417,7 +535,7 @@ class FormExtRowWriter(TableRowWriter):
         "ext_bin": "bytes",
         "ext_format": "text",
         "ext_path": "text",
-    }
+    })
 
 
 class TemplatesRowWriter(TableRowWriter):
@@ -425,10 +543,14 @@ class TemplatesRowWriter(TableRowWriter):
 
     ext - текст содержимого (Template.xml) как есть, ext_root_tag - корневой тег этого XML
     (DataCompositionSchema и т.п.), ext_bin - содержимое Template.bin, если XML-описания нет.
+
+    Узел V19 (M1): содержимое макета — то, что правят чаще всего (запросы СКД, узел A),
+    поэтому макет версионируется по своему uuid: правка макета создаёт новую ревизию той же
+    строки, а прежний состав остаётся в цепочке.
     """
 
     TABLE = "templates"
-    COLUMNS = {
+    COLUMNS = versioned_columns({
         "uuid": "uuid",
         "parent_uuid": "uuid",
         "parent_type": "text",
@@ -443,7 +565,7 @@ class TemplatesRowWriter(TableRowWriter):
         "ext_path": "text",
         "ext_root_tag": "text",
         "ext_truncated": "bool",
-    }
+    })
 
 
 class BslModuleRowWriter(TableRowWriter):
@@ -457,10 +579,17 @@ class BslModuleRowWriter(TableRowWriter):
     parent_type, а второй заголовок для того же понятия только порождал пустой FK.
     FK на report_id в схеме нет, поэтому при удалении объекта очистка bsl_modules
     выполняется явно.
+
+    Узел V19 (M1, M3): у модуля нет uuid в выгрузке, поэтому цепочка состояний строится по
+    пути файла — (parent_uuid, file_path, revision_no) (uq_bsl_modules_parent_file_revision),
+    и тот же ключ (`parent_type|file_path`) является элементом манифеста `module_paths`.
+    Формат задаёт src/current_revision.py::module_key_sql — переписывать его здесь нельзя.
+    Модули конфигураций (parent_uuid IS NULL) историей не живут: индекс состава пересоздаётся
+    загрузчиком, поэтому у таких строк остаётся ревизия 1 без штампа события.
     """
 
     TABLE = "bsl_modules"
-    COLUMNS = {
+    COLUMNS = versioned_columns({
         "module_name": "text",
         "file_path": "text",
         "code": "text",
@@ -472,7 +601,7 @@ class BslModuleRowWriter(TableRowWriter):
         "module_type": "text",
         "code_size": "int",
         "truncated": "bool",
-    }
+    })
 
 
 class ConfigAliasRowWriter(TableRowWriter):

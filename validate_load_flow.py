@@ -44,7 +44,10 @@ DETECT_CASES = [
     ("Test3_Otchet_Null", "external_report"),
     ("TSD_0", "external_processing"),
     ("TSD_R", "extension"),
-    ("BGU2", "configuration"),
+    # С 18.10.2026 XML-выгрузки конфигураций — в Configurations\XML_files\<имя>
+    # (файлы .cf — в Configurations\). Детекция варианта здесь в БД не пишет.
+    (r"Configurations\XML_files\BGU2", "configuration"),
+    (r"Configurations\XML_files\Config_NULL", "configuration"),
     ("__каталога_нет__", "error"),
 ]
 
@@ -114,7 +117,11 @@ def check_loading():
         ("TSD_0", False, "loaded"),
         ("TSD_0", False, "duplicate"),
         ("TSD_R", False, "not_implemented"),
-        ("BGU2", False, "not_implemented"),
+        # Вариант `configuration` с узлов V32/V33 больше не заглушка: load_catalog(BGU2)
+        # даёт ✅ загружено и пишет 122 164 строки индекса состава. Этот регресс убирает за
+        # собой только внешние объекты, поэтому полную загрузку конфигурации здесь не гоняют:
+        # её проверяют tools/check_v32_zero_configuration.py и _v33_probe.py, которые снимают
+        # заголовок delete_configuration. Детекция варианта BGU2 остаётся в разделе 1.
     ):
         path = str(Path(BASE) / name)
         result = load_catalog(path, force=force)

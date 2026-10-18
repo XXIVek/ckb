@@ -3,10 +3,10 @@
 Универсальный скрипт для индексации конфигураций 1С.
 
 Использование:
-    python index_config.py "C:\\1C_LLM\\LoadDoc\\BGU2"                    # полная индексация
-    python index_config.py "C:\\1C_LLM\\LoadDoc\\BGU2" --register-only     # только регистрация
-    python index_config.py "C:\\1C_LLM\\LoadDoc\\BGU2" --no-enum           # без перечислений
-    python index_config.py "C:\\1C_LLM\\LoadDoc\\BGU2" --types catalog,document  # только указанные типы
+    python index_config.py "C:\\1C_LLM\\LoadDoc\\Configurations\\XML_files\\BGU2"                    # полная индексация
+    python index_config.py "C:\\1C_LLM\\LoadDoc\\Configurations\\XML_files\\BGU2" --register-only     # только регистрация
+    python index_config.py "C:\\1C_LLM\\LoadDoc\\Configurations\\XML_files\\BGU2" --no-enum           # без перечислений
+    python index_config.py "C:\\1C_LLM\\LoadDoc\\Configurations\\XML_files\\BGU2" --types catalog,document  # только указанные типы
 
 Поддерживаемые типы объектов:
     - catalog             Справочники
@@ -181,25 +181,25 @@ def main():
         epilog="""
 Примеры использования:
   # Полная индексация всех типов:
-  python index_config.py "C:\\1C_LLM\\LoadDoc\\BGU2"
+  python index_config.py "C:\\1C_LLM\\LoadDoc\\Configurations\\XML_files\\BGU2"
 
   # Только регистрация (без индексации):
-  python index_config.py "C:\\1C_LLM\\LoadDoc\\BGU2" --register-only
+  python index_config.py "C:\\1C_LLM\\LoadDoc\\Configurations\\XML_files\\BGU2" --register-only
 
   # Индексация только справочников и документов:
-  python index_config.py "C:\\1C_LLM\\LoadDoc\\BGU2" --types catalog,document
+  python index_config.py "C:\\1C_LLM\\LoadDoc\\Configurations\\XML_files\\BGU2" --types catalog,document
 
   # Без перечислений (быстрая индексация):
-  python index_config.py "C:\\1C_LLM\\LoadDoc\\BGU2" --skip enum
+  python index_config.py "C:\\1C_LLM\\LoadDoc\\Configurations\\XML_files\\BGU2" --skip enum
 
   # Без перечислений и констант:
-  python index_config.py "C:\\1C_LLM\\LoadDoc\\BGU2" --skip enum,constant
+  python index_config.py "C:\\1C_LLM\\LoadDoc\\Configurations\\XML_files\\BGU2" --skip enum,constant
         """
     )
     
     parser.add_argument(
         'source_path',
-        help='Путь к каталогу с выгрузкой конфигурации (например, C:\\1C_LLM\\LoadDoc\\BGU2)'
+        help='Путь к каталогу с выгрузкой конфигурации (например, C:\\1C_LLM\\LoadDoc\\Configurations\\XML_files\\BGU2)'
     )
     
     parser.add_argument(

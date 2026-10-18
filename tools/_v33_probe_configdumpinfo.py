@@ -22,7 +22,7 @@ import xml.etree.ElementTree as ET
 from collections import Counter
 from pathlib import Path
 
-DEFAULT = r"C:\1C_LLM\LoadDoc\BGU2\ConfigDumpInfo.xml"
+DEFAULT = r"C:\1C_LLM\LoadDoc\Configurations\XML_files\BGU2\ConfigDumpInfo.xml"
 UUID_RE = re.compile(r"^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$")
 COMPOSITE_RE = re.compile(r"^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\.\d+$")
 

@@ -50,11 +50,15 @@ EXTERNAL = sorted(LOAD.glob("Test*/*.xml")) + sorted(LOAD.glob("TSD_0/*.xml")) \
     + sorted(WORK.glob("v29_probe/*.xml")) + sorted(WORK.glob("conv/*/*.xml")) \
     + sorted(LOAD.glob("БП3/*.erf.xml"))
 
-# выборка по видам метаданных из выгрузок конфигураций: по N файла на вид
-CONFIG_ROOTS = [LOAD / "BGU2" / "Configuration.xml", LOAD / "TSD_R" / "Configuration.xml"]
+# выборка по видам метаданных из выгрузок конфигураций: по N файла на вид.
+# С 18.10.2026 XML-выгрузки конфигураций лежат в Configurations\XML_files\<имя>
+# (файлы .cf — в Configurations\); расширения (TSD_R) остаются в корне LoadDoc.
+# Ключи KIND_DIRS — cfg.name, то есть имя конфигурации, а не путь: "BGU2/Catalogs".
+CFG_XML = LOAD / "Configurations" / "XML_files"
+CONFIG_ROOTS = [CFG_XML / "BGU2" / "Configuration.xml", LOAD / "TSD_R" / "Configuration.xml"]
 PER_KIND = 12
 KIND_DIRS = {}
-for cfg in (LOAD / "BGU2", LOAD / "TSD_R"):
+for cfg in (CFG_XML / "BGU2", LOAD / "TSD_R"):
     if not cfg.is_dir():
         continue
     for child in sorted(cfg.iterdir()):

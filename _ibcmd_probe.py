@@ -237,9 +237,11 @@ def step_order(name):
 
 
 
-BP3 = r"C:\1C_LLM\LoadDoc\BP3"
+# С 18.10.2026 XML-выгрузка конфигурации БП3 и файл .cf консолидованы в Configurations\:
+# XML_files\BP3 и BP3_1Cv8.cf. Внешние объекты (.erf/.epf/.cfe) остались в LoadDoc\БП3 (SRC).
+BP3 = r"C:\1C_LLM\LoadDoc\Configurations\XML_files\BP3"
 TSD_R = r"C:\1C_LLM\LoadDoc\TSD_R"
-CF = os.path.join(SRC, "BP3_1Cv8.cf")      # файл конфигурации БП3 (802 МБ), вход `config load`
+CF = r"C:\1C_LLM\LoadDoc\Configurations\BP3_1Cv8.cf"  # файл конфигурации БП3, вход `config load`
 IB_BP3 = os.path.join(WORK, "ib_bp3")      # ИБ с РЕАЛЬНОЙ конфигурацией: замер точки A1
 T1_ROOT = r"C:\1C_LLM\LoadDoc\Test1_Otchet\СравнениеУСНИ90_2.xml"
 

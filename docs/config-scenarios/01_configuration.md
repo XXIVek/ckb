@@ -17,6 +17,9 @@
 > конфигурации» ниже — историческая постановка, а не описание текущего кода. Что реально лежит в
 > выгрузке конфигурации и какие решения по модели ещё не приняты — разделы
 > «Структура конфигурации: что подтверждается выгрузкой» и «Открытые вопросы модели» в конце файла.
+> Источники с 18.10.2026 консолидованы: XML-выгрузки конфигураций — `C:\1C_LLM\LoadDoc\Configurations\XML_files\<имя>`
+> (Config_NULL, BGU2, BP3, KomMag, UNF3, UT11, ZUP31), файлы `.cf` — `C:\1C_LLM\LoadDoc\Configurations\<имя>_1Cv8.cf`.
+> Прежние пути `LoadDoc\BGU2`, `LoadDoc\Config_NULL\...` больше не существуют.
 
 # Сценарий 1: Загрузка полной конфигурации 1С (configuration)
 
@@ -51,14 +54,14 @@
 
 ### Шаг 1: Анализ источника
 ```python
-analyze_config_load_tool(source_path="C:\\1C_LLM\\LoadDoc\\BGU2")
+analyze_config_load_tool(source_path="C:\\1C_LLM\\LoadDoc\\Configurations\\XML_files\\BGU2")
 # Возвращает: object_type="configuration", catalog_info, file_count
 ```
 
 ### Шаг 2: Регистрация конфигурации
 ```python
 register_configuration_tool(
-    source_path="C:\\1C_LLM\\LoadDoc\\BGU2",
+    source_path="C:\\1C_LLM\\LoadDoc\\Configurations\\XML_files\\BGU2",
     dump_file="ConfigDumpInfo.xml"
 )
 # Создает запись в configuration (uuid, name, vendor, version)

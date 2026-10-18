@@ -145,7 +145,9 @@ SELECT e.id AS report_id,
        -- добавлялись в конец списка, — аддитивная миграция migrate_v22_object_kind.sql
        -- повторяет этот же текст и применяется к уже созданной базе без DROP VIEW.
        COALESCE(e.object_kind, 'external_report') AS object_kind
-FROM external_report e;
+-- узел V19: счётчики считаются по текущему состоянию объекта (M5); исторические ревизии
+-- одного uuid не должны множиться в строках витрины
+FROM v_current_external_report e;
 
 CREATE OR REPLACE VIEW v_config_alias_targets AS
 SELECT a.id,

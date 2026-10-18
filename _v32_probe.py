@@ -5,7 +5,7 @@ import sys
 sys.path.insert(0, "src")
 from configuration_meta_parser import parse_configuration_meta  # noqa: E402
 
-FIXTURE = r"C:\1C_LLM\LoadDoc\Config_NULL\Config_NULL_XML\Configuration.xml"
+FIXTURE = r"C:\1C_LLM\LoadDoc\Configurations\XML_files\Config_NULL\Configuration.xml"
 
 raw = io.open(FIXTURE, encoding="utf-8").read()
 print("file chars:", len(raw))

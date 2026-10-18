@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 r"""tools/check_v32_zero_configuration.py — проверка узла V32: «нулевая» конфигурация.
 
-Эталон: C:\1C_LLM\LoadDoc\Config_NULL\Config_NULL_XML — Configuration.xml без объектов
+Эталон: C:\1C_LLM\LoadDoc\Configurations\XML_files\Config_NULL — Configuration.xml без объектов
 метаданных кроме Language и без модулей. Внешний объект для проверки привязок —
 Test3_Otchet_Null; эталонная пара (Test1_Otchet, Test2_Otchet) не трогается.
 
@@ -96,7 +96,9 @@ from external_db import connect  # noqa: E402
 from external_report_loader import delete_external_object  # noqa: E402
 
 BASE = Path(r"C:\1C_LLM\LoadDoc")
-CONFIG_CATALOG = BASE / "Config_NULL" / "Config_NULL_XML"
+# С 18.10.2026 XML-выгрузки конфигураций консолидованы в Configurations\XML_files\<имя>,
+# файлы .cf — в Configurations\. Внешние объекты (Test*, TSD_*) остаются в корне LoadDoc.
+CONFIG_CATALOG = BASE / "Configurations" / "XML_files" / "Config_NULL"
 CONFIG_XML = CONFIG_CATALOG / "Configuration.xml"
 NULL_REPORT = BASE / "Test3_Otchet_Null"
 PROBE = "__v32_probe__"

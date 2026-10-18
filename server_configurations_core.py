@@ -198,7 +198,9 @@ def delete_external_report_tool(source_path: str = None, uuid: str = None, repor
                  if isinstance(count, int) and count > 0]
         if parts:
             lines.append("Удалено связанных строк: " + ", ".join(parts) + ".")
-        if result.get('children_cascaded') and not parts:
+        if result.get('children_removed_by_parent_uuid') and not parts:
+            # узел V19: каскада по parent_uuid в схеме нет (внешний ключ снят), поэтому
+            # «не было» означает «не было ни одной ревизии детей», а не «сработал каскад».
             lines.append("Дочерних строк по parent_uuid не было.")
         return '\n'.join(lines)
     except Exception as e:
