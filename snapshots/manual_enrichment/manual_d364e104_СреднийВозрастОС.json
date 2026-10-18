@@ -1,0 +1,101 @@
+{
+  "kind": "manual_enrichment_snapshot",
+  "version": 1,
+  "generated_at": "2026-10-18T20:15:34",
+  "object": {
+    "id": 477,
+    "uuid": "d364e104-e1ef-49e7-8163-d2ab726aaa96",
+    "name": "СреднийВозрастОС",
+    "object_kind": "external_report",
+    "revision_no": 1,
+    "manifest_missing": true,
+    "origin_kind": "catalog",
+    "configuration_id": null
+  },
+  "counts": {
+    "manual_alias_groups": 2,
+    "manual_aliases": 8,
+    "manual_snippets": 1,
+    "manual_dependencies": 2,
+    "cross_references": 0
+  },
+  "aliases": [
+    {
+      "target_type": "ExternalReport",
+      "target_name": "СреднийВозрастОС",
+      "target_uuid": "d364e104-e1ef-49e7-8163-d2ab726aaa96",
+      "target_snippet_id": null,
+      "target_key_stability": "stable",
+      "stability_note": "ключ - uuid строки метаданных из выгрузки",
+      "weight": 1.2,
+      "description": "алиас, добавленный оператором",
+      "active": true,
+      "source_alias_ids": [
+        24861,
+        24862,
+        24863,
+        24864,
+        24865
+      ],
+      "aliases": [
+        "средний возраст основных средств",
+        "возраст основных средств",
+        "срок полезного использования",
+        "ввод в эксплуатацию",
+        "инвентарный номер ОС"
+      ]
+    },
+    {
+      "target_type": "Module",
+      "target_name": "Form.Отчет",
+      "target_uuid": "module:form:fcdf404a-ab23-4d98-81ea-b3d1707dce14",
+      "target_snippet_id": null,
+      "target_key_stability": "stable",
+      "stability_note": "ключ модуля формы построен на uuid формы - он из XML выгрузки",
+      "weight": 1.0,
+      "description": "алиас, добавленный оператором",
+      "active": true,
+      "source_alias_ids": [
+        24866,
+        24867,
+        24868
+      ],
+      "aliases": [
+        "конструктор выходных форм",
+        "макет внешнего отчёта",
+        "формат вывода отчёта"
+      ]
+    }
+  ],
+  "snippets": [
+    {
+      "source_snippet_id": 1560,
+      "question": "чем формируется вывод отчёта, если у объекта нет СКД?",
+      "answer": "У объекта основная схема компоновки данных не задана (main_data_composition_schema = NULL, в макетах нет DataCompositionSchema): get_config_template_tool по макету «Отчет» прямо отвечает «содержимое макета — не схема компоновки данных (корневой элемент document)».\nВывод строит макет «Отчет» — SpreadsheetDocument (17 377 симв.), содержащий {{КОНСТРУКТОР_ВЫХОДНЫХ_ФОРМ(Отчет)}}; заполнение табличного документа задаёт модуль формы (ПередОткрытием, Отчет, ДействияФормыОтчетСформировать), а РазобратьРазностьДат корректирует возраст с учётом разного числа дней в месяцах.\nСледствие: поля и отборы СКД в этом объекте искать бесполезно — состав вывода меняется в макете и в модуле формы.",
+      "answer_size": 684,
+      "source_kind": "manual",
+      "source_uuid": null,
+      "source_path": null,
+      "target_type": null,
+      "target_uuid": null,
+      "target_key_stability": "name",
+      "stability_note": "ключа цели в БД нет; цель наносится парой target_type + target_name (узел E)",
+      "tags": [
+        "output",
+        "template",
+        "form-module"
+      ],
+      "confidence": 1.0,
+      "dependencies": [
+        "Module:Отчет",
+        "Template:Отчет"
+      ],
+      "quarantined": false,
+      "quarantine_reason": null
+    }
+  ],
+  "cross_references": [],
+  "warnings": [
+    "у строки объекта нет children_manifest (снимок до узла V19): строгий состав детей карточка не отдаёт; после загрузки текущим кодом манифест появится"
+  ]
+}
