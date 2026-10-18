@@ -45,6 +45,12 @@ import psycopg2.extras
 from config_dump_info_parser import find_config_dump_info, parse_config_dump_info
 from configuration_meta_parser import parse_configuration_meta
 from external_db import connect, transaction
+# Узел V19, закрытие S2 (18.10.2026): счётчики и перечень внешних объектов читаются из
+# витрин текущего состояния. С историей `COUNT(*) FROM external_report WHERE
+# configuration_id = c.id` посчитал бы все состояния каждого объекта, а не число
+# привязанных объектов; `bsl_modules` версионируется той же цепочкой, что и содержимое
+# внешнего объекта (модули конфигурации — parent_uuid IS NULL, витрина отдаёт их как есть).
+from current_revision import current_view
 from external_table_writer import ConfigurationObjectRowWriter, ConfigurationRowWriter
 
 TABLE = "configurations"
@@ -66,9 +72,9 @@ SELECT c.id, c.uuid::text AS uuid, c.name, c.synonym, c.version, c.vendor_name,
        c.interface_compat_mode, c.help_included,
        COALESCE(array_length(c.main_roles, 1), 0) AS main_roles_count,
        to_char(c.created_at, 'YYYY-MM-DD HH24:MI:SS') AS created_at,
-       (SELECT COUNT(*) FROM external_report e
+       (SELECT COUNT(*) FROM """ + current_view("external_report") + """ e
          WHERE e.configuration_id = c.id) AS bound_external_objects,
-       (SELECT COUNT(*) FROM bsl_modules b
+       (SELECT COUNT(*) FROM """ + current_view("bsl_modules") + """ b
          WHERE b.configuration_id = c.id) AS bsl_modules_count,
        (SELECT COUNT(*) FROM config_extensions x
          WHERE x.configuration_id = c.id) AS extensions_count
@@ -215,7 +221,7 @@ def find_configuration_by_name(name, exclude_id=None):
 def bound_external_objects(cfg_id):
     """Внешние объекты, привязанные к этому заголовку (после снятия строки — битые)."""
     rows = _read_rows(
-        "SELECT id, name, uuid::text AS uuid FROM external_report "
+        "SELECT id, name, uuid::text AS uuid FROM " + current_view("external_report") + " "
         "WHERE configuration_id = %s ORDER BY id",
         [int(cfg_id)],
     )

@@ -32,6 +32,10 @@ src_dir = Path(__file__).parent / "src"
 sys.path.insert(0, str(src_dir))
 from fastmcp import FastMCP  # noqa: E402
 from external_db import transaction  # noqa: E402
+# Узел V19, закрытие S2 (18.10.2026): счётчик внешних объектов читается из витрины текущего
+# состояния. С историей `COUNT(*) FROM external_report` посчитал бы каждое состояние каждого
+# объекта, а не число объектов; формулировку даёт только src/current_revision.py (S1).
+from current_revision import current_view  # noqa: E402
 
 mcp = FastMCP("1c-configurations-export")
 
@@ -58,7 +62,7 @@ def export_readiness_tool():
             present = {table: _table_exists(cur, table) for table in REQUIRED_TABLES}
             cur.execute("SELECT count(*) FROM configurations")
             configs = cur.fetchone()[0]
-            cur.execute("SELECT count(*) FROM external_report")
+            cur.execute("SELECT count(*) FROM " + current_view("external_report"))
             reports = cur.fetchone()[0]
     except Exception as exc:
         return f"❌ Готовность экспорта не проверена: {exc}"

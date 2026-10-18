@@ -18,10 +18,14 @@ from current_revision import (
     FIRST_REVISION,
     MANIFEST_KEYS,
     build_children_manifest,
+    chain_count_sql,
+    chain_exists_sql,
     current_child_count_sql,
     current_view,
     manifest_member_count_sql,
     manifest_missing_sql,
+    revision_chain_count_sql,
+    row_by_id_sql,
     stamp_revision_rows,
 )
 # узел V31: провенанс строки — ОТКУДА появилась эта запись и чем подтвердить, что источник
@@ -369,7 +373,7 @@ def find_external_object(uuid_val, obj_type="external_report"):
         # force=True снимает историю целиком (M7), и оператор обязан видеть, сколько ревизий
         # будет снято, ДО подтверждения перезагрузки.
         "COALESCE(t.revision_no::text, '')",
-        f"(SELECT COUNT(*) FROM {table} h WHERE h.uuid = t.uuid)",
+        revision_chain_count_sql("t.uuid"),
         # узел V19 (M3, A1): заявлен ли состав детей. «манифеста нет» (NULL — строки,
         # загруженные до V19) и «манифест пуст» (состав снят целиком) — разные утверждения,
         # и карточка обязана различать их, а не выдавать 0 как факт о составе.
@@ -511,7 +515,15 @@ def delete_external_object(obj_id=None, uuid_val=None, obj_type="external_report
     except (TypeError, ValueError):
         return {"success": False, "error": f"Некорректный ID объекта: {obj_id}"}
 
-    rows = _psql_fields(f"SELECT t.id, REPLACE(COALESCE(t.name, ''), '|', ' '), COALESCE(t.uuid::text, '') FROM {table} t WHERE t.id = {obj_id} LIMIT 1")
+    # Узел V19 (S4): строка ищется по её первичному ключу `id`, а не по uuid — `id` адресует
+    # конкретную ревизию, и через витрину текущего состояния историческая ревизия читалась бы
+    # как «строки нет». Формулировку даёт current_revision.row_by_id_sql: своего SQL здесь быть
+    # не может, иначе сторож не отличит «нужна конкретная строка» от «забыли витрину».
+    rows = _psql_fields(row_by_id_sql(
+        table,
+        ["t.id", "REPLACE(COALESCE(t.name, ''), '|', ' ')", "COALESCE(t.uuid::text, '')"],
+        obj_id,
+    ))
     if isinstance(rows, dict) and "error" in rows:
         return {"success": False, "error": rows["error"]}
     if not rows:
@@ -523,7 +535,9 @@ def delete_external_object(obj_id=None, uuid_val=None, obj_type="external_report
     by_parent = f" OR parent_uuid = '{obj_uuid}'::uuid" if obj_uuid else ""
 
     bsl_deleted = 0
-    count_res = _run_psql(f"SELECT COUNT(*) FROM bsl_modules WHERE {bsl_column} = {obj_id}{by_parent}")
+    # узел V19 (S4): считаются ВСЕ состояния модуля — удаляется вся цепочка.
+    count_res = _run_psql(chain_count_sql(
+        "bsl_modules", f"{bsl_column} = {obj_id}{by_parent}"))
     if isinstance(count_res, list) and count_res and isinstance(count_res[0].get("result"), int):
         bsl_deleted = count_res[0]["result"]
     if bsl_deleted:
@@ -541,7 +555,12 @@ def delete_external_object(obj_id=None, uuid_val=None, obj_type="external_report
     if info["has_children"] and obj_uuid:
         for child_table in ("form_ext", "forms", "templates",
                             "attributes", "tabular_sections"):
-            counted = _run_psql(f"SELECT COUNT(*) FROM {child_table} WHERE parent_uuid = '{obj_uuid}'::uuid")
+            # Узел V19 (M7, S4): считается объём удаления по ВСЕЙ цепочке состояний, а не по
+            # текущей: снимаются все revision_no этого uuid. Через витрину текущего состояния
+            # карточка удаления недооценила бы число снятых строк, если у объекта больше одной
+            # ревизии, — поэтому формулировка дана в current_revision.chain_count_sql.
+            counted = _run_psql(chain_count_sql(
+                child_table, f"parent_uuid = '{obj_uuid}'::uuid"))
             count = counted[0]["result"] if isinstance(counted, list) and counted else 0
             if count:
                 gone = _run_psql(f"DELETE FROM {child_table} WHERE parent_uuid = '{obj_uuid}'::uuid")
@@ -594,8 +613,11 @@ def delete_external_object(obj_id=None, uuid_val=None, obj_type="external_report
     if isinstance(del_res, dict) and "error" in del_res:
         return {"success": False, "error": del_res["error"]}
 
+    # Узел V19 (инвариант 6): проверять надо цепочку состояний, а не текущую ревизию:
+    # снятая одна ревизия оставила бы историю того же uuid, и следующая загрузка каталога
+    # упала бы на UNIQUE (uuid, revision_no).
     check_where = (f"t.uuid = '{obj_uuid}'::uuid" if obj_uuid else f"t.id = {obj_id}")
-    check = _psql_fields(f"SELECT t.id FROM {table} t WHERE {check_where} LIMIT 1")
+    check = _psql_fields(chain_exists_sql(table, check_where, columns="t.id"))
     if isinstance(check, dict) and "error" in check:
         return {"success": False, "error": check["error"]}
     if check:

@@ -28,7 +28,15 @@ totalField, parameter, settingsVariant. Имена ищутся по локал�
 
 from __future__ import annotations
 
+import os
+import sys
 import xml.etree.ElementTree as ET
+
+# Узел V19, закрытие S2 (18.10.2026): макеты читаются только через витрину текущего
+# состояния и манифест текущей ревизии родителя. Файлы выгрузки по-прежнему не читаются
+# (граница узла B не менялась) — меняется только SQL, которым берётся сохранённое.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from current_revision import current_child_rows_sql  # noqa: E402
 
 # Корневой элемент содержимого макета-схемы. Отличает «макет СКД» от прочего содержимого
 # макета (SpreadsheetDocument, произвольный XML): для последних разбор неприменим.
@@ -673,14 +681,25 @@ def parse_dcs(ext_text, template_name="", template_uuid=None, truncated=False):
 
 
 def template_rows(cur, obj_uuid):
-    """Макеты объекта из БД: id, uuid, имя, тип, корневой тег, размеры, содержимое."""
+    """Макеты ТЕКУЩЕГО состояния объекта из БД: id, uuid, имя, тип, корневой тег, размеры,
+    содержимое (узел V19, S2).
+
+    Источник — `v_current_templates` и перечень макетов из манифеста текущей ревизии
+    родителя (`current_child_rows_sql`): с историей прямое чтение `templates` вернуло бы
+    макеты всех состояний объекта, а `find_template` при двух одноимённых ревизиях
+    отказался бы выбирать. Для снимков до V19 (манифеста нет) состав разрешается
+    строками текущей ревизии — оговорка `include_without_manifest`.
+    """
     cur.execute(
-        "SELECT id, uuid::text AS uuid, name, template_type, ext_root_tag, ext_format, ext_path, "
-        "       coalesce(ext_size, 0) AS ext_size, "
-        "       coalesce(length(ext), 0) AS ext_chars, "
-        "       coalesce(octet_length(ext_bin), 0) AS ext_bytes, "
-        "       coalesce(ext_truncated, false) AS ext_truncated, ext "
-        "FROM templates WHERE parent_uuid = %s::uuid ORDER BY id", (obj_uuid,))
+        "SELECT c.id, c.uuid::text AS uuid, c.name, c.template_type, c.ext_root_tag, "
+        "c.ext_format, c.ext_path, "
+        "       coalesce(c.ext_size, 0) AS ext_size, "
+        "       coalesce(length(c.ext), 0) AS ext_chars, "
+        "       coalesce(octet_length(c.ext_bin), 0) AS ext_bytes, "
+        "       coalesce(c.ext_truncated, false) AS ext_truncated, c.ext "
+        + current_child_rows_sql("templates", "%(u)s::uuid",
+                                 include_without_manifest=True)
+        + " ORDER BY c.id", {"u": obj_uuid})
     columns = [column[0] for column in cur.description]
     return [dict(zip(columns, row)) for row in cur.fetchall()]
 

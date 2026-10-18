@@ -51,6 +51,15 @@ from quarantine import (MARK_ARRAY, MARKED_FLAG_POSITIONAL_SQL,  # noqa: E402
                         NOT_MARKED_SQL_NAMED, REASON_EXPR_NAMED, is_marked, marked_flag,
                         reason_of, reason_expr_named, sql_marked, sql_not_marked,
                         strip_reserved, without_mark, with_mark)
+# Узел V19, закрытие S2 (18.10.2026): любой read версионируемых таблиц — только через
+# витрины текущего состояния (M5, S3). LEFT JOIN external_report по базовой таблице с
+# историей размножал бы строки сниппета по ревизиям объекта; резолвер целей обязан
+# разрешать цель по ТЕКУЩЕМУ составу (правило 5: целей текущего состояния нет — отказ).
+from current_revision import (  # noqa: E402
+    current_children_condition,
+    current_view,
+    uuid_literal,
+)
 
 MAX_LIST_LIMIT = 500
 TOKEN_RE = re.compile(r"[0-9A-Za-zА-Яа-яЁё_]+")
@@ -109,10 +118,13 @@ def _known_target(cur, obj_uuid, target_type, target_name, target_uuid, object_k
     она указывала бы на тип, под которым у этого uuid нет строки, то есть вникуда.
     """
     if target_type in TARGET_TABLES:
-        table, column = TARGET_TABLES[target_type]
-        rows = fetch_rows(cur, f"SELECT 1 AS ok FROM {table} WHERE parent_uuid = %s::uuid "
-                               f"AND lower({column}) = lower(%s) LIMIT 1", (obj_uuid, target_name))
-        return bool(rows)
+        # Узел V19 (S2): проверка цели идёт тем же каналом, что и простановка target_uuid
+        # (_resolve_target_uuid), а не своим запросом по базовой таблице: `uuid` больше не
+        # уникален, поэтому `FROM attributes WHERE parent_uuid = …` вернул бы строки всех
+        # ревизий и принял бы целью ребёнка, снятого новой ревизией родителя, — ровно ту
+        # связь вникуда, которую правило 5 контракта запрещает. Тот же приём уже применён
+        # ниже для FormItem/Module: одна цель не должна описываться двумя запросами.
+        return _resolve_target_uuid(cur, obj_uuid, target_type, target_name) is not None
     if target_type in ("FormItem", "Module"):
         # Единый источник проверки - та же функция, что проставляет target_uuid (R: одна цель
         # не должна описываться двумя запросами). Раньше здесь был свой запрос, и он расходился
@@ -148,25 +160,34 @@ def _resolve_target_uuid(cur, obj_uuid, target_type, target_name):
     """
     if target_type in TARGET_TABLES:
         table, column = TARGET_TABLES[target_type]
-        return fetch_value(cur, f"SELECT uuid::text FROM {table} "
-                                f"WHERE parent_uuid = %s::uuid AND lower({column}) = lower(%s) "
-                                "LIMIT 1", (obj_uuid, target_name))
+        # Узел V19 (S2): цель резолвится по ТЕКУЩЕМУ составу объекта — строка снятого
+        # ребёнка (историческая ревизия или removed из манифеста) не должна становиться
+        # целью алиаса или зависимости. uuid_literal, а не позиционный %s: выражение
+        # состава повторяет uuid-выражение несколько раз (см. current_children_condition).
+        return fetch_value(cur, "SELECT c.uuid::text FROM " + current_view(table) + " c WHERE "
+                                + current_children_condition(table, uuid_literal(obj_uuid),
+                                                             include_without_manifest=True)
+                                + f" AND lower(c.{column}) = lower(%s) LIMIT 1",
+                           (target_name,))
     if target_type == "FormItem":
         # имя цели принимается и qualified ('Форма.Элемент'), и bare ('Элемент'):
         # витрина и генератор отдают qualified, но голое имя тоже удобно оператору
         form_name, _, item_name = str(target_name or "").partition(".")
         if not item_name:
             form_name, item_name = "", target_name
-        sql = """
-            SELECT f.uuid::text AS form_uuid, e->>'name' AS item_name
-            FROM form_ext fe
-            JOIN forms f ON f.id = fe.form_id
-            CROSS JOIN LATERAL jsonb_array_elements(fe.items) AS e
-            WHERE fe.parent_uuid = %s::uuid AND jsonb_typeof(fe.items) = 'array'
-        """
-        params = [obj_uuid]
+        # Узел V19 (S2): ищется только описание формы ТЕКУЩЕГО состояния (алиас строки
+        # ребёнка — `c`, как требует current_children_condition); форма, снятая с объекта
+        # новой ревизией родителя, элементом не считается.
+        sql = ("SELECT c.form_uuid::text AS form_uuid, e->>'name' AS item_name "
+               "FROM " + current_view("form_ext") + " c "
+               "JOIN " + current_view("forms") + " f ON f.id = c.form_id "
+               "CROSS JOIN LATERAL jsonb_array_elements(c.items) AS e "
+               "WHERE jsonb_typeof(c.items) = 'array' AND "
+               + current_children_condition("form_ext", uuid_literal(obj_uuid),
+                                           include_without_manifest=True))
+        params = []
         if form_name:
-            sql += " AND lower(coalesce(fe.name, '')) = lower(%s)"
+            sql += " AND lower(coalesce(c.name, '')) = lower(%s)"
             params.append(form_name)
         sql += " AND lower(coalesce(e->>'name', '')) = lower(%s) LIMIT 1"
         params.append(item_name)
@@ -182,17 +203,24 @@ def _resolve_target_uuid(cur, obj_uuid, target_type, target_name):
         form_name = str(target_name or "")
         if form_name.lower().startswith("form."):
             form_name = form_name[len("form."):]
-        form_key = fetch_value(cur, "SELECT 'module:form:' || f.uuid::text AS key FROM forms f "
-                                    "WHERE f.parent_uuid = %s::uuid "
-                                    "AND lower(coalesce(f.name, '')) = lower(%s) LIMIT 1",
-                               (obj_uuid, form_name))
+        # Узел V19 (S2): и форма, и модуль ищутся по текущему составу (манифест
+        # form_uuids / module_paths), а не по всем строкам таблицы.
+        form_key = fetch_value(cur, "SELECT 'module:form:' || c.uuid::text AS key FROM "
+                                    + current_view("forms") + " c WHERE "
+                                    + current_children_condition("forms", uuid_literal(obj_uuid),
+                                                                 include_without_manifest=True)
+                                    + " AND lower(coalesce(c.name, '')) = lower(%s) LIMIT 1",
+                               (form_name,))
         if form_key:
             return form_key
-        module_id = fetch_value(cur, "SELECT id FROM bsl_modules WHERE parent_uuid = %s::uuid "
-                                     "AND (lower(coalesce(module_name, '')) = lower(%s) "
-                                     "OR lower(coalesce(module_type, '')) = lower(%s) "
-                                     "OR lower(coalesce(file_path, '')) = lower(%s)) LIMIT 1",
-                                (obj_uuid, target_name, target_name, target_name))
+        module_id = fetch_value(cur, "SELECT c.id FROM " + current_view("bsl_modules") + " c WHERE "
+                                     + current_children_condition("bsl_modules",
+                                                                 uuid_literal(obj_uuid),
+                                                                 include_without_manifest=True)
+                                     + " AND (lower(coalesce(c.module_name, '')) = lower(%s) "
+                                     "OR lower(coalesce(c.module_type, '')) = lower(%s) "
+                                     "OR lower(coalesce(c.file_path, '')) = lower(%s)) LIMIT 1",
+                                (target_name, target_name, target_name))
         return f"module:{module_id}" if module_id else None
     return None
 
@@ -320,7 +348,7 @@ def get_config_snippet(snippet_id):
                        s.target_uuid, s.tags, s.confidence, s.is_verified,
                        e.name AS object_name
                 FROM config_snippets s
-                LEFT JOIN external_report e ON e.uuid = s.parent_uuid
+                LEFT JOIN """ + current_view("external_report") + """ e ON e.uuid = s.parent_uuid
                 WHERE s.id = %s
             """, (int(snippet_id),))
             if not rows:
@@ -381,7 +409,7 @@ def list_config_snippets(uuid=None, source_kind=None, limit=20, only_verified=Fa
            f"e.name AS object_name, "
            f"(SELECT count(*) FROM config_snippet_dependencies d WHERE d.snippet_id = s.id) "
            f"AS dependencies "
-           f"FROM config_snippets s LEFT JOIN external_report e ON e.uuid = s.parent_uuid "
+           f"FROM config_snippets s LEFT JOIN " + current_view("external_report") + f" e ON e.uuid = s.parent_uuid "
            f"WHERE {' AND '.join(where)} "
            f"ORDER BY marked, s.parent_uuid, s.source_kind, s.question LIMIT %(limit)s")
     try:
@@ -423,11 +451,11 @@ def search_config_snippets(query, uuid=None, limit=10, include_marked=False):
                "left(s.answer, 300) AS answer_preview, e.name AS object_name, "
                f"{MARKED_FLAG_SQL}")
     fts_sql = (f"SELECT {columns}, ts_rank(s.tsv, %(tsq)s::tsquery) AS rank "
-               f"FROM config_snippets s LEFT JOIN external_report e ON e.uuid = s.parent_uuid "
+               f"FROM config_snippets s LEFT JOIN " + current_view("external_report") + f" e ON e.uuid = s.parent_uuid "
                f"WHERE s.tsv @@ %(tsq)s::tsquery{scope} "
                f"ORDER BY marked, rank DESC, s.question LIMIT %(limit)s")
     sub_sql = (f"SELECT {columns}, 0.0 AS rank "
-               f"FROM config_snippets s LEFT JOIN external_report e ON e.uuid = s.parent_uuid "
+               f"FROM config_snippets s LEFT JOIN " + current_view("external_report") + f" e ON e.uuid = s.parent_uuid "
                f"WHERE position(%(word)s IN lower(s.question || ' ' || s.answer)) > 0{scope} "
                f"ORDER BY marked, s.question LIMIT %(limit)s")
     try:
@@ -516,7 +544,7 @@ def mark_config_snippet(snippet_id, reason=None):
                                    "s.tags, s.parent_uuid::text AS parent_uuid, "
                                    "e.name AS object_name, e.object_kind "
                                    "FROM config_snippets s "
-                                   "LEFT JOIN external_report e ON e.uuid = s.parent_uuid "
+                                   "LEFT JOIN " + current_view("external_report") + " e ON e.uuid = s.parent_uuid "
                                    "WHERE s.id = %s", (int(snippet_id),))
             if not rows:
                 return {"success": False, "error": f"Сниппет id={snippet_id} не найден"}
@@ -552,7 +580,7 @@ def unmark_config_snippet(snippet_id):
                                    "s.tags, s.parent_uuid::text AS parent_uuid, "
                                    "e.name AS object_name, e.object_kind "
                                    "FROM config_snippets s "
-                                   "LEFT JOIN external_report e ON e.uuid = s.parent_uuid "
+                                   "LEFT JOIN " + current_view("external_report") + " e ON e.uuid = s.parent_uuid "
                                    "WHERE s.id = %s", (int(snippet_id),))
             if not rows:
                 return {"success": False, "error": f"Сниппет id={snippet_id} не найден"}
@@ -595,7 +623,7 @@ def list_marked_config_snippets(uuid=None, limit=50):
                 f"{reason_expr_named(MARK_TAG_PARAM)} AS reason, "
                 f"length(s.answer) AS answer_size "
                 f"FROM config_snippets s "
-                f"LEFT JOIN external_report e ON e.uuid = s.parent_uuid "
+                f"LEFT JOIN " + current_view("external_report") + f" e ON e.uuid = s.parent_uuid "
                 f"WHERE {' AND '.join(where)} ORDER BY s.parent_uuid, s.id LIMIT %(limit)s",
                 params)
             for row in rows:
@@ -806,7 +834,7 @@ def get_config_cross_references(uuid=None, local_doc_id=None, limit=50):
     sql = (f"SELECT x.id, x.local_doc_kind, x.local_doc_id, x.target_type, x.target_name, "
            f"x.target_uuid, x.parent_uuid::text AS parent_uuid, x.reference_type, "
            f"e.name AS object_name FROM config_cross_references x "
-           f"LEFT JOIN external_report e ON e.uuid = x.parent_uuid "
+           f"LEFT JOIN " + current_view("external_report") + f" e ON e.uuid = x.parent_uuid "
            f"WHERE {' AND '.join(where)} ORDER BY x.local_doc_kind, x.local_doc_id "
            f"LIMIT %(limit)s")
     try:
@@ -886,7 +914,7 @@ def enrichment_stats(uuid=None, limit=20):
                 "       CASE WHEN er.configuration_id IS NULL THEN 'not_declared' "
                 "            WHEN cfg.id IS NULL THEN 'dangling' "
                 "            ELSE 'bound' END AS configuration_state "
-                "FROM external_report er "
+                "FROM " + current_view("external_report") + " er "
                 "LEFT JOIN configurations cfg ON cfg.id = er.configuration_id "
                 f"WHERE {' AND '.join(cfg_where)} ORDER BY er.name LIMIT %(limit)s", params)
             if uuid:
@@ -928,7 +956,7 @@ def enrichment_stats(uuid=None, limit=20):
                     "                            AND cfg.id IS NOT NULL) AS configuration_bound, "
                     "       count(*) FILTER (WHERE er.configuration_id IS NOT NULL "
                     "                            AND cfg.id IS NULL) AS configuration_dangling "
-                    "FROM external_report er "
+                    "FROM " + current_view("external_report") + " er "
                     "LEFT JOIN configurations cfg ON cfg.id = er.configuration_id")
                 result["totals"].update(binding[0] if binding else {})
                 # Узел Q1: число скрытых (карантинных) сниппетов по всей базе — ровно то, что
@@ -966,7 +994,7 @@ def enrichment_stats(uuid=None, limit=20):
                     result["totals"][f"objects_{kind_row['object_kind']}"] = kind_row["objects"]
                 result["configurations"] = fetch_rows(
                     cur, "SELECT c.id, c.name, c.version, "
-                         "(SELECT count(*) FROM external_report er "
+                         "(SELECT count(*) FROM " + current_view("external_report") + " er "
                          "  WHERE er.configuration_id = c.id) AS bound_objects "
                          "FROM configurations c ORDER BY c.name LIMIT %(l)s",
                     {"l": MAX_LIST_LIMIT})

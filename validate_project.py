@@ -14,7 +14,7 @@ print("1C KNOWLEDGE BASE - PROJECT VALIDATION")
 print("=" * 70)
 
 # 1. Check server.py
-print("\n[1/7] Checking server.py (1c-knowledge-base)...")
+print("\n[1/8] Checking server.py (1c-knowledge-base)...")
 try:
     from server import mcp as mcp_kb
     print("  ✅ server.py imported successfully")
@@ -27,7 +27,7 @@ except Exception as e:
 #    'configurations', которой на сервере нет, и больше не является точкой входа.
 #    Смысл проверки: сгенерированные generate_servers.py серверы теряли импорты из src/, и
 #    инструменты падали NameError ещё до обращения к БД (замер 13.10.2026: 17/17 и 6/6).
-print("\n[2/7] Checking MCP tool wiring (core/enrichment/export servers)...")
+print("\n[2/8] Checking MCP tool wiring (core/enrichment/export servers)...")
 try:
     sys.path.insert(0, str(Path(__file__).parent / 'tools'))
     from check_mcp_tool_wiring import DEFAULT_TARGETS, check_file
@@ -56,7 +56,7 @@ except Exception as e:
 #    `configurations`, которой на сервере нет, и к таблицам, которых в схеме нет
 #    (дефект п. 8 правил .clinerules/1c-configurations-core_Rule.md). Модули удалены 14.10.2026
 #    вместе с остальным мёртвым кодом той же эпохи (см. docs/config-scenarios/TOOLS_REVISION_2026-10-13.md).
-print("\n[3/7] Checking live loader/enrichment modules...")
+print("\n[3/8] Checking live loader/enrichment modules...")
 try:
     from config_load_router import load_catalog, format_load_result
     from external_report_loader import delete_external_object, read_external_meta
@@ -101,7 +101,7 @@ except Exception as e:
 #     (причина читается, только если тег причины последний). Статическая проверка сторожит
 #     именно эти границы, а не конкретную запись: порядок тегов меняется, когда к строке
 #     применяют with_mark повторно.
-print("\n[3b/7] Checking quarantine tag/SQL invariants...")
+print("\n[3b/8] Checking quarantine tag/SQL invariants...")
 try:
     fragment = reason_expr_named(MARK_TAG_PARAM)
     positional = reason_expr_positional()
@@ -136,7 +136,7 @@ except Exception as e:
 # 4. Состав инструментов контракта (core 4 / enrichment 18 / export 1) — по разбору шага 2.
 #    Лишний инструмент = возврат к неработающим вызовам; недостающий = потерянный контракт.
 #    Числа в итоговой строке печатаются из EXPECTED_TOOLS, а не из этой строки-комментария.
-print("\n[4/7] Checking MCP tool contract (core/enrichment/export)...")
+print("\n[4/8] Checking MCP tool contract (core/enrichment/export)...")
 try:
     from check_mcp_tool_wiring import EXPECTED_TOOLS
     for rep in wiring_reports:
@@ -160,7 +160,7 @@ except Exception as e:
     sys.exit(1)
 
 # 5. Check mcp_tools_api.py and mcp_tools_loader.py
-print("\n[5/7] Checking MCP tools...")
+print("\n[5/8] Checking MCP tools...")
 try:
     from mcp_tools_api import add_snippet, get_db_state, get_group, search_docs
     # узел Q1: карантин сниппетов local_doc — те же операции, что у enrich-контура
@@ -176,7 +176,7 @@ except Exception as e:
     sys.exit(1)
 
 # 6. Check database connections (реальные БД сервера: local_doc и ckb_1c_configurations)
-print("\n[6/7] Checking database connections...")
+print("\n[6/8] Checking database connections...")
 try:
     from mcp_tools_api import get_db_state
     state = get_db_state()
@@ -207,7 +207,7 @@ except Exception as e:
 # config_export_manager, config_migration, старые server_configurations*.py, generate_servers.py.
 # Проверка держит это состояние: если такой код вернётся, он снова упадёт на FATAL в рантайме,
 # и поймать это дешевле здесь, чем живим вызовом MCP.
-print("\n[7/7] Checking that no code targets the absent DB 'configurations'...")
+print("\n[7/8] Checking that no code targets the absent DB 'configurations'...")
 try:
     root = Path(__file__).parent
     dead_markers = ("dbname='configurations'", 'dbname="configurations"',
@@ -230,6 +230,36 @@ except Exception as e:
     print(f"  ❌ проверка не выполнена: {e}")
     sys.exit(1)
 
+# 8. Статический guard узла V19 (правила S2/S3 норматива, раздел 11
+#    docs/CONFIGURATIONS_ENRICHMENT_PLAN.md): ни один модуль вне единой точки доступа
+#    `src/current_revision.py` не читает версионируемые таблицы напрямую. Причина не в стиле
+#    кода: `uuid` версионируемой таблицы больше не уникален, поэтому `WHERE uuid = ?` без
+#    разрешения цепочки вернул бы все ревизии сразу (M5). Guard и измеряет, и утверждает:
+#    прямых чтений 0, обращения через канал посчитаны, словарь каналов (CHANNEL_FUNCS)
+#    совпадает с фактическими функциями модуля — иначе счётчики каналов замолчали бы вместе
+#    с переименованием helpers, и «ноль нарушений» перестал бы что-либо значить.
+print("\n[8/8] Checking V19 current-state access (no direct reads of versioned tables)...")
+try:
+    from _v19_read_sites import (scan as v19_scan, guard as v19_guard, GUARD_OK,
+                                 external_channel as v19_external)
+    v19_report = v19_scan()
+    v19_violations = [line for line in v19_guard(v19_report)
+                      if not line.startswith(GUARD_OK)]
+    if v19_violations:
+        for line in v19_violations:
+            print(f"  ❌ {line}")
+        sys.exit(1)
+    v19_totals = v19_report["totals"]
+    print(f"  ✅ прямых чтений версионируемых таблиц нет; через канал "
+          f"src/current_revision.py: {v19_totals['channel_calls']} "
+          f"({v19_external(v19_totals)} из модулей), записей: {v19_totals['writes']}, "
+          f"чтений витрин литералом: {v19_totals['view_reads']}")
+except SystemExit:
+    raise
+except Exception as e:
+    print(f"  ❌ guard V19 не выполнен: {e}")
+    sys.exit(1)
+
 # Summary
 print("\n" + "=" * 70)
 print("VALIDATION SUMMARY")
@@ -248,6 +278,8 @@ print("✅ мёртвый код базы 'configurations' удалён, пов�
 print("✅ mcp_tools_api.py + mcp_tools_loader.py + loader.py: imports OK")
 print("✅ local_doc DB: connected")
 print("✅ ckb_1c_configurations DB: connected (загрузчик внешних объектов)")
+print("✅ V19: прямых чтений версионируемых таблиц вне единой точки доступа нет, "
+      "словарь каналов совпадает с src/current_revision.py")
 print("\n📁 Project structure:")
 project_root = Path(__file__).parent
 for item in sorted(project_root.iterdir()):

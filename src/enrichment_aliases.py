@@ -48,6 +48,10 @@ from enrichment_generator import (  # noqa: E402
 # Одна и та же цель не должна описываться двумя запросами; импорт односторонний -
 # enrichment_snippets этот модуль не импортирует, цикла нет.
 from enrichment_snippets import _resolve_target_uuid  # noqa: E402
+# Узел V19, закрытие S2: LEFT JOIN строки заголовка берётся из витрины текущего
+# состояния — с историей join по базовой таблице размножал бы алиасы по ревизиям
+# объекта (M5, S3).
+from current_revision import current_view  # noqa: E402
 
 
 MAX_LIST_LIMIT = 500
@@ -244,6 +248,7 @@ def search_config_aliases(query, uuid=None, target_type=None, limit=20):
         params["target_type"] = target_type
     where.append("(a.alias_norm = %(q)s OR a.alias_norm LIKE %(q)s || '%%' "
                  "OR position(%(q)s IN a.alias_norm) > 0)")
+    header_view = current_view("external_report")  # узел V19 (S2): заголовок текущего состояния
     sql = f"""
         SELECT a.id, a.alias_name, a.target_type, a.target_name, a.target_uuid,
                a.target_snippet_id, a.parent_uuid::text AS parent_uuid, a.parent_type,
@@ -252,7 +257,7 @@ def search_config_aliases(query, uuid=None, target_type=None, limit=20):
                     WHEN a.alias_norm LIKE %(q)s || '%%' THEN 2
                     ELSE 1 END AS rank
         FROM config_aliases a
-        LEFT JOIN external_report e ON e.uuid = a.parent_uuid
+        LEFT JOIN {header_view} e ON e.uuid = a.parent_uuid
         WHERE {' AND '.join(where)}
         ORDER BY rank DESC, a.weight DESC, a.alias_name
         LIMIT %(limit)s
@@ -312,7 +317,7 @@ def list_config_aliases(uuid=None, target_type=None, origin=None, limit=50,
     sql = (f"SELECT a.id, a.alias_name, a.target_type, a.target_name, a.target_uuid, "
            f"a.target_snippet_id, a.parent_uuid::text AS parent_uuid, a.parent_type, "
            f"a.weight, a.origin, a.active, a.description, e.name AS object_name "
-           f"FROM config_aliases a LEFT JOIN external_report e ON e.uuid = a.parent_uuid "
+           f"FROM config_aliases a LEFT JOIN " + current_view("external_report") + f" e ON e.uuid = a.parent_uuid "
            f"{'WHERE ' + ' AND '.join(where) if where else ''} "
            f"ORDER BY a.parent_uuid, a.target_type, a.weight DESC, a.alias_name "
            f"LIMIT %(limit)s")

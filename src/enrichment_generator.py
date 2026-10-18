@@ -56,6 +56,17 @@ from quarantine import (  # noqa: E402
     reason_expr_named,
     with_mark,
 )
+# Узел V19, закрытие S2 (18.10.2026): содержимое объекта читается только через витрины
+# текущего состояния и разрешение состава манифестом текущей ревизии. Прямого FROM
+# базовой версионируемой таблицы в читающих запросах быть не должно: с историей оно
+# приписало бы объекту снятых детей и старые ревизии (M5, S3). Свой max(revision_no)
+# здесь тоже не пишется — формулировку даёт current_revision (S1).
+from current_revision import (  # noqa: E402
+    current_child_count_sql,
+    current_child_rows_sql,
+    current_children_condition,
+    current_view,
+)
 
 # Пороги полезности (разделы 2.2 и 4.2 плана V17).
 MIN_BODY_LINES = 5                    # непустых строк тела объявления, чтобы не было шума
@@ -238,7 +249,7 @@ def object_row(cur, obj_uuid):
     rows = fetch_rows(cur,
                       "SELECT uuid::text AS uuid, name, synonym, "
                       "COALESCE(object_kind, 'external_report') AS object_kind "
-                      "FROM external_report "
+                      "FROM " + current_view("external_report") + " "
                       "WHERE uuid = %s::uuid LIMIT 1", (obj_uuid,))
     return rows[0] if rows else None
 
@@ -248,27 +259,43 @@ _object_row = object_row  # внутренний псевдоним
 
 
 def collect_source_data(cur, obj_uuid):
-    """Собрать содержимое объекта одним набором запросов (только уже сохранённое)."""
+    """Собрать содержимое ТЕКУЩЕГО состояния объекта одним набором запросов (только уже
+    сохранённое; узел V19, S2).
+
+    Источник — витрины `v_current_*` и состав детей по манифесту текущей ревизии
+    (`current_child_rows_sql`): прямое чтение базовых таблиц дало бы смешанные ревизии,
+    как только у объекта появится вторая. Для строк, загруженных до V19 (манифеста нет),
+    состав разрешается строками текущей ревизии — это снимок, а не строгий состав по M5
+    (оговорка `include_without_manifest` в `current_revision`). Именованный параметр
+    `%(u)s` обязателен: выражение состава повторяет uuid-выражение несколько раз, и
+    позиционные `%s` при повторе ломали бы порядок параметров.
+    """
+    u = "%(u)s::uuid"
+
+    def rows_of(table, columns, order, extra=None):
+        return _rows(
+            cur, "SELECT " + columns + " "
+                 + current_child_rows_sql(table, u, include_without_manifest=True,
+                                          extra_condition=extra)
+                 + " ORDER BY " + order, {"u": obj_uuid})
+
     return {
-        "attributes": _rows(
-            cur, "SELECT uuid::text AS uuid, name, synonym FROM attributes "
-                 "WHERE parent_uuid = %s::uuid ORDER BY name", (obj_uuid,)),
-        "tabular_sections": _rows(
-            cur, "SELECT uuid::text AS uuid, name, synonym, column_uuids FROM tabular_sections "
-                 "WHERE parent_uuid = %s::uuid ORDER BY name", (obj_uuid,)),
-        "forms": _rows(
-            cur, "SELECT uuid::text AS uuid, name, synonym, form_type FROM forms "
-                 "WHERE parent_uuid = %s::uuid ORDER BY name", (obj_uuid,)),
-        "form_ext": _rows(
-            cur, "SELECT form_uuid::text AS form_uuid, name, items, events, commands, "
-                 "auto_command_bar, ext, ext_path "
-                 "FROM form_ext WHERE parent_uuid = %s::uuid ORDER BY name", (obj_uuid,)),
-        "templates": _rows(
-            cur, "SELECT uuid::text AS uuid, name, synonym, ext_root_tag, ext, ext_path "
-                 "FROM templates WHERE parent_uuid = %s::uuid ORDER BY name", (obj_uuid,)),
-        "bsl_modules": _rows(
-            cur, "SELECT id, module_type, module_name, file_path, code FROM bsl_modules "
-                 "WHERE parent_uuid = %s::uuid AND code IS NOT NULL ORDER BY id", (obj_uuid,)),
+        "attributes": rows_of("attributes",
+                              "uuid::text AS uuid, name, synonym", "c.name"),
+        "tabular_sections": rows_of("tabular_sections",
+                                    "uuid::text AS uuid, name, synonym, column_uuids",
+                                    "c.name"),
+        "forms": rows_of("forms",
+                         "uuid::text AS uuid, name, synonym, form_type", "c.name"),
+        "form_ext": rows_of("form_ext",
+                            "form_uuid::text AS form_uuid, name, items, events, commands, "
+                            "auto_command_bar, ext, ext_path", "c.name"),
+        "templates": rows_of("templates",
+                             "uuid::text AS uuid, name, synonym, ext_root_tag, ext, ext_path",
+                             "c.name"),
+        "bsl_modules": rows_of("bsl_modules",
+                               "id, module_type, module_name, file_path, code",
+                               "c.id", extra="c.code IS NOT NULL"),
     }
 
 
@@ -1061,7 +1088,7 @@ def _binding_state_row(cur, obj_uuid):
         "       CASE WHEN er.configuration_id IS NULL THEN 'not_declared' "
         "            WHEN cfg.id IS NULL THEN 'dangling' "
         "            ELSE 'bound' END AS configuration_state "
-        "FROM external_report er "
+        "FROM " + current_view("external_report") + " er "
         "LEFT JOIN configurations cfg ON cfg.id = er.configuration_id "
         "WHERE er.uuid = %s::uuid LIMIT 1", (obj_uuid,))
 
@@ -1088,7 +1115,12 @@ def set_object_configuration(uuid=None, source_path=None, configuration_id=None)
     obj_uuid = resolved["uuid"]
     try:
         with transaction() as cur:
-            cur.execute("SELECT id, name, configuration_id FROM external_report "
+            # Узел V19 (S2): строка берётся из витрины текущего состояния — id именно
+            # текущей ревизии. UPDATE ниже идёт по первичному ключу этой строки, поэтому
+            # ревизий не смешивает: исторические ревизии сохраняют привязку, которая была
+            # заявлена для их состояния (модель «атрибут состояния», а не объекта).
+            cur.execute("SELECT id, name, configuration_id FROM "
+                        + current_view("external_report") + " "
                         "WHERE uuid = %s::uuid LIMIT 1", (obj_uuid,))
             row = cur.fetchone()
             if not row:
@@ -1133,7 +1165,8 @@ def set_object_configuration(uuid=None, source_path=None, configuration_id=None)
 
             cur.execute("UPDATE external_report SET configuration_id = %s WHERE id = %s",
                         (cfg_id, obj_id))
-            bound = fetch_rows(cur, "SELECT count(*) AS bound_objects FROM external_report "
+            bound = fetch_rows(cur, "SELECT count(*) AS bound_objects FROM "
+                                    + current_view("external_report") + " "
                                     "WHERE configuration_id = %s",
                                (cfg_id,))[0]["bound_objects"]
             return {"success": True, "mode": "bound", "uuid": obj_uuid,
@@ -1192,11 +1225,13 @@ def _json_len_sql(column):
 
 # NOT EXISTS по column_uuids отличает реквизиты объекта от колонок табличных частей: и те и другие
 # лежат в attributes с parent_uuid внешнего объекта (узел V12), различие — только в ссылке ТЧ.
-_OBJECT_ATTRIBUTES_ONLY = (
-    "NOT EXISTS (SELECT 1 FROM tabular_sections ts "
-    "            WHERE ts.parent_uuid = %(u)s::uuid "
-    "              AND ts.column_uuids @> jsonb_build_array(a.uuid))"
-)
+# Узел V19 (S2): ТЧ разрешается по витрине текущего состояния — колонка считается колонкой,
+# только если её называет column_uuids табличной части ТЕКУЩЕГО состояния; ссылку снятой
+# (исторической) ревизии ТЧ носить за текущим составом нельзя.
+def _object_attributes_only(alias="c"):
+    return ("NOT EXISTS (SELECT 1 FROM " + current_view("tabular_sections") + " ts "
+            "            WHERE ts.parent_uuid = %(u)s::uuid "
+            "              AND ts.column_uuids @> jsonb_build_array(" + alias + ".uuid))")
 
 
 def describe_object(uuid=None, source_path=None, limit=DESCRIBE_DEFAULT_LIMIT):
@@ -1258,7 +1293,7 @@ def describe_object(uuid=None, source_path=None, limit=DESCRIBE_DEFAULT_LIMIT):
                 "       CASE WHEN er.configuration_id IS NULL THEN 'not_declared' "
                 "            WHEN cfg.id IS NULL THEN 'dangling' "
                 "            ELSE 'bound' END AS configuration_state "
-                "FROM external_report er "
+                "FROM " + current_view("external_report") + " er "
                 "LEFT JOIN configurations cfg ON cfg.id = er.configuration_id "
                 "WHERE er.uuid = %s::uuid LIMIT 1", (obj_uuid,))
             if not identity:
@@ -1266,16 +1301,31 @@ def describe_object(uuid=None, source_path=None, limit=DESCRIBE_DEFAULT_LIMIT):
                         "error": f"Внешний объект с uuid={obj_uuid} в external_report не найден",
                         "hint": "Сначала загрузите каталог: load_1c_catalog_tool(source_path=...), "
                                 "далее generate_config_enrichment_tool(...) для сниппетов."}
+            # Узел V19 (S2): счётчики состава считаются через единое разрешение текущего
+            # состояния (current_child_count_sql / current_child_rows_sql) — с историей
+            # прямое count(*) по parent_uuid посчитал бы все ревизии и снятых детей.
+            # include_without_manifest=True держит честные числа для снимков до V19:
+            # у них манифеста нет, и 0 от строгого счёта читался бы как «состава нет».
             counts = fetch_rows(
                 cur,
-                "SELECT (SELECT count(*) FROM attributes a WHERE a.parent_uuid = %(u)s::uuid) AS attributes, "
-                f"       (SELECT count(*) FROM attributes a WHERE a.parent_uuid = %(u)s::uuid "
-                f"        AND {_OBJECT_ATTRIBUTES_ONLY}) AS object_attributes, "
-                "       (SELECT count(*) FROM tabular_sections WHERE parent_uuid = %(u)s::uuid) AS tabular_sections, "
-                "       (SELECT count(*) FROM forms WHERE parent_uuid = %(u)s::uuid) AS forms, "
-                "       (SELECT count(*) FROM form_ext WHERE parent_uuid = %(u)s::uuid) AS form_ext, "
-                "       (SELECT count(*) FROM templates WHERE parent_uuid = %(u)s::uuid) AS templates, "
-                "       (SELECT count(*) FROM bsl_modules WHERE parent_uuid = %(u)s::uuid) AS bsl_modules, "
+                "SELECT " + current_child_count_sql(
+                    "attributes", "%(u)s::uuid", include_without_manifest=True)
+                + " AS attributes, "
+                + "(SELECT COUNT(*) " + current_child_rows_sql(
+                    "attributes", "%(u)s::uuid", include_without_manifest=True,
+                    extra_condition=_object_attributes_only("c"))
+                + ") AS object_attributes, "
+                + current_child_count_sql(
+                    "tabular_sections", "%(u)s::uuid", include_without_manifest=True)
+                + " AS tabular_sections, "
+                + current_child_count_sql(
+                    "forms", "%(u)s::uuid", include_without_manifest=True) + " AS forms, "
+                + current_child_count_sql(
+                    "form_ext", "%(u)s::uuid", include_without_manifest=True) + " AS form_ext, "
+                + current_child_count_sql(
+                    "templates", "%(u)s::uuid", include_without_manifest=True) + " AS templates, "
+                + current_child_count_sql(
+                    "bsl_modules", "%(u)s::uuid", include_without_manifest=True) + " AS bsl_modules, "
                 # состав форм и событий считается по витринам — тем же источникам, что и разделы
                 # ниже: счётчик в заголовке раздела обязан совпадать с числом строк в БД,
                 # а не с числом строк, отданных под limit
@@ -1328,29 +1378,42 @@ def _describe_sections(cur, result, obj_uuid, limit):
     # Массив тегов и текстовый маркер — разные параметры именно здесь (MARK_ARRAY против
     # MARKER), поэтому оба ключа обязаны присутствовать.
     params = {"u": obj_uuid, "l": limit, MARK_PARAM: MARK_ARRAY, MARK_TAG_PARAM: MARKER}
+    # Узел V19 (S2): разделы состава читаются через витрины текущего состояния и
+    # разрешение состава манифестом (те же выражения, что и счётчики выше) — карточка
+    # обязана называть состав ТЕКУЩЕГО состояния, а не все ревизии одной выборкой.
     result["attributes"] = fetch_rows(
         cur,
-        f"SELECT a.name, a.type, a.comment FROM attributes a "
-        f"WHERE a.parent_uuid = %(u)s::uuid AND {_OBJECT_ATTRIBUTES_ONLY} "
+        f"SELECT c.name, c.type, c.comment "
+        + current_child_rows_sql("attributes", "%(u)s::uuid",
+                                 include_without_manifest=True,
+                                 extra_condition=_object_attributes_only("c"))
         # порядок вставки = порядок обхода ChildObjects выгрузки; отдельной колонки позиции в
         # attributes нет (ordinal_position есть только в information_schema.attributes)
-        f"ORDER BY a.id LIMIT %(l)s", params)
+        + " ORDER BY c.id LIMIT %(l)s", params)
     result["tabular_sections"] = fetch_rows(
         cur,
-        f"SELECT name, {_json_len_sql('column_uuids')} AS columns, comment "
-        f"FROM tabular_sections WHERE parent_uuid = %(u)s::uuid ORDER BY name LIMIT %(l)s",
+        f"SELECT c.name, {_json_len_sql('c.column_uuids')} AS columns, c.comment "
+        + current_child_rows_sql("tabular_sections", "%(u)s::uuid",
+                                 include_without_manifest=True)
+        + " ORDER BY c.name LIMIT %(l)s",
         params)
     result["forms"] = fetch_rows(
         cur,
-        "SELECT f.name, f.form_type, fe.ext_format, fe.ext_path, "
+        "SELECT c.name, c.form_type, fe.ext_format, fe.ext_path, "
         "       coalesce(length(fe.ext), 0) AS ext_chars, "
         "       coalesce(octet_length(fe.ext_bin), 0) AS ext_bytes, "
         f"       {_json_len_sql('fe.items')} AS items, "
         f"       {_json_len_sql('fe.attributes')} AS attributes, "
         f"       {_json_len_sql('fe.events')} AS events, "
         f"       {_json_len_sql('fe.commands')} AS commands "
-        "FROM forms f LEFT JOIN form_ext fe ON fe.form_id = f.id "
-        "WHERE f.parent_uuid = %(u)s::uuid ORDER BY f.name LIMIT %(l)s", params)
+        "FROM " + current_view("forms") + " c "
+        "LEFT JOIN " + current_view("form_ext") + " fe ON fe.form_id = c.id "
+        # описание формы относится к ревизии самой формы (uq_form_ext_form_id_revision),
+        # поэтому JOIN по id строки формы из витрины текущего состояния сам берёт
+        # парную ревизию form_ext; состав форм дополнительно подтверждает манифест
+        "WHERE " + current_children_condition("forms", "%(u)s::uuid",
+                                             include_without_manifest=True)
+        + " ORDER BY c.name LIMIT %(l)s", params)
     result["form_elements"] = fetch_rows(
         cur,
         "SELECT form_name, element_name, element_type, data_source, caption_ru "
@@ -1362,13 +1425,18 @@ def _describe_sections(cur, result, obj_uuid, limit):
         "WHERE report_uuid = %(u)s::uuid ORDER BY form_name, ordinal LIMIT %(l)s", params)
     result["templates"] = fetch_rows(
         cur,
-        "SELECT name, template_type, ext_root_tag, coalesce(length(ext), 0) AS ext_chars, "
-        "       coalesce(octet_length(ext_bin), 0) AS ext_bytes "
-        "FROM templates WHERE parent_uuid = %(u)s::uuid ORDER BY name LIMIT %(l)s", params)
+        "SELECT c.name, c.template_type, c.ext_root_tag, "
+        "       coalesce(length(c.ext), 0) AS ext_chars, "
+        "       coalesce(octet_length(c.ext_bin), 0) AS ext_bytes "
+        + current_child_rows_sql("templates", "%(u)s::uuid",
+                                 include_without_manifest=True)
+        + " ORDER BY c.name LIMIT %(l)s", params)
     result["modules"] = fetch_rows(
         cur,
-        "SELECT module_type, module_name, file_path, code_size, truncated "
-        "FROM bsl_modules WHERE parent_uuid = %(u)s::uuid ORDER BY module_type, id LIMIT %(l)s",
+        "SELECT c.module_type, c.module_name, c.file_path, c.code_size, c.truncated "
+        + current_child_rows_sql("bsl_modules", "%(u)s::uuid",
+                                 include_without_manifest=True)
+        + " ORDER BY c.module_type, c.id LIMIT %(l)s",
         params)
     # Карантин (узел Q1, вариант A): карточка описывает состояние объекта целиком, поэтому
     # помеченные на удаление сниппеты из перечня НЕ убираются — они получают флаг `marked`
