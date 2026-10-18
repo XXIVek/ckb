@@ -1,5 +1,12 @@
 # Правила работы с MCP сервером "1c-configurations-core"
 
+> **Обновлено 18.10.2026 под узел V19** (версионность состояний внешнего объекта): добавлен раздел
+> «🔁 Версионность состояний внешнего объекта (узел V19)», переписан п. 19 журнала, приведены живые
+> счётчики схемы. Код узла закоммичен (`28e45d0e`). Реализована **часть** модели: схема, загрузчик,
+> витрины текущего состояния, карточка загрузки. Не реализованы: правки состояния (ради которых
+> версионность и заводилась), перевод слоя обогащения на единую точку доступа (S2), регрессии самой
+> цепочки ревизий (M1/M4/M7). Норматив модели — раздел 11 `docs/CONFIGURATIONS_ENRICHMENT_PLAN.md`.
+
 ## 📋 Назначение сервера
 
 MCP сервер `1c-configurations-core` (server_configurations_core.py) — это система управления загруженными конфигурациями 1С. Отвечает за загрузку каталогов выгрузки, индексацию и поиск объектов конфигурации, BSL-модулей и перечислений.
@@ -8,7 +15,7 @@ MCP сервер `1c-configurations-core` (server_configurations_core.py) — э
 
 > **Норматив поведения:** [docs/config-scenarios/FLOWCHART_1c-configurations-core.md](../docs/config-scenarios/FLOWCHART_1c-configurations-core.md) —
 > блок-схема 0 (узлы T1–T6), шаблон загрузчика (G0–G8), вариант-схема внешнего отчёта (V1–V12),
-> правила R1–R14, матрица «узел → код». Код и правила обязаны этому документу.
+> правила R1–R17, матрица «узел → код». Код и правила обязаны этому документу.
 
 | Инструмент | Сигнатура | Назначение |
 |---|---|---|
@@ -41,6 +48,7 @@ MCP сервер `1c-configurations-core` (server_configurations_core.py) — э
 | `src/external_subdir_parser.py` | `parse_external_subdirs()` — разбор подкаталогов `Forms/`, `Templates/`, `Ext/` (узел V13) в контракты `forms`, `form_ext`, `templates`, `bsl_modules`; сверка имён с корневым XML даёт предупреждения, кривой uuid формы/макета — ошибку R3 |
 | `src/external_table_writer.py` | классы-писатели `ExternalReportRowWriter`, `ExternalProcessingRowWriter`, `AttributesRowWriter`, `TabularSectionsRowWriter`, `FormRowWriter`, `FormExtRowWriter`, `TemplateRowWriter`, `BslModuleRowWriter` (базовый `TableRowWriter`): спецификация колонок, `INSERT … RETURNING id`, пакетный `insert_many` |
 | `src/external_db.py` | подключение к `ckb_1c_configurations` через **psycopg2** и контекст `transaction()` — одна транзакция на загрузку объекта, при ошибке полный откат |
+| `src/current_revision.py` (узел V19) | **Единая точка доступа к текущему состоянию внешнего объекта** (правила M5, S1–S5 норматива): словарь ревизионных колонок и словарь `changed_by`, имена витрин текущего состояния (`current_view`), разрешение состава детей манифестом (`current_child_count_sql`, `manifest_member_set_sql`, `manifest_missing_sql`, `manifest_column_of`), формат ключа модуля `parent_type\|file_path` (`module_key_sql` в SQL и `module_path_of` в Python — один формат на два контура), сборка манифеста (`build_children_manifest`) и простановка штампа ревизии (`stamp_revision_rows`). Сам модуль SQL к базовым таблицам не обращается — он задаёт формулировки, которыми пользуются другие. Ни загрузчик, ни писатель, ни MCP-слой не имеют права придумывать свой `max(revision_no)` или свой формат ключей |
 | `src/external_form_decoder.py` | `decode_layout()` (узел V15) — разметка `0/form` обычной формы → колонки `form_ext` (`items`, `attributes`, `events`, `commands`, `auto_command_bar`). Обёртка над `v8unpack.MetaDataObject.Form.FormElements26/27`: версия берётся из первого элемента разметки; исключений не бросает — любой сбой возвращает `success=False` с причиной. Полный `elem.json` в БД не пишется: источник истины — `form_ext.ext_bin` |
 | `src/ibcmd_bridge.py` (узел V25) | Двоичный файл внешнего объекта (`.erf`/`.epf`) → каталог разбора штатными командами `ibcmd`: `infobase create --db-path <каталог> --create-database --locale=ru`, `config --db-path <ИБ> load <файл.cf>`, `config --db-path <ИБ> export --file=<файл> <база>` (пара `<база>.xml` + каталог `<база>/`), обратная — `config --db-path <ИБ> import <root.xml> --out=<файл>`. `find_ibcmd()` — `PATH`, затем `C:\Program Files\[ (x86)]\1cv8\*\bin\ibcmd.exe` по убыванию версии, версия берётся из `--version` и на сообщения не влияет. `ensure_infobase()` — ИБ создаётся один раз и переиспользуется (`_ibcmd_work/ib`); метка `ckb_ibcmd_state.json` лежит **в каталоге ИБ**, создаётся вместе с ней со значением `config_state=unknown`, а `loaded` проставляется после успешного `config load` либо выводится из фактов разбора. `export_to_layout()` решает по наличию `<база>.xml`, а не по `rc` (L4); каталог `<база>/` опционален — внешний объект с пустым содержимым его не создаёт (замер узла V29, 16.10.2026), отсутствие каталога отдаётся предупреждением в разделе разбора, а не отказом; `type_name_counts()` считает в сохранённом XML имена `<v8:Type>cfg:…` и элементы `<v8|xr:TypeId>` — это и есть доказательство разрешения типов (R14); `import_from_layout()` — только по явной команде (узел V25.1). Своего SQL у моста нет: вставка выполняется через `load_catalog`. Каждый `subprocess.run` — с таймаутом (`TIMEOUT_INFOBASE` 300 с, `TIMEOUT_EXPORT` 600 с, `TIMEOUT_LOAD_CONFIG` 3600 с), таймаут — тоже исход, а не исключение |
 
@@ -106,13 +114,27 @@ MCP сервер `1c-configurations-core` (server_configurations_core.py) — э
 больше не числится: с узла V33 (17.10.2026) она **есть** в шаге 2 установки и заполняется загрузчиком
 варианта `configuration` (индекс состава из `ConfigDumpInfo.xml`, без XML объектов).
 
-`uuid` в `attributes` и `tabular_sections` уникален **глобально** (`attributes_uuid_key`,
-`tabular_sections_uuid_key`), а не в пределах родителя. Для внешнего отчёта это безопасно
-(uuid уникальны внутри выгрузки), но мешает вариантам «конфигурация» и «расширение»:
-расширение переиспользует uuid реквизита базовой конфигурации, и вторая вставка упадёт с
-`duplicate key` (см. п. 13). У `forms` и `templates` с 12.10.2026 (V13) уникальность уже
-**полиморфная** — `UNIQUE (parent_uuid, uuid)` + отдельный индекс по `uuid`, поэтому повторная
-загрузка расширения форму не сломает.
+**С узла V19 (18.10.2026) `uuid` не уникален ни в `external_report`, ни в дочерних таблицах** —
+граница перенесена на пару `(uuid, revision_no)`: `external_report_uuid_revision_no_key`,
+`attributes_uuid_revision_no_key`, `tabular_sections_uuid_revision_no_key`,
+`forms_uuid_revision_no_key`, `templates_uuid_revision_no_key`. Одна строка = одно состояние
+объекта, несколько строк = цепочка состояний одного объекта. Прежние границы (`external_report_uuid_key`,
+`attributes_uuid_key`, `tabular_sections_uuid_key`, `forms_parent_uuid_uuid_key`,
+`templates_parent_uuid_uuid_key`, индексы `uq_form_ext_form_id`, `uq_bsl_modules_parent_file`)
+сняты: они означали «одна строка на объект» и вторую ревизию не помещали бы.
+
+Внешние ключи `parent_uuid → external_report(uuid)` у `attributes`, `tabular_sections`, `forms`,
+`templates` **сняты и не восстановлены**: при двух ревизиях родителя ключ по неуникальному `uuid`
+существовать не может, а `ON DELETE` на нём был бы бесполезен. Каскад удаления детей делает
+загрузчик явными `DELETE` (`cascade_delete_pre_v19_children`, исторические таблицы до V19 снимает
+тем же порядком). `form_ext.form_id → forms(id)` **сохранён** с `ON DELETE CASCADE`: описание формы
+адресуется id строки-ревизии своей формы, а его граница — `uq_form_ext_form_id_revision
+(form_id, revision_no)`; у `bsl_modules` цепочка идёт по `(parent_uuid, file_path, revision_no)`,
+потому что uuid у модулей нет.
+
+Для вариантов «конфигурация» и «расширение» коллизия uuid **остаётся открытой**: граница
+`(uuid, revision_no)` глобальна, а не в пределах родителя, поэтому расширение, переиспольующее uuid
+реквизита базовой конфигурации, по-прежнему упадёт с `duplicate key` (п. 13).
 
 ### Дочерние данные внешнего отчёта (узлы V12, V13) — где что лежит
 
@@ -163,7 +185,13 @@ MCP сервер `1c-configurations-core` (server_configurations_core.py) — э
 
 Для уже существующей БД вместо шага 1b — аддитивная `migrate_v17_enrichment.sql` (тот же SQL +
 заполнение `target_key`/`target_uuid` у заполненных ранее таблиц); вместо создания
-`configuration_objects` шагом 2 — аддитивная `migrate_v33_configuration_objects.sql` (узел V33).
+`configuration_objects` шагом 2 — аддитивная `migrate_v33_configuration_objects.sql` (узел V33);
+вместо ревизионных колонок и витрин `v_current_*` шагов 1 и 1b — аддитивная
+`migrate_v19_revisions.sql` (узел V19: колонки `revision_no`/`changed_at`/`changed_by`, снятие
+прежних уникальностей и FK `parent_uuid`, `UNIQUE (uuid, revision_no)`, индексы разрешения текущей
+ревизии, `children_manifest`, витрины `v_current_*` и перевод витрин анализа). **Отдельного шага
+установки у V19 нет**: колонок и витрин узла в файлах шагов 1/1b/2 достаточно для чистой БД —
+`_cmp_ddl.py` собирает их всеми тремя шагами и расхождений не находит.
 
 Правила, которые это обеспечивает (дефект устранён 13.10.2026, см. п. 17):
 
@@ -197,6 +225,15 @@ MCP сервер `1c-configurations-core` (server_configurations_core.py) — э
   потерянная ссылка обнаруживается при чтении — карточка и сводка различают «не заявлена» /
   «привязано» / «битая, требуется перепривязка»; тот же контракт, что у
   `config_cross_references.local_doc_id` (п. 20, раздел 12 норматива).
+- ревизионные колонки и витрины узла V19 входят в **шаги 1 и 1b** (источник — `src/generate_ddl.py`),
+  отдельного шага установки у узла нет: `UNIQUE (uuid, revision_no)` семи таблиц, 21 CHECK-инвариант
+  (`*_revision_no_positive`, `*_changed_by_known`, `*_changed_pair_check`), `children_manifest`,
+  витрины `v_current_*` и перевод `v_form_elements`/`v_form_events`/`v_config_enrichment` на текущее
+  состояние. Сняты и **не возвращаются** ни в один DDL-источник: 4 FK `parent_uuid`
+  (`attributes`, `tabular_sections`, `forms`, `templates`) и 5 прежних уникальностей по uuid
+  (`external_report_uuid_key`, `attributes_uuid_key`, `tabular_sections_uuid_key`,
+  `forms_parent_uuid_uuid_key`, `templates_parent_uuid_uuid_key`) — при двух ревизиях родителя они
+  невозможны (п. 19). Для живых БД — `migrate_v19_revisions.sql`;
 - таблица `external_processing` и колонка `bsl_modules.processing_id` **удалены узлом V22**
   (14.10.2026): заголовок внешней обработки — строка `external_report` с
   `object_kind='external_processing'`, поэтому дочерние FK (`attributes`, `tabular_sections`,
@@ -231,6 +268,14 @@ MCP сервер `1c-configurations-core` (server_configurations_core.py) — э
 `configuration_objects` + её индексы, `migrate_v33_configuration_objects.sql`): 290 колонок,
 66 индексов/уникальных ограничений, 38 ограничений в `pg_constraint`, 4 витрины — расхождений нет,
 код возврата 0.
+Состояние 18.10.2026 после узла V19 (ревизионные колонки семи таблиц, `UNIQUE (uuid, revision_no)`,
+`children_manifest`, витрины `v_current_*`, перевод витрин анализа на текущее состояние):
+**481 колонка, 72 индекса/уникальных ограничения, 55 внешних ключей и ограничений, 12 витрин** —
+расхождений нет, код возврата 0. Арифметика ограничений (чтобы числа не читались противоречием):
+V19 снял 4 FK `parent_uuid` и 5 уникальностей по uuid (−9) и добавил 5 `UNIQUE (uuid, revision_no)`
+и 21 CHECK-инвариант ревизий (+26) — от замера 38 это даёт 55. Живой разклад по типам
+(`pg_constraint`): 14 PK + 10 UNIQUE + 5 FK + 26 CHECK = 55, из CHECK 21 — узла V19. Четыре витрины
+прежние + 8 новых (`v_current_*` семи таблиц и `v_current_object_manifest`) = 12.
 
 ### Обычные формы (`form_type='Ordinary'`, содержимое — `Form.bin`)
 
@@ -283,6 +328,99 @@ ordinary-формы и её заголовок — декодер заголов
 
 
 
+
+## 🔁 Версионность состояний внешнего объекта (узел V19, 18.10.2026)
+
+**Статус: реализована часть модели** — схема, загрузчик, витрины текущего состояния и карточка
+загрузки. Правки состояния (ради которых версионность и заводилась) ещё нет: инструментов, меняющих
+строки внешнего объекта, в контракте нет, поэтому в живой БД у всех строк `revision_no = 1`,
+`changed_at = changed_by = NULL`. Модель и правила M1–M8 — раздел 11
+`docs/CONFIGURATIONS_ENRICHMENT_PLAN.md`; журнал позиции — п. 19 ниже.
+
+### Что задаёт схема
+
+| Объект | Содержание |
+|---|---|
+| `revision_no` / `changed_at` / `changed_by` | семь таблиц: `external_report`, `attributes`, `tabular_sections`, `forms`, `form_ext`, `templates`, `bsl_modules`. Первая загрузка = ревизия 1, событие не записано (`changed_at = changed_by = NULL`). Продолжить цепочку может только правка состояния: `changed_by` ∈ `load` / `edit` / `restore` (CHECK `*_changed_by_known`, словарь — `src/current_revision.py`), `changed_at` и `changed_by` либо оба `NULL`, либо оба заполнены (CHECK `*_changed_pair_check`), `revision_no >= 1` (CHECK `*_revision_no_positive`) |
+| `UNIQUE (uuid, revision_no)` | одна строка на состояние: повторная ревизия того же uuid в ту же цепочку не ляжет, разные цепочки не мешают друг другу |
+| `uq_form_ext_form_id_revision (form_id, revision_no)` | описание формы относится к ревизии самой формы, а не «к максимальной по form_uuid»: два максимума по разным ключам могли бы разойтись. Поэтому загрузчик обязан проставить `form_ext` тот же `revision_no`, что и строке формы |
+| `uq_bsl_modules_parent_file_revision (parent_uuid, file_path, revision_no) WHERE parent_uuid IS NOT NULL` | цепочка модуля — по родителю и пути файла (uuid у модулей нет). Модули конфигурации (`parent_uuid IS NULL`) историей не живут: M1 относится к внешним объектам |
+| `external_report.children_manifest jsonb` | манифест состава детей текущего состояния (M3, M4): ключи `attribute_uuids`, `tabular_section_uuids`, `form_uuids`, `template_uuids`, `module_paths`. Формат задаёт `src/current_revision.py::build_children_manifest` (ключ модуля — `parent_type\|file_path` в нижнем регистре). Снятие ребёнка выражается новой ревизией родителя без этого ключа; отдельного признака состояния у строки ребёнка нет (решение A1) |
+| витрины `v_current_external_report`, `v_current_attributes`, `v_current_tabular_sections`, `v_current_forms`, `v_current_form_ext`, `v_current_templates`, `v_current_bsl_modules` | разрешение текущего состояния через `NOT EXISTS` по своей цепочке: для `form_ext` — по совпадению `revision_no` со строкой формы, для модулей — по `(parent_uuid, file_path)`, модули конфигурации отдаются как есть. Отдельного признака «текущая строка» нет: его пришлось бы поддерживать при каждой вставке, а пропущенная поддержка осталась бы незаметной |
+
+| `v_current_object_manifest` | манифест текущего состояния, разложенный по ключам (`attribute_uuids[]`, …, `module_paths[]`), плюс `manifest_missing` — различие «манифеста нет» (строки, загруженные до V19) и «манифест пуст» (состав снят целиком). Прочитать их одинаково — значит соврать: «состава нет» и «состав не заявлен» — разные утверждения |
+| `v_form_elements`, `v_form_events`, `v_config_enrichment` | переведены на `v_current_*`: исторические ревизии одного uuid не должны множиться в строках анализа содержимого и в счётчиках обогащения |
+| `idx_*_uuid_revision`, `idx_bsl_modules_parent_uuid_revision` | опора контракта M5, а не ускорение: без них разрешение максимальной ревизии читало бы таблицу целиком |
+
+**Версионируются только внешние объекты.** `configurations`, `config_extensions`,
+`configuration_objects` и таблицы обогащения (`config_*`) ревизионных колонок не имеют: M1 относится к
+внешним объектам, индекс состава — производные данные, пересоздаваемые при каждой загрузке (п. 26),
+а обогащение описывает состояние, состав детей которого разрешается манифестом текущего состояния
+(см. `.clinerules/1c-configurations-enrichment_Rule.md`).
+
+### Единая точка доступа — `src/current_revision.py`
+
+Один контракт формулировок (правила S1–S5 норматива): `current_view` (имена витрин текущего
+состояния), `current_child_count_sql` (число детей текущего состояния — строгий разбор по манифесту и
+свободный по строкам), `manifest_member_set_sql` (множество элементов манифеста),
+`manifest_missing_sql` («манифеста нет» ≠ «манифест пуст»), `manifest_column_of`,
+`module_key_sql` / `module_path_of` (ключ модуля — один формат на Python и SQL),
+`build_children_manifest`, `stamp_revision_rows` (общий штамп `revision_no`/`changed_at`/`changed_by`
+для всех строк состояния) и `validate_stamp` (несогласованный штамп — ошибка до вставки). Загрузчик,
+писатели и MCP-слой **не имеют права** писать свой `max(revision_no)` или свой формат ключей — ровно
+та же причина, по которой фильтр карантина живёт в `src/quarantine.py`.
+
+### Измерение прямого чтения (S2 — пробел не закрыт)
+
+Замер `python tools/_v19_read_sites.py` (18.10.2026): **51** SQL-обращение к семи версионируемым
+таблицам в рантайм-коде — `enrichment_generator.py` 27, `enrichment_snippets.py` 15,
+`configuration_loader.py` 3, `enrichment_aliases.py` 2, `external_report_loader.py` 2,
+`enrichment_dcs.py` 1, `server_configurations_export.py` 1. Разбивка по виду обращения — 48
+чтений (`FROM`/`JOIN`), 2 `UPDATE`, 1 `DELETE FROM`. Чтения идут по базовым таблицам **без фильтра по
+ревизии**, и сегодня смешанных состояний не дают лишь потому, что в живой базе на один `uuid` лежит
+одна ревизия (замер 18.10.2026: `max(revision_no) = 1`, строк с несколькими ревизиями — 0), а это
+держится на снятии истории загрузчиком (M7), а не на самих запросах. Как только появится правка,
+создающая ревизию 2, эти места начнут видеть обе ревизии сразу.
+
+`tools/_v19_read_sites.py` остаётся скриптом-измерением: он **не** сторожит запрет `max(revision_no)`
+вне `src/current_revision.py` и не входит в `validate_project.py`. Перевод этих мест на витрины
+`v_current_*` и единый фрагмент — открытая часть узла.
+
+### Открытые дефекты V19 (не закрыты на 18.10.2026)
+
+1. **M4 не реализован:** `delete_external_object()` снимает строки состояния без создания новой
+   ревизии родителя, а `load_catalog(force=True)` по M7 снимает историю — поэтому цепочка состояний
+   не отвечает на вопрос «что удаляли из объекта»: ответ на него даёт только `children_manifest`
+   предыдущей ревизии, и то пока строка не снята.
+2. **M1 не реализован для правок содержимого:** ни один инструмент не создаёт ревизию `revision_no =
+   max + 1` с `changed_by = 'edit'` — инструментов правки содержимого нет вовсе (см.
+   `docs/EXTERNAL_OBJECT_EDIT_PLAN.md`). Единственный путь изменения состояния — `force=True`,
+   который историю сбрасывает.
+3. **Регрессии M1/M4/M7 нет.** `tools/check_v19_revisions.py` (замер 18.10.2026: **121 проверка,
+   провалено 0**) сторожит другое: статическую форму `current_child_count_sql` (нет сломанной формы
+   `= ANY((SELECT m.<колонка> …))`, сравнение ключа идёт с множеством элементов через `unnest`,
+   выражение остаётся скаляром `COUNT(*)`), нормализацию ключа модуля (`LOWER(BTRIM(...))` — как
+   `_key_list` на Python), единственность канала (`manifest_member_set_sql`, своего SQL у вызывающих
+   нет), равенство строгого счёта числу членов манифеста **и** числу строк текущей ревизии,
+   различие «снимок до V19» (строгий счёт обязан быть 0, свободный — фактические строки) и уборку
+   за собой. Цепочки ревизий (M1), снятие ребёнка новой ревизией (M4) и сброс истории при
+   `force=True` (M7) скрипт **не** проверяет — граница названа в его же docstring: инструментов
+   правки нет, проверять пока нечего.
+4. **Эталонная пара загружена до V19:** у её строк `children_manifest IS NULL` (`manifest_missing =
+   true`); это различается явно (см. `v_current_object_manifest`), но карточка эталонов не отдаёт
+   строгий состав детей, пока пару не загрузят заново.
+
+### Как проверять узел
+
+```text
+python _cmp_ddl.py                    # шаги 1 → 1b → 2 (+migrate_v19_revisions.sql) против живой схемы
+python tools/check_v19_revisions.py   # SQL-форма разрешения детей по манифесту, ключи модулей,
+                                      # единый канал, различие «снимок до V19 / манифест записан»
+python tools/_v19_read_sites.py       # число SQL-обращений к версионируемым таблицам (S2)
+```
+
+`force=True` по-прежнему допустим только как осознанная замена (правило R5): карточка
+`♻️ перезагружено` означает сброс истории состояний (M7).
 
 ## 📊 Структура базы данных `ckb_1c_configurations` (живая схема)
 
@@ -392,7 +530,9 @@ load_1c_catalog_tool(source_path=r"C:\1C_LLM\LoadDoc\Test1_Otchet")
 #      сценарий не реализован / не получен ID)
 
 # Шаг 2: подтверждение перезагрузки дубликата
-load_1c_catalog_tool(source_path=..., force=True)   # ♻️ старая запись и её BSL удаляются
+load_1c_catalog_tool(source_path=..., force=True)   # ♻️ старая запись и её BSL удаляются;
+                                                    # с узла V19 по M7 снимается и история состояний
+                                                    # (загруженный каталог становится ревизией 1)
 
 # Шаг 2b (узел V25): тот же цикл для двоичного файла внешнего объекта (.erf/.epf).
 # Пути обязаны быть абсолютными: ibcmd рвёт относительный по рабочему каталогу процесса.
@@ -426,8 +566,14 @@ delete_external_report_tool(source_path=...)  # или uuid=..., или report_i
 #                                              # parent_type детей, удаление с object_type).
 #                                              # Прогон очищает БД — эталоны затем восстанавливают
 #                                              # tools/restore_reference_pair.py + генерация
-# python _cmp_ddl.py                           # полная сверка: шаги 1+2 установки против живой
-#                                              # схемы (колонки, индексы, FK, витрины)
+# python _cmp_ddl.py                           # полная сверка: шаги 1+1b+2 установки (+миграция V19)
+#                                              # против живой схемы (колонки, индексы, FK, витрины)
+# python tools/check_v19_revisions.py          # узел V19: SQL-форма разрешения детей по манифесту,
+#                                              # ключи модулей, единый канал, «снимок до V19» vs
+#                                              # записанный манифест. Замер 18.10.2026: 121 проверка,
+#                                              # провалено 0 (M1/M4/M7 им не проверяются)
+# python tools/_v19_read_sites.py              # узел V19: число SQL-обращений к версионируемым
+#                                              # таблицам (S2 не закрыт: замер 18.10.2026 — 51)
 # python tools/restore_reference_pair.py       # восстановить эталонную пару (Test1_Otchet +
 #                                              # Test2_Otchet) через src/config_load_router,
 #                                              # после того как валидаторы очистили БД
@@ -1134,11 +1280,13 @@ SQL-подтверждение — `check_external_report_fill.sql` раздел
 выгрузку» — это безопасно. При сценарии «создаём и исправляем внешние отчёты/обработки»
 становится опасным: теряется и состояние «до» правки, и ответ на вопрос «что именно изменилось
 между двумя состояниями», нужный перед обратной выгрузкой в файлы (узел V18).
-**Статус:** ⚠️ **Осознанная незавершённость — узел V19. Модель принята оператором 14.10.2026,
-нормативная подготовка (этап 0) выполнена 18.10.2026, код и схема не изменены.** Норматив:
+**Статус:** 🟡 **Частично реализовано 18.10.2026 (коммит `28e45d0e`) — узел V19. Модель принята оператором 14.10.2026,
+нормативная подготовка (этап 0) выполнена 18.10.2026, схема и загрузчик изменены 18.10.2026; tools-слой
+(правка состояния следующей ревизией, снятие ребёнка) и перевод enrichment-слоя — не реализованы.** Норматив:
 [docs/CONFIGURATIONS_ENRICHMENT_PLAN.md](../docs/CONFIGURATIONS_ENRICHMENT_PLAN.md), раздел 11
-(подраздел «Принятая модель», правила M1–M8, решения по открытым точам A1–A4 — закрыты 18.10.2026,
-требование единой точки доступа S1–S5, замер цены узла).
+(подразделы «Принятая модель», «Реализация 18.10.2026», «Осталось», правила M1–M8, решения по открытым
+точам A1–A4 — закрыты 18.10.2026, требование единой точки доступа S1–S5, замер цены узла). Модель схемы,
+манифеста и точки доступа — раздел «🔁 Версионность состояний внешнего объекта (узел V19)» этих правил.
 
 Принята версионность **в самих таблицах**, а не снимками: цепочка строк на один `uuid`
 (`revision_no` в пределах `uuid`, `changed_at`, `changed_by`; первая загрузка = ревизия 1) плюс
@@ -1154,11 +1302,12 @@ jsonb `form_ext.items/events/commands`, `templates.ext`), и новый мани
 **отклонён**: он даёт только историю, но не редактируемое состояние с неизменным `uuid` объекта;
 построчная история через триггеры и колонка `revision` без правила «текущая версия» — тоже.
 
-Что придётся менять при реализации (замер цены узла — 18.10.2026, `python tools/_v19_read_sites.py`):
+Что требовалось менять при реализации (замер цены узла **до** реализации — 18.10.2026,
+`python tools/_v19_read_sites.py`):
 `UNIQUE (uuid, revision_no)` вместо
 `external_report.uuid UNIQUE`, `attributes_uuid_key`, `tabular_sections_uuid_key`,
 `forms_parent_uuid_uuid_key`, `templates_parent_uuid_uuid_key`, `uq_form_ext_form_id`, частичного
-индекса `bsl_modules (parent_uuid, file_path)`; FK `parent_uuid → external_report(uuid)` придётся
+индекса `bsl_modules (parent_uuid, file_path)`; FK `parent_uuid → external_report(uuid)` пришлось
 снять (при двух ревизиях `uuid` не уникален) и делать каскад явными `DELETE` в
 `delete_external_object()` — прецедент с `bsl_modules` (п. 10) уже есть; **52 места чтений**
 (замер `python tools/_v19_read_sites.py`: `src/enrichment_generator.py` 27, `src/enrichment_snippets.py` 15,
@@ -1169,6 +1318,17 @@ jsonb `form_ext.items/events/commands`, `templates.ext`), и новый мани
 переводятся на **единую точку доступа** к текущему состоянию (один SQL-фрагмент/модуль по образцу
 `src/quarantine.py` либо витрины `v_current_*`) — править 52 места по одному запрещено, потому что
 одно пропущенное условие даёт смешанные ревизии в одном ответе (M5, S1–S5 норматива);
+Схемная часть этого перечня **выполнена 18.10.2026** (ограничения, снятие FK, явные `DELETE`,
+витрины `v_current_*`, модуль `src/current_revision.py`); витрины `v_form_elements`, `v_form_events`,
+`v_config_enrichment` переведены на `v_current_*`, `v_config_alias_targets` версионируемых таблиц
+не читает вовсе. **Чтение осталось (S2)**: повторный замер 18.10.2026 — **51 прямое обращение**
+в семи модулях (`enrichment_generator` 27, `enrichment_snippets` 15, `configuration_loader` 3,
+`enrichment_aliases` 2, `external_report_loader` 2, `enrichment_dcs` 1,
+`server_configurations_export` 1). Из 52 снялось ровно одно: `external_report_loader` до
+реализации читал `external_report` трижды, после — дважды (`find_external_object` переведён на
+витрину текущего состояния). Остальные модули перечня не изменились; разбор чисел и разбивка по
+виду обращения — раздел «Версионность состояний внешнего объекта (узел V19)» выше и раздел 11
+норматива. Числа 52 и 51 измеряют разное время и не противоречат друг другу.
 проверки «сирот» и «потерянных ссылок» считаются по манифесту
 текущего состояния; снятие ребёнка выражается **только отсутствием в манифесте** родителя (A1,
 колонки `state` нет); регрессии, использующие `force=True` (`validate_load_flow.py --with-load`,
@@ -1555,8 +1715,11 @@ CHECK и функций — по живой схеме и `src/external_provenan
   колонки, состояние читается как `not_recorded`;
 - **провенанс только у `external_report`.** У `configurations`/`configuration_objects` колонок `origin_*`
   нет (решение D-C): заголовок конфигурации — единственная строка на `name`, индекс состава —
-  производные данные, пересоздаваемые при каждой загрузке. Версионности состояний нет (узел V19 не
-  реализован, п. 19).
+  производные данные, пересоздаваемые при каждой загрузке. На них узел V19 (версионность состояний
+  внешнего объекта, п. 19) **не распространяется** — это сознательная граница модели V19. Колонки
+  провенанса лежат на строке заголовка, то есть относятся к строке **текущей ревизии**; цепочку
+  ревизий создаёт одна загрузка, а `force=True` снимает историю и пересчитывает провенанс
+  (правило R15), поэтому отдельной истории источников по состояниям нет.
 **Проверка:** `python tools/check_v31_provenance.py` (колонки + три CHECK + индекс `origin_sha256` в
 живой схеме; каталог → `origin_kind='catalog'`; `.epf` → `binary_file` с `sha256` файла; `force=True`
 перезаписывает; у `configurations`/`configuration_objects` `origin_*` нет). `_cmp_ddl.py` rc=0 (замер
