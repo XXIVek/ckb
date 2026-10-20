@@ -80,11 +80,16 @@ EXPECTED_TOOLS = {
     # которых в сервере нет, и молчал об тех, что есть (карантин узла Q1, инструменты правил).
     # Пока `server.py` не входил в EXPECTED_TOOLS, класс дефекта «правило обещает инструмент,
     # которого нет» не ловился ничем. Состав — 15 инструментов регистра `server.py`.
+    # Узел P6 (20.10.2026) добавил get_snippet_tool и update_snippet_tool: 15 → 17. Причина
+    # не в удобстве: содержимое сниппета по ID не читалось ни одним инструментом контракта
+    # (вывод строился по превью в 200 символов), а «исправить знание» было можно только новой
+    # строкой — в базе оставались два противоречащих знания, и поиск отдавал обе.
     "server.py": [
         "add_aliases_tool", "add_snippet_tool", "detect_tags_tool", "get_db_state_tool",
-        "get_doc_tool", "get_load_rules_tool", "get_search_rules_tool", "list_categories_tool",
-        "list_marked_snippets_tool", "load_bsl_tool", "load_doc_tool", "load_single_html_tool",
-        "mark_snippet_for_deletion_tool", "search_docs_tool", "unmark_snippet_for_deletion_tool",
+        "get_doc_tool", "get_load_rules_tool", "get_search_rules_tool", "get_snippet_tool",
+        "list_categories_tool", "list_marked_snippets_tool", "load_bsl_tool", "load_doc_tool",
+        "load_single_html_tool", "mark_snippet_for_deletion_tool", "search_docs_tool",
+        "unmark_snippet_for_deletion_tool", "update_snippet_tool",
     ],
 }
 

@@ -167,11 +167,15 @@ try:
     # узел Q1: карантин сниппетов local_doc — те же операции, что у enrich-контура
     from mcp_tools_api import (mark_snippet_for_deletion, unmark_snippet_for_deletion,
                                list_marked_snippets)
+    # узел P6: вторая фаза чтения (содержимое сниппета по ID) и правка строки с историей
+    from mcp_tools_api import get_snippet, update_snippet, MAX_ANSWER_CHARS
     from mcp_tools_loader import load_files, load_bsl_docs
     from loader import detect_tags
     print(f"  ✅ 7 functions imported: {', '.join(['add_snippet', 'get_db_state', 'get_group', 'search_docs', 'load_files', 'load_bsl_docs', 'detect_tags'])}")
     print("  ✅ карантин local_doc: mark_snippet_for_deletion, unmark_snippet_for_deletion, "
           "list_marked_snippets")
+    print(f"  ✅ чтение и правка сниппета local_doc: get_snippet, update_snippet "
+          f"(порог усечения MAX_ANSWER={MAX_ANSWER_CHARS}, общий с enrichment-контуром)")
 except Exception as e:
     print(f"  ❌ MCP tools failed: {e}")
     sys.exit(1)

@@ -5,8 +5,18 @@ from mcp_tools_core import _get_pool, extract_aliases
 # Узел Q1: карантин ошибочных сниппетов (зарезервированный тег в knowledge_snippets.tags).
 # Тот же модуль служит контуру ckb_1c_configurations (config_snippets.tags) — соглашение о
 # метке обязано быть одним, иначе в двух базах появятся два разных «удалено частично».
-from quarantine import (MARK_ARRAY, MARKER, is_marked, reason_of, sql_not_marked,  # noqa: E402
-                        with_mark, without_mark)
+from quarantine import (MARK_ARRAY, MARKER, MARKED_SQL, is_marked, reason_of,  # noqa: E402
+                        sql_not_marked, strip_reserved, with_mark, without_mark)
+
+# Усечение текста в выдаче. Порог один на весь проект — тот же, что у get_config_snippet_tool
+# и get_config_template_tool (server_configurations_enrichment.py, MAX_ANSWER). Два разных порога
+# означали бы два разных ответа на один вопрос «покажи текст целиком»; при усечении всегда
+# печатается полная длина, чтобы усечение не читалось как полное содержимое.
+MAX_ANSWER_CHARS = 8000
+# Алиасы перечисляются с ограничением, но их общее число отдаётся всегда: по числу алиасов
+# оператор судит о находимости строки (правило «нет алиаса — нет знания»), и усечённый
+# перечень без полного числа вводил бы в заблуждение.
+MAX_ALIASES_LISTED = 100
 
 
 def add_snippet(question, answer, source_url=None, tags='bsl,code', confidence=0.9, groups_id=None, aliases=None):
@@ -144,7 +154,7 @@ def mark_snippet_for_deletion(snippet_id, reason=None):
         if not row:
             conn.commit()
             cur.close()
-            return {'success': False,
+            return {'success': False, 'found': False,
                     'error': f'Сниппет id={snippet_id} в knowledge_snippets не найден'}
         old_tags = row[2] or []
         if reason is None and is_marked(old_tags):
@@ -189,7 +199,7 @@ def unmark_snippet_for_deletion(snippet_id):
         if not row:
             conn.commit()
             cur.close()
-            return {'success': False,
+            return {'success': False, 'found': False,
                     'error': f'Сниппет id={snippet_id} в knowledge_snippets не найден'}
         if not is_marked(row[2]):
             conn.commit()
@@ -238,6 +248,224 @@ def list_marked_snippets(limit=50):
         return {'success': True, 'found': len(rows), 'rows': rows}
     except Exception as e:
         print(f'[ERROR list_marked_snippets]: {str(e)}', flush=True)
+        return {'success': False, 'error': str(e)}
+    finally:
+        if 'conn' in locals(): pool.putconn(conn)
+
+
+def get_snippet(snippet_id):
+    """Полная карточка сниппета local_doc по ID — вторая фаза двухфазного чтения (узел P6).
+
+    Зачем. Выдача search_docs — это ID, тип, заголовок и превью в 200 символов
+    (`title[:200]` / `description[:200]`), а не содержимое: `groups.description` хранит весь
+    `<body>` HTML, ручная строка доходит до десятков килобайт. Содержимое группы читалось
+    get_group; инструмента для содержимого сниппета не было (открытый дефект 20.10.2026),
+    поэтому вывод о полном тексте сниппета по превью не делался, а единственный обход —
+    прямой SQL — оператору не отвечает (правило «только инструменты контракта»).
+
+    Что отдаётся: question и answer (answer усекается до MAX_ANSWER_CHARS с явной пометкой и
+    полной длиной — усечение не должно читаться как «текст целиком»), теги, confidence,
+    is_verified, source_url, отметки времени, признак карантина и его причина (только через
+    src/quarantine.py, своего разбора здесь нет), родительская группа (id, name, pagetitle) —
+    по ней видно, авторитетна ли строка или это ручная запись без группы, и алиасы строки с их
+    общим числом: по числу алиасов судят о находимости («нет алиаса — знания для поиска нет»),
+    поэтому усечённый перечень обязан идти с полным счётчиком.
+
+    Два отказа различаются ключом `found`: «строки с таким id нет» даёт `success=False` и
+    `found: False`, сбой обращения к базе — `success=False` без ключа `found` (его отсутствие и
+    есть различие: первое — утверждение об id, второе — не выполненный вызов). Тот же ключ
+    возвращают `mark_snippet_for_deletion`, `unmark_snippet_for_deletion` и `update_snippet`.
+    """
+    try:
+        pool = _get_pool()
+        conn = pool.getconn()
+        cur = conn.cursor()
+        cur.execute("SELECT id, groups_id, question, answer, source_url, tags, confidence, "
+                    "is_verified, created_at, updated_at FROM knowledge_snippets WHERE id = %s",
+                    (int(snippet_id),))
+        row = cur.fetchone()
+        if not row:
+            conn.commit()
+            cur.close()
+            # `found` отделяет «строки с таким id нет» от «вызов не выполнен» (исключение ниже):
+            # без этого ключа оба ответа выглядят одинаково (success=False), а смысл разный —
+            # первое утверждение об id, второе сбой обращения к базе.
+            return {'success': False, 'found': False,
+                    'error': f'Сниппет id={snippet_id} в knowledge_snippets не найден'}
+        snippet_id, groups_id, question, answer = row[0], row[1], row[2] or '', row[3] or ''
+        tags = row[5] or []
+        group = None
+        if groups_id is not None:
+            cur.execute("SELECT id, name, pagetitle FROM groups WHERE id = %s", (groups_id,))
+            grow = cur.fetchone()
+            if grow:
+                group = {'id': grow[0], 'name': grow[1] or '', 'pagetitle': grow[2] or ''}
+        cur.execute("SELECT count(*) FROM alias_targets WHERE snippets_id = %s", (snippet_id,))
+        aliases_total = int(cur.fetchone()[0] or 0)
+        cur.execute("SELECT alias_name, weight FROM alias_targets WHERE snippets_id = %s "
+                    "ORDER BY weight DESC NULLS LAST, alias_name LIMIT %s",
+                    (snippet_id, MAX_ALIASES_LISTED))
+        aliases = [{'alias_name': a[0], 'weight': float(a[1]) if a[1] is not None else None}
+                   for a in cur.fetchall()]
+        cur.close()
+        return {'success': True, 'snippet_id': int(snippet_id),
+                'question': question, 'answer': answer[:MAX_ANSWER_CHARS],
+                'answer_chars': len(answer), 'answer_truncated': len(answer) > MAX_ANSWER_CHARS,
+                'source_url': row[4], 'tags': tags, 'confidence': row[6],
+                'is_verified': bool(row[7]), 'created_at': str(row[8] or ''),
+                'updated_at': str(row[9] or ''),
+                'groups_id': groups_id, 'group': group,
+                'marked': is_marked(tags), 'marked_reason': reason_of(tags),
+                'aliases': aliases, 'aliases_total': aliases_total,
+                'aliases_truncated': aliases_total > len(aliases)}
+    except Exception as e:
+        print(f'[ERROR get_snippet]: {str(e)}', flush=True)
+        return {'success': False, 'error': str(e)}
+    finally:
+        if 'conn' in locals(): pool.putconn(conn)
+
+
+def update_snippet(snippet_id, new_question=None, new_answer=None, tags=None, aliases=None,
+                   reason=None):
+    """Исправить существующий сниппет, сохранив прежнее содержимое в snippet_audit_log.
+
+    Зачем отдельный инструмент, а не «записать новую строку»: add_snippet создаёт запись и
+    оставляет старую, поэтому в базе остаются два противоречащих знания и поиск отдаёт обе
+    строки. Так 20.10.2026 появились две карточки одного свойства с разными словарями
+    значений. Правка обязана быть операцией над существующей строкой, с историей.
+
+    Правила контракта (каждое — на случай, который уже случался):
+
+      * `reason` обязателен: правка знания без причины не отвечает на вопрос, зачем изменён
+        текст, и обессмысливает строку истории;
+      * ни одного изменения не передано — отказ: пустая правка ничего не меняет и не должна
+        попадать в аудит;
+      * `tags` заменяются целиком, но состояние карантина сохраняется средствами
+        src/quarantine.py (with_mark/without_mark): правка текста не имеет права ни снимать,
+        ни ставить пометку. Пустой набор тегов отклоняется — снять тег категории значит
+        сделать строку невидимой для поиска с category, то есть удалить знание, а не
+        исправить его;
+      * алиасы не удаляются никогда: они и есть находимость. Переданные `aliases` добавляются
+        аддитивно (ON CONFLICT DO NOTHING), прежние остаются нетронутыми;
+      * содержимое, алиасы и аудит пишутся в одной транзакции: либо всё, либо ничего.
+
+    Строка аудита пишется полной: прежние question/answer и новые значения, а там, где поле не
+    менялось, записывается прежнее значение, а не пустая строка, — иначе строку аудита нельзя
+    читать как снимок состояния (прежняя реализация fix_knowledge_snippet теряла вопрос при
+    правке только ответа).
+    """
+    changed = {}
+    if new_question is not None:
+        changed['question'] = str(new_question)
+    if new_answer is not None:
+        changed['answer'] = str(new_answer)
+
+    tag_list = None
+    if tags is not None:
+        raw = tags.split(',') if isinstance(tags, str) else list(tags or [])
+        cleaned, _dropped_reserved = strip_reserved(raw)
+        if not cleaned:
+            return {'success': False,
+                    'error': 'Пустой набор тегов: замена tags обязана оставлять хотя бы один '
+                             'тег. Тег категории определяет находимость строки поиском с '
+                             'category — снять его значит удалить знание, а не исправить его. '
+                             'Если теги менять не нужно, не передавайте параметр tags.'}
+        tag_list = cleaned
+
+    if isinstance(aliases, str):
+        alias_list = [a.strip().lower() for a in aliases.split(',') if a.strip()]
+    else:
+        alias_list = [str(a).strip().lower() for a in (aliases or []) if str(a).strip()]
+
+    if not changed and tag_list is None and not alias_list:
+        return {'success': False,
+                'error': 'Не передано ни одного изменения: укажите question, answer, tags или '
+                         'aliases. Пустая правка не меняет строку и не должна попадать в аудит.'}
+    if not str(reason or '').strip():
+        return {'success': False,
+                'error': 'Не указана причина правки (параметр reason). Правка знания без причины '
+                         'не отвечает на вопрос, почему текст изменён, и лишает смысла строку '
+                         'истории в snippet_audit_log.'}
+
+    try:
+        pool = _get_pool()
+        conn = pool.getconn()
+        cur = conn.cursor()
+        cur.execute("SELECT id, question, answer, tags FROM knowledge_snippets WHERE id = %s",
+                    (int(snippet_id),))
+        row = cur.fetchone()
+        if not row:
+            conn.rollback()
+            cur.close()
+            return {'success': False, 'found': False,
+                    'error': f'Сниппет id={snippet_id} в knowledge_snippets не найден'}
+        old_id, old_question = row[0], row[1] or ''
+        old_answer, old_tags = row[2] or '', list(row[3] or [])
+
+        dropped_categories, new_tags = [], list(old_tags)
+        if tag_list is not None:
+            cur.execute("SELECT code FROM doc_categories")
+            codes = {str(r[0]) for r in cur.fetchall()}
+            old_categories = {str(t).strip() for t in old_tags if str(t).strip() in codes}
+            new_tags = (with_mark(tag_list, reason_of(old_tags) or None)
+                        if is_marked(old_tags) else without_mark(tag_list))
+            dropped_categories = sorted(old_categories
+                                       - {str(t).strip() for t in new_tags})
+
+        updates, params = [], []
+        if 'question' in changed:
+            updates.append("question = %s")
+            params.append(changed['question'])
+        if 'answer' in changed:
+            updates.append("answer = %s")
+            params.append(changed['answer'])
+        if tag_list is not None:
+            updates.append("tags = %s")
+            params.append(new_tags)
+        # `updated_at` добавляется в список, а не дописывается после запятой: правка только
+        # алиасов не меняет ни question, ни answer, ни tags — пустой `updates` дал бы
+        # «SET , updated_at = NOW()» (синтаксическая ошибка), и аддитивная правка алиасов
+        # падала бы, не дойдя до аудита.
+        updates.append("updated_at = NOW()")
+        params.append(int(old_id))
+        cur.execute(f"UPDATE knowledge_snippets SET {', '.join(updates)} WHERE id = %s", params)
+
+        aliases_added = 0
+        for alias in alias_list:
+            cur.execute(
+                "INSERT INTO alias_targets (alias_name, target_type, groups_id, snippets_id, "
+                "tags, weight) VALUES (%s, 'snippet', NULL, %s, NULL, 1.0) "
+                "ON CONFLICT (alias_name, snippets_id) WHERE snippets_id IS NOT NULL "
+                "DO NOTHING", (alias, int(old_id)))
+            aliases_added += cur.rowcount
+
+        audit_reason = " ".join(str(reason).split())
+        if dropped_categories:
+            audit_reason += f" | сняты теги категорий: {', '.join(dropped_categories)}"
+        if aliases_added:
+            audit_reason += f" | добавлено алиасов: {aliases_added}"
+        cur.execute("INSERT INTO snippet_audit_log (snippet_id, action, old_question, "
+                    "new_question, old_answer, new_answer, reason) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                    (int(old_id), 'fix', old_question, changed.get('question', old_question),
+                     old_answer, changed.get('answer', old_answer), audit_reason))
+        audit_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        changed_fields = sorted(list(changed.keys())
+                                + (['tags'] if tag_list is not None else [])
+                                + (['aliases'] if alias_list else []))
+        return {'success': True, 'snippet_id': int(old_id), 'changed': changed_fields,
+                'question': changed.get('question', old_question),
+                'answer_chars': len(changed.get('answer', old_answer)),
+                'tags': new_tags, 'aliases_requested': len(alias_list),
+                'aliases_added': aliases_added, 'dropped_categories': dropped_categories,
+                'marked': is_marked(new_tags), 'marked_reason': reason_of(new_tags),
+                'audit_id': int(audit_id),
+                'note': 'прежнее содержимое сохранено в snippet_audit_log (action=fix)'}
+    except Exception as e:
+        if 'conn' in locals(): conn.rollback()
+        print(f'[ERROR update_snippet]: {str(e)}', flush=True)
         return {'success': False, 'error': str(e)}
     finally:
         if 'conn' in locals(): pool.putconn(conn)

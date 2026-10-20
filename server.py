@@ -9,6 +9,14 @@ sys.path.insert(0, str(src_dir))
 from fastmcp import FastMCP
 from database import init_database
 from mcp_tools_api import add_snippet as _add_snippet, add_aliases as _add_aliases, get_db_state as _get_db_state, get_group as _get_group
+# Узел P6: вторая фаза двухфазного чтения (содержимое сниппета по ID) и правка существующей
+# строки с историей в snippet_audit_log. До этого содержимое сниппета не читалось ничем из
+# контракта, а правка была только как «добавить новую строку» — обе строки оставались в базе.
+from mcp_tools_api import get_snippet as _get_snippet, update_snippet as _update_snippet
+# Порог усечения один на весь проект (тот же, что у get_config_snippet_tool в
+# server_configurations_enrichment.py): два разных порога дали бы два разных ответа на
+# вопрос «покажи текст целиком».
+from mcp_tools_api import MAX_ANSWER_CHARS
 from mcp_tools_loader import load_files as _load_files, load_bsl_docs as _load_bsl_docs, parse_html_file as _parse_html_file, extract_code_example as _extract_code_example
 from loader import detect_tags as _detect_tags
 
@@ -222,11 +230,121 @@ def get_doc_tool(doc_id: int):
             f"Теги: {', '.join(group.get('tags', []))}",
             "",
             "Описание:",
-            str(group.get('description', ''))[:2000],
+            str(group.get('description', '') or '')[:MAX_ANSWER_CHARS],
         ]
+        # Узел P6: усечение обязано быть названным. Прежний порог в 2000 символов молча
+        # обрывал <body> страницы: ответ выглядел как полное содержимое группы, и по нему
+        # нельзя было судить о словаре значений или таблице в конце раздела.
+        _desc = str(group.get('description', '') or '')
+        if len(_desc) > MAX_ANSWER_CHARS:
+            lines.append("")
+            lines.append(f"⚠️ Описание усечено: показано {MAX_ANSWER_CHARS} символов из "
+                         f"{len(_desc)}. Полный текст — SQL по groups.description.")
         return '\n'.join(lines)
     except Exception as e:
         return f"Ошибка при получении группы: {str(e)}"
+
+
+@mcp.tool()
+def get_snippet_tool(snippet_id: int):
+    """Полная карточка сниппета local_doc по ID — вторая фаза двухфазного чтения.
+
+    Выдача search_docs_tool содержит ID, тип, заголовок и превью в 200 символов, а не
+    содержимое: о словаре значений, таблице или примере кода по превью не судят. Этим
+    инструментом читается содержимое сниппета (answer до MAX_ANSWER символов, с явной меткой
+    усечения и полной длиной), плюс теги, confidence, is_verified, source_url, родительская
+    группа (по ней видно, авторитетна ли строка), алиасы строки и их полное число, признак
+    карантина и его причина.
+    """
+    try:
+        result = _get_snippet(snippet_id=snippet_id)
+        if not result.get('success'):
+            return f"❌ {result.get('error')}"
+        lines = [
+            f"ID: {result.get('snippet_id')}",
+            f"Вопрос: {result.get('question')}",
+            f"Ответ ({result.get('answer_chars')} симв.):",
+            str(result.get('answer') or ''),
+        ]
+        if result.get('answer_truncated'):
+            lines.append("")
+            lines.append(f"⚠️ Ответ усечён: показано {MAX_ANSWER_CHARS} символов из "
+                         f"{result.get('answer_chars')}. Полный текст — SQL по "
+                         f"knowledge_snippets.answer.")
+        lines.append("")
+        lines.append(f"Теги: {', '.join(result.get('tags') or []) or 'нет'}")
+        lines.append(f"groups_id: {result.get('groups_id')} | confidence: "
+                     f"{result.get('confidence')} | is_verified: {result.get('is_verified')}")
+        if result.get('group'):
+            grp = result['group']
+            lines.append(f"Родительская группа: ID {grp.get('id')} | {grp.get('name')} "
+                         f"| pagetitle: {grp.get('pagetitle')}")
+        else:
+            lines.append("Родительская группа: нет (ручная строка: PDF, FAQ, ручные записи)")
+        lines.append(f"source_url: {result.get('source_url') or 'нет'}")
+        lines.append(f"created_at: {result.get('created_at')} | "
+                     f"updated_at: {result.get('updated_at')}")
+        if result.get('marked'):
+            lines.append(f"⚠️ Помечен к удалению: "
+                         f"{result.get('marked_reason') or 'причина не указана'}")
+        total = result.get('aliases_total') or 0
+        shown = result.get('aliases') or []
+        lines.append(f"Алиасы (всего {total}, показано {len(shown)}): "
+                     + (', '.join(a.get('alias_name', '') for a in shown) or 'нет'))
+        if total > len(shown):
+            lines.append(f"⚠️ Перечень алиасов усечён: всего {total} (полный список — SQL по "
+                         f"alias_targets).")
+        lines.append("")
+        lines.append("Изменить эту строку: update_snippet_tool (прежнее содержимое уйдёт в историю).")
+        return '\n'.join(lines)
+    except Exception as e:
+        return f"Ошибка при получении сниппета: {str(e)}"
+
+
+@mcp.tool()
+def update_snippet_tool(snippet_id: int, new_question: str = None, new_answer: str = None,
+                        tags: str = None, aliases: str = None, reason: str = None):
+    """Исправить существующий сниппет local_doc, сохранив прежнее содержимое в snippet_audit_log.
+
+    Причина, по которой правка — отдельный инструмент: add_snippet_tool создаёт новую запись и
+    оставляет старую, поэтому в базе остаются два противоречащих знания и поиск отдаёт обе
+    строки (так появились две карточки одного свойства с разными словарями значений). Здесь
+    изменяется та же строка, а прежнее её содержимое уходит в snippet_audit_log (action=fix).
+
+    Аргументы: new_question/new_answer — новый текст (меняются только переданные поля);
+    tags — полная замена тегов через запятую (пустой набор отклоняется: снять тег категории
+    значит сделать строку невидимой для поиска с category; состояние карантина сохраняется);
+    aliases — ДОБАВИТЬ алиасы, прежние не удаляются; reason — обязателен.
+    """
+    try:
+        result = _update_snippet(snippet_id=snippet_id, new_question=new_question,
+                                 new_answer=new_answer, tags=tags, aliases=aliases, reason=reason)
+        if not result.get('success'):
+            return f"❌ {result.get('error')}"
+        lines = [
+            "✅ Сниппет исправлен (строка та же, прежнее содержимое — в истории).",
+            f"ID: {result.get('snippet_id')}",
+            f"Изменено полей: {', '.join(result.get('changed') or [])}",
+            f"Вопрос после правки: {str(result.get('question') or '')[:120]}",
+            f"Длина ответа: {result.get('answer_chars')} симв.",
+            f"Теги после правки: {', '.join(result.get('tags') or []) or 'нет'}",
+            f"Алиасы: запрошено {result.get('aliases_requested')}, добавлено "
+            f"{result.get('aliases_added')} (прежние не удалялись)",
+        ]
+        if result.get('dropped_categories'):
+            lines.append(f"⚠️ Со строки сняты теги категорий: "
+                         f"{', '.join(result['dropped_categories'])} — строка перестала "
+                         f"находиться поиском с category.")
+        if result.get('marked'):
+            lines.append(f"⚠️ Строка помечена к удалению: "
+                         f"{result.get('marked_reason') or 'причина не указана'} "
+                         f"(правка текста пометку не снимает).")
+        lines.append(f"Строка истории: snippet_audit_log id={result.get('audit_id')} (action=fix)")
+        lines.append("")
+        lines.append(str(result.get('note') or ''))
+        return '\n'.join(lines)
+    except Exception as e:
+        return f"Ошибка при правке сниппета: {str(e)}"
 
 
 @mcp.tool()
