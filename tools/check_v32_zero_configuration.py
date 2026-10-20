@@ -19,6 +19,14 @@ Test3_Otchet_Null; эталонная пара (Test1_Otchet, Test2_Otchet) не
      названы прямо (Properties без колонки, ChildObjects/Language,
      UsedMobileApplicationFunctionalities, InternalInfo корня с версиями UUID v1/v4);
      пустой или некорректный uuid — отказ с причиной;
+  3c. перечень ссылок (дефект разбора `DefaultRoles`, 20.10.2026): детьми перечисных свойств
+      бывают и `<v8:Value>` (UsePurposes), и `<xr:Item xsi:type="xr:MDObjectRef">`
+      (DefaultRoles) — измеряется по восьми выгрузкам. Разбор обязан читать обе формы,
+      снимать префикс вида (`Role.Х` → `Х`), сохранять порядок и не молчать о детях
+      неизвестной формы (пустая колонка называется предупреждением); `_has_value` по детям
+      `Item` не считает заполненное свойство пустой слепой зоной; роль доходит до колонки
+      `main_roles` (TEXT[]) и убирается за собой;
+
   4. фикстура `Config_NULL` (её проверяет только этот инструмент): индекс состава пуст —
      общая точка входа удерживает загрузку ДО записи (узел V33: частичного индекса не
      бывает), хотя сам `Configuration.xml` разбирается целиком (раздел 3). Строк ни в
@@ -67,6 +75,7 @@ import shutil
 import sys
 import tempfile
 import uuid as uuid_lib
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -87,8 +96,9 @@ from configuration_loader import (TABLE, bound_external_objects,  # noqa: E402
                                   delete_configuration, find_configuration,
                                   find_configuration_by_name, find_configuration_xml,
                                   register_configuration)
-from configuration_meta_parser import (CONFIGURATION_FIELDS,  # noqa: E402
-                                      parse_configuration_meta)  # noqa: E402
+from configuration_meta_parser import (CONFIGURATION_FIELDS, LIST_CHILD_TAGS,  # noqa: E402
+                                      _has_value, _list_children, _ref_list,
+                                      parse_configuration_meta)
 from enrichment_generator import (describe_object, generate_enrichment,  # noqa: E402
                                  set_object_configuration)
 from enrichment_snippets import enrichment_stats  # noqa: E402
@@ -548,6 +558,157 @@ def check_parser_negatives():
     check("синоним только на en: значение сохранено как есть (первый доступный язык)",
           res.get("success") and res["configuration"]["synonym"] == "Null",
           repr(res["configuration"].get("synonym")))
+
+
+# ─────── 3c. перечень ссылок: дети Value и Item (дефект разбора DefaultRoles) ───────
+
+# Форма детей перечисных свойств задаёт ВЫГРУЗКА, а не память о схеме. Замер 20.10.2026 по
+# восьми XML-выгрузкам (BGU2, BP3, KomMag, UNF3, UT11, ZUP31, Config_NULL, MinCfg): у
+# Properties/UsePurposes дети называются `v8:Value` (xsi:type "app:ApplicationUsePurpose"),
+# у Properties/DefaultRoles — `xr:Item` (xsi:type="xr:MDObjectRef"). Прежний разбор вида
+# `ref_list` искал только `Value`, поэтому при непустом <DefaultRoles> колонка main_roles
+# оставалась пустой: роли теряли 6 из 8 конфигураций (пустой перечень давали только две
+# фикстуры с <DefaultRoles/>). Проверка держит обе измеренные формы детей, чтобы возврат к
+# «только Value» был виден сразу, а не по пустой колонке у читателя карточки.
+ROLES_ITEM = '<xr:Item xsi:type="xr:MDObjectRef">Role.{}</xr:Item>'
+ROLES_VALUE = "<v8:Value>Role.{}</v8:Value>"
+
+
+def roles_property_xml(names, tag="DefaultRoles", child="item"):
+    """Перечень свойства по измеренной форме детей: `item` — как в выгрузке, `value` — иная."""
+    if not names:
+        return f"<{tag}/>"
+    template = ROLES_VALUE if child == "value" else ROLES_ITEM
+    inner = "".join(template.format(name) for name in names)
+    return f"<{tag}>{inner}</{tag}>"
+
+
+def check_roles():
+    """Перечни ссылок: обе формы детей, порядок, снятие префикса вида, запись в TEXT[]."""
+    section("3c. перечень ссылок: дети Item и Value (дефект разбора DefaultRoles)")
+    before = db_counts()
+    roles = ["ТестоваяРольПробы", "ВтораяРольПробы"]
+
+    # ── уровень разбора: форма детей из выгрузки (xr:Item) ──
+    catalog = synth_catalog("v32_roles_item", name_mode="fixed",
+                           name_value=PROBE + "roles_item")
+    xml = catalog / "Configuration.xml"
+    edit_xml(xml, [("<DefaultRoles/>", roles_property_xml(roles))])
+    parsed = parse_configuration_meta(str(xml))
+    if not check("копия фикстуры с непустым <DefaultRoles> разобрана",
+                 parsed.get("success"), repr(parsed)[:300]):
+        return
+    row, counts = parsed["configuration"], parsed["counts"]
+    check('роли из <xr:Item xsi:type="xr:MDObjectRef"> прочитаны (дефект: ждали только Value)',
+          row["main_roles"] == roles, repr(row.get("main_roles")))
+    check("префикс вида метаданных Role. снят: колонка main_roles хранит имя роли",
+          all("." not in role for role in (row["main_roles"] or [])),
+          repr(row.get("main_roles")))
+    check("порядок выгрузки сохранён", row["main_roles"] == roles,
+          repr(row.get("main_roles")))
+    empty_counts = parse_configuration_meta(str(CONFIG_XML))["counts"]
+    check("непустый перечень не прибавляется к списку пустых свойств без колонки",
+          counts["properties_unstored_empty"] == empty_counts["properties_unstored_empty"],
+          repr([counts["properties_unstored_empty"],
+                empty_counts["properties_unstored_empty"]]))
+
+    # ── вторая измеренная форма детей того же свойства (v8:Value) ──
+    edit_xml(xml, [(roles_property_xml(roles), roles_property_xml(roles, child="value"))])
+    alt = parse_configuration_meta(str(xml))
+    check("иная форма детей того же свойства (v8:Value) читается тем же разбором",
+          alt.get("success") and alt["configuration"]["main_roles"] == roles,
+          repr((alt.get("configuration") or {}).get("main_roles")))
+
+    # ── неизвестная форма детей: пустая колонка обязана быть названа ──
+    edit_xml(xml, [(roles_property_xml(roles, child="value"),
+                    "<DefaultRoles><Bogus>Role.НеизвестнаяФорма</Bogus></DefaultRoles>")])
+    unknown = parse_configuration_meta(str(xml))
+    check("дети неизвестной формы не теряются молча: пустая колонка названа предупреждением",
+          unknown.get("success") and not unknown["configuration"]["main_roles"]
+          and any("значений извлечено 0" in w and "Bogus" in w
+                  for w in unknown["warnings"]),
+          repr([w[:160] for w in unknown.get("warnings", []) if "DefaultRoles" in w]))
+
+    # ── `_has_value` по детям Item: свойство без колонки с значениями ──
+    edit_xml(xml, [("<StandaloneConfigurationRestrictionRoles/>",
+                    roles_property_xml(["ОграничениеАвтономнойРоль"],
+                                       tag="StandaloneConfigurationRestrictionRoles"))])
+    blind = parse_configuration_meta(str(xml))
+    blind_names = set((blind.get("counts") or {}).get("properties_unstored_nonempty") or [])
+    check("свойство без колонки с детьми Item названо непустой слепой зоной (правка _has_value)",
+          "StandaloneConfigurationRestrictionRoles" in blind_names,
+          repr(sorted(blind_names)[:12]))
+
+    # ── `_has_value` шире списка известных детей: дети-подразделы тоже значение ──
+    # Замер 20.10.2026 по восьми выгрузкам: единственным свойством, которое узкий признак
+    # (только `Value`/`Item`) относил к пустым, а широкий — к непустым, оказался
+    # `UsedMobileApplicationFunctionalities`: у него свои дети-подразделы с `use=`.
+    # Оставить его в счётчике пустых — значит соврать в слепой зоне, поэтому фикстура
+    # проверяется целиком: имя обязано называться поимённо.
+    fixture = parse_configuration_meta(str(CONFIG_XML))
+    fixture_counts = fixture.get("counts") or {}
+    fixture_nonempty = set(fixture_counts.get("properties_unstored_nonempty") or [])
+    check("свойство с детьми-подразделами названо непустой слепой зоной, а не пустым",
+          "UsedMobileApplicationFunctionalities" in fixture_nonempty
+          and any("UsedMobileApplicationFunctionalities" in w and "слепая зона V32" in w
+                  for w in fixture.get("warnings") or []),
+          repr(sorted(fixture_nonempty)[:14]))
+    check("пустые слепые зоны не считают за него: непустых больше, пустых меньше",
+          fixture_counts.get("properties_unstored", -1)
+          == (len(fixture_counts.get("properties_unstored_nonempty") or [])
+              + (fixture_counts.get("properties_unstored_empty") or 0)),
+          repr({key: fixture_counts.get(key) for key in
+                ("properties_unstored", "properties_unstored_empty")}))
+
+    # ── реестр имён детей один, а не разбросанный литерал в вызовах ──
+    check("реестр имён детей перечисных свойств = value + item",
+          tuple(LIST_CHILD_TAGS) == ("value", "item"), repr(LIST_CHILD_TAGS))
+    xr_ns = ('xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" '
+             'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"')
+    prefixed = ET.fromstring(f"<r {xr_ns}>" + ROLES_ITEM.format("Одна") + "</r>")
+    plain = ET.fromstring("<r><Item>Role.Две</Item><Value>Role.Три</Value>"
+                          "<item>Role.Четыре</item></r>")
+    check("дети с префиксом пространства имён читаются так же, как без префикса",
+          _ref_list(prefixed) == ["Одна"] and len(_list_children(prefixed)) == 1,
+          repr(_ref_list(prefixed)))
+    check("регистр имени ребёнка не важен (Item, Value, item — одна форма детей)",
+          _ref_list(plain) == ["Две", "Три", "Четыре"] and _has_value(plain),
+          repr(_ref_list(plain)))
+    check("пустой элемент и xsi:nil дают пустой перечень, а не ошибку разбора",
+          _ref_list(ET.fromstring("<r/>")) == []
+          and _ref_list(ET.fromstring('<r xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
+                                      'xsi:nil="true"/>')) == [],
+          repr(_ref_list(ET.fromstring("<r/>"))))
+    check("разбор ничего не записывает в БД: чтение отделено от записи",
+          db_counts() == before, f"{before} -> {db_counts()}")
+
+    # ── путь записи: роли доходят до TEXT[] в configurations ──
+    # XML к этому моменту испорчен намеренно (Bogus-форма, слепая зона с детьми Item),
+    # поэтому перед загрузком перечень возвращается к измеренной форме — иначе проверка
+    # записи сверялась бы с пустой колонкой и не проверяла бы ничего.
+    edit_xml(xml, [("<DefaultRoles><Bogus>Role.НеизвестнаяФорма</Bogus></DefaultRoles>",
+                    roles_property_xml(roles))])
+    res = load_catalog(str(catalog))
+    text = format_load_result(res)
+    cfg_id = int(res.get("id") or 0)
+    if not check("исход ✅ загружено: непустый перечень ролей загрузке не мешает",
+                 res.get("status") == "loaded", text[:400]):
+        return
+    stored = sql_one("SELECT main_roles FROM configurations WHERE id = %s", (cfg_id,))
+    check("роли записаны в колонку main_roles (TEXT[]) без префикса и по порядку",
+          list(stored or []) == roles, repr(stored))
+    check("число ролей в БД равно числу из разбора",
+          sql_one("SELECT COALESCE(array_length(main_roles, 1), 0) FROM configurations "
+                  "WHERE id = %s", (cfg_id,)) == len(roles), repr(stored))
+
+    removed = delete_configuration(cfg_id=cfg_id)
+    check("прогон убирает за собой: заголовок снят вместе с составом",
+          removed.get("success") is True, repr(removed)[:300])
+    check("после уборки счётники БД равны началу раздела",
+          db_counts() == before, repr([before, db_counts()]))
+    note("Граница: читаются ИМЕНА ролей из Properties/DefaultRoles; сами объекты Role.* в "
+         "схеме не хранятся — перечень остаётся списком имён (роль как объект метаданных "
+         "появится только вместе со сниманием слепых зоны V38 группы A).")
 
 
 # ───────────────── общая часть второй половины: снимки и копия фикстуры ─────────────────
@@ -1280,6 +1441,7 @@ SECTIONS = [
     ("detection", "2. детекция варианта (R1)", check_detection, ()),
     ("parser", "3. разбор Configuration.xml", check_parser, ()),
     ("parser-negatives", "3b. отказ разбора с причиной", check_parser_negatives, ()),
+    ("roles", "3c. перечень ссылок: дети Item и Value", check_roles, ()),
     ("null-index", "4. фикстура Config_NULL: пустой индекс", check_null_fixture, ()),
     ("load", "5. загрузка копии: путь записи", check_load_path, ()),
     ("duplicate", "6. дубликат без force (R5)", check_duplicate, ("load",)),

@@ -26,8 +26,15 @@ MCP-инструментов нет), вариант определяется п
     первый доступный; если языков больше одного, это называется предупреждением
     (вторая языковая форма при скалярной колонке теряется), jsonb в TEXT не сериализуем;
   * usage_purpose (VARCHAR(100)) / main_roles (TEXT[]): UsePurposes и DefaultRoles —
-    перечень v8:Value; одно значение пишется как есть, несколько — через запятую с
-    предупреждением (список в скалярной колонке помещается нечестно);
+    перечни. Одно значение в скалярную колонку пишется как есть, несколько — через
+    запятую с предупреждением (список в скалярной колонке помещается нечестно);
+  * ДЕТЯМИ перечень бывает разными: у UsePurposes это `<v8:Value xsi:type=
+    "app:ApplicationUsePurpose">`, у DefaultRoles — `<xr:Item xsi:type="xr:MDObjectRef">`
+    (замер 20.10.2026 по восьми выгрузкам). Искать только `Value` — значит потерять
+    роли: при непустом `<DefaultRoles>` колонка main_roles оставалась пустой, потому
+    что разбор ждал не ту форму детей. Имена детей задаёт выгрузка, а не память о
+    схеме, поэтому допустимые имена перечислены словарём `LIST_CHILD_TAGS` (ниже), а
+    не вшиты в вызов;
   * свойства, для которых в configurations НЕТ колонки, не молчат: непустые называются
     поимённо, пустые — числом (слепая зона названа, а не спрятана);
   * ChildObjects, UsedMobileApplicationFunctionalities, InternalInfo корня
@@ -118,15 +125,60 @@ def _value_list(element):
     return values
 
 
+# Допустимые ИМЕНА детей перечисных свойства (реестр по замеру, а не по памяти о схеме).
+# Замер 20.10.2026 по восьми выгрузкам (BGU2, BP3, KomMag, UNF3, UT11, ZUP31, Config_NULL,
+# MinCfg): у Properties/UsePurposes дети называются `Value` (с xsi:type
+# "app:ApplicationUsePurpose"), у Properties/DefaultRoles — `Item` (с xsi:type
+# "xr:MDObjectRef"). Сравнение регистронезависимое: `Item` и `item` — одна форма детей,
+# а прежний код искал `item` строчными буквами и потому не находил `Item`.
+LIST_CHILD_TAGS = ("value", "item")
+
+
+def _list_children(element, tags=LIST_CHILD_TAGS):
+    """Прямые дети перечня по любому из имён словаря LIST_CHILD_TAGS (namespace-агностично)."""
+    if element is None:
+        return []
+    return [child for child in list(element) if _local(child.tag).lower() in tuple(tags)]
+
+
+def _ref_list(element):
+    """Перечень ссылок (Properties/DefaultRoles) -> список имён БЕЗ префикса вида метаданных.
+
+    `Role.ПолныеПрава` -> `ПолныеПрава` (то же правило, что у `ref`: колонка называется
+    main_roles, поэтому префикс вида в неё не пишется). Порядок выгрузки сохраняется,
+    повторы одной роли не дублируются. Пустой элемент `<DefaultRoles/>`, xsi:nil и
+    отсутствующее свойство дают пустой список — это разные состояния выгрузки, но одинаковое
+    состояние колонки (NULL).
+    """
+    if element is None or _is_nil(element):
+        return []
+    values = []
+    for entry in _list_children(element):
+        value = _ref(entry)
+        if value and value not in values:
+            values.append(value)
+    return values
+
+
 def _has_value(element):
-    """Есть ли у элемента непустое значение (текст, перечень, многоязычный текст)."""
+    """Есть ли у элемента непустое значение: текст или любой прямой ребёнок.
+
+    Признак состава обязан быть ШИРЕ списка LIST_CHILD_TAGS по двум причинам:
+      * свойство с детьми `Item` (Properties/DefaultRoles) при поиске только `Value`
+        считалось пустым — по этому признаку профиль свойств называл заполненное
+        свойство «пустым»;
+      * замер 20.10.2026 по восьми выгрузкам (BGU2, BP3, KomMag, UNF3, UT11, ZUP31,
+        Config_NULL, MinCfg) даёт ровно одно расхождение узкого признака с широким:
+        `UsedMobileApplicationFunctionalities` — у него свои дети-подразделы и ни одного
+        `Value`/`Item`. Узкий признак относил его к ПУСТЫМ свойствам без колонки, хотя
+        значение в выгрузке есть; это ровно тот самообман, из-за которого пустую колонку
+        читают как «в конфигурации этого нет».
+    Поэтому дети неизвестной формы тоже считаются значением: слепая зона называется
+    поимённо, а не прячется в счётчике пустых.
+    """
     if element is None or _is_nil(element):
         return False
-    if _text(element):
-        return True
-    if _value_list(element) or _multi_text(element):
-        return True
-    return bool(_children(element, "Value") or _children(element, "item"))
+    return bool(_text(element)) or bool(list(element))
 
 
 def _synonym_text(element, warnings):
@@ -204,8 +256,20 @@ def _read_configuration(config):
         elif kind == "ref":
             value = _ref(element)
         elif kind == "ref_list":
-            value = [item for item in (_ref(entry) for entry in _children(element, "Value"))
-                     if item]
+            value = _ref_list(element)
+            if not value and list(element):
+                # Дети ЕСТЬ (любой формы), а имя из них не извлеклось — молчать нельзя:
+                # пустая колонка main_roles читалась бы как «ролей в конфигурации нет».
+                # Имена детей называются прямо: именно по такому расхождению и был найден
+                # дефект 20.10.2026 (выгрузка даёт `Item`, а разбор ждал `Value`).
+                child_names = sorted({(_local(child.tag) or "<пустое имя>")
+                                      for child in element})
+                warnings.append(
+                    f"Properties/{name}: детей перечня {len(list(element))} "
+                    f"(имена: {', '.join(child_names)}), а значений извлечено 0 — "
+                    f"колонка {column} останется пустой; форма детей не разобрана "
+                    "(проверьте имена детей по LIST_CHILD_TAGS)"
+                )
         elif kind == "value_list":
             values = _value_list(element)
             value = None
