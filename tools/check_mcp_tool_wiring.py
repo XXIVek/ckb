@@ -18,7 +18,7 @@ AST-разбором собираются имена, вызываемые вн�
 Код возврата 0 — нерешённых имён нет; 1 — есть (печатаются имя и строка вызова).
 
 Запуск:
-    python tools/check_mcp_tool_wiring.py                # три сервера конфигураций
+    python tools/check_mcp_tool_wiring.py                # knowledge-base + три сервера конфигураций
     python tools/check_mcp_tool_wiring.py server.py      # любой список файлов
     python tools/check_mcp_tool_wiring.py --json         # машиночитаемый вывод
 
@@ -36,6 +36,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_TARGETS = [
+    ROOT / "server.py",
     ROOT / "server_configurations_core.py",
     ROOT / "server_configurations_enrichment.py",
     ROOT / "server_configurations_export.py",
@@ -74,6 +75,17 @@ EXPECTED_TOOLS = {
         "set_object_configuration_tool", "unmark_config_snippet_tool",
     ],
     "server_configurations_export.py": ["export_readiness_tool"],
+    # Узел 20.10.2026: knowledge-base добавлен в сверку, потому что текст правил поиска
+    # (`SEARCH_RULES.md`, отдаётся инструментом `get_search_rules_tool`) перечислял инструменты,
+    # которых в сервере нет, и молчал об тех, что есть (карантин узла Q1, инструменты правил).
+    # Пока `server.py` не входил в EXPECTED_TOOLS, класс дефекта «правило обещает инструмент,
+    # которого нет» не ловился ничем. Состав — 15 инструментов регистра `server.py`.
+    "server.py": [
+        "add_aliases_tool", "add_snippet_tool", "detect_tags_tool", "get_db_state_tool",
+        "get_doc_tool", "get_load_rules_tool", "get_search_rules_tool", "list_categories_tool",
+        "list_marked_snippets_tool", "load_bsl_tool", "load_doc_tool", "load_single_html_tool",
+        "mark_snippet_for_deletion_tool", "search_docs_tool", "unmark_snippet_for_deletion_tool",
+    ],
 }
 
 BUILTIN_NAMES = set(dir(builtins)) | {
@@ -225,7 +237,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Проверка разрешимости имён внутри @mcp.tool() и состава контракта (AST, модули не импортируются)")
     parser.add_argument("paths", nargs="*",
-                        help="файлы для проверки; по умолчанию — три сервера конфигураций")
+                        help="файлы для проверки; по умолчанию — knowledge-base и три сервера конфигураций")
     parser.add_argument("--json", action="store_true", help="машиночитаемый вывод")
     args = parser.parse_args(argv)
 
