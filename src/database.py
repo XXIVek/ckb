@@ -70,17 +70,26 @@ def release_connection(conn):
 
 @contextmanager
 def get_cursor():
-    """Контекстный менеджер для получения курсора."""
+    """Контекстный менеджер для получения курсора.
+
+    Соединение возвращается в пул в finally. Без этого каждый вызов навсегда занимал одно
+    соединение SimpleConnectionPool (max_connections=10): скрипт-сверка с десятками обращений
+    к БД доходил до `PoolError: connection pool exhausted` и часть проверок не выполнялась
+    вовсе — это произошло 20.10.2026 с tools/check_xml_format_layer.py после расширения слоёв.
+    """
     conn = get_connection()
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        yield cur
-        conn.commit()
-        cur.close()
-    except Exception:
-        conn.rollback()
-        cur.close()
-        raise
+        try:
+            yield cur
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            cur.close()
+    finally:
+        release_connection(conn)
 
 
 def init_database():

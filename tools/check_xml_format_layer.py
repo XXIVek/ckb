@@ -22,19 +22,31 @@ r"""tools/check_xml_format_layer.py — слой знаний формата XML
 идентификатора (ClassId) находится только по алиасу. Это не дефект проверки, а причина, по
 которой алиасы имени обязательны: случай фиксируется, чтобы ограничение не «исчезло» из правил.
 
-Слои (LAYERS): профиль свойств ExternalDataProcessor, профиль свойств Configuration.xml
+Слои (LAYERS, 12): профиль свойств ExternalDataProcessor; профиль свойств Configuration.xml
 (55 свойств корня конфигурации: что маппится в configurations, что без колонки, а что не
-заполняется осознанно — узлы V32/V33, замер MinCfg 19.10.2026), профиль идентификаторов
-ClassId/ObjectId/TypeId/ValueId и три слоя структуры выгрузки конфигурации (состав каталогов
-видов метаданных, индекс ConfigDumpInfo.xml, расположение uuid объекта конфигурации) — все
-категории xml-format; профиль версий UUID — категории platform (его сниппет намеренно размечен
-и xml-format, поэтому xml-format у него в «чужих» категориях не проверяется).
+заполняется осознанно — узлы V32/V33, замер MinCfg 19.10.2026); карточки отдельных свойств
+корня (DefaultRunMode и др.); общие свойства Name / Synonym / Comment; профиль идентификаторов
+ClassId/ObjectId/TypeId/ValueId; три слоя структуры выгрузки конфигурации (состав каталогов
+видов метаданных, индекс ConfigDumpInfo.xml, расположение uuid объекта конфигурации); и слой
+представления (Представление) — три карточки: файлы Ext/ (HomePageWorkArea, CommandInterface,
+Logo, Splash, Help…), свойства представления в корне <Properties> (WindowMode, Style, Language,
+Info, Copyright, Addresses) и основные формы конфигурации вместе с макетами оформления отчётов
+(DefaultReportForm … DefaultReportAppearanceTemplate) — замер 8 XML-выгрузок, 20.10.2026.
+Всё это категории xml-format; профиль версий UUID — категории platform (его сниппет намеренно
+размечен и xml-format, поэтому xml-format у него в «чужих» категориях не проверяется).
 
 Профиль свойств Configuration.xml заведён отдельно от профиля ExternalDataProcessor, хотя
 маркеры формата строк у них общие: у профиля конфигурации значимы счётчики `found=/mapped=`
 и раздел ROOT_EXT_MODULES (модули предопределённых программ находятся только как файлы Ext/,
 соответствующие им колонки конфигурации загрузчик не заполняет) — без этих маркеров профиль
 смыкался бы с профилем внешнего объекта и перестал бы отвечать на вопрос «что теряется».
+
+Карточки представления заведены тремя строками, а не одной, потому что у них разные источники
+истины: «рабочая область», «интерфейс команд», «логотип», «заставка» в <Properties> не лежат
+вовсе — это файлы Ext/; свойства представления корня маппятся в колонки configurations лишь
+частично; основные формы — это ссылки на форму и макет метаданных. Различие `DefaultReportForm`
+(значение по умолчанию на уровне конфигурации) и `DefaultForm` (своя форма конкретного отчёта)
+названо в тексте прямо: без него ответ «какая форма у отчёта» собирался бы неверно.
 
 Запуск:
     [Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $env:PYTHONIOENCODING='utf-8'
@@ -152,6 +164,72 @@ LAYERS = [
                   "GeneratedType"],
         "foreign": FOREIGN_BASE + ["platform"],
     },
+    {
+        # Карточка ОБЩИХ свойств: Name/Synonym/Comment есть в <Properties> и у конфигурации,
+        # и у любого объекта метаданных — поэтому одна карточка на тройку (решение оператора
+        # 20.10.2026). Маркеры берут ограничения и правила, а не общие слова: потеря
+        # границы длины имени (80), правила "синоним не задан - используется имя" или
+        # маршрута synonym в БД (TEXT у конфигурации против JSONB у внешнего объекта)
+        # роняет проверку, и именно эти утверждения карточка обязана сохранять.
+        "name": "карточка общих свойств Name/Synonym/Comment (конфигурация и любой объект)",
+        "anchor": "property-common-name-synonym-comment",
+        "category": "xml-format",
+        "markers": ("===PROPERTY_CARD", "xml=Name,Synonym,Comment",
+                    "НЕ БОЛЕЕ 80 СИМВОЛОВ", "ЕСЛИ СИНОНИМ НЕ ЗАДАН — ИСПОЛЬЗУЕТСЯ ИМЯ",
+                    "configurations.synonym — колонка TEXT"),
+        "terms": ["Name", "Synonym", "Comment", "синоним объекта", "80 символов",
+                  "configurations.name", "представление объекта конфигурации"],
+        "foreign": FOREIGN_BASE + ["platform"],
+    },
+    # --- группа «Представление» (замер 8 выгрузок, 20.10.2026) ------------------------------
+    # Разделение на три слоя — не прихоть, а следствие замера: у настроек представления РАЗНЫЕ
+    # способы хранения. Пункты «рабочая область», «командный интерфейс раздела», «картинка
+    # раздела», «интерфейс клиентского приложения», логотип и заставка вообще не лежат в
+    # <Properties> — это файлы каталога Ext/ у корня выгрузки, поэтому карточка свойства о них
+    # соврала бы («свойства нет»), а карточка файлов называет ещё и границу «файла нет ≠
+    # настройки нет». Маркеры — замерные имена файлов и корневые теги: они отличают слой от
+    # любой другой строки категории xml-format.
+    {
+        "name": "файлы Ext/ представления конфигурации (рабочая область, командный интерфейс, картинки)",
+        "anchor": "configuration-ext-presentation-files",
+        "category": "xml-format",
+        "markers": ("===PRESENTATION_EXT_LAYER", "HomePageWorkArea.xml",
+                    "MainSectionCommandInterface.xml", "ClientApplicationInterface.xml",
+                    "ExtPicture", "TwoColumnsVariableWidth"),
+        "terms": ["HomePageWorkArea", "MainSectionPicture", "ClientApplicationInterface",
+                  "Splash.xml", "рабочая область начальной страницы",
+                  "картинка основного раздела"],
+        "foreign": FOREIGN_BASE + ["platform"],
+    },
+    {
+        # Свойства корня из той же группы: здесь хранение обычное (<Properties>), поэтому
+        # карточка свойств уместна. Маркеры держат два опровергнутых значения — подмена
+        # словаря значений (Maximized) или префикса ссылки (OtherConfiguration) роняет проверку.
+        "name": "карточка свойств представления корня (режим окна, стиль, язык, адреса)",
+        "anchor": "property-configuration-presentation-root",
+        "category": "xml-format",
+        "markers": ("===PROPERTY_CARD", "MainClientApplicationWindowMode", "FullscreenWorkplace",
+                    "Kiosk", "configurations.short_info"),
+        "terms": ["MainClientApplicationWindowMode", "DefaultStyle", "BriefInformation",
+                  "VendorInformationAddress", "Киоск",
+                  "режим основного окна клиентского приложения"],
+        "foreign": FOREIGN_BASE + ["platform"],
+    },
+    {
+        # Подгруппа основных форм: значение — квалифицированное имя, а не uuid. Маркер
+        # MainDataCompositionSchema обязателен: он доказывает, что карточка различает свойства
+        # конфигурации и свойства самого отчёта (иначе «Основная форма отчета» читалась бы как
+        # форма конкретного отчёта).
+        "name": "карточка основных форм конфигурации и макета оформления отчёта",
+        "anchor": "property-configuration-default-forms",
+        "category": "xml-format",
+        "markers": ("===PROPERTY_CARD", "DefaultReportForm", "CommonForm.ФормаНастроекОтчета",
+                    "DefaultReportAppearanceTemplate", "MainDataCompositionSchema"),
+        "terms": ["DefaultReportVariantForm", "DefaultDataHistoryVersionDifferencesForm",
+                  "DefaultReportAppearanceTemplate", "основной макет оформления отчета",
+                  "макет оформления отчета"],
+        "foreign": FOREIGN_BASE + ["platform"],
+    },
 ]
 
 failures = []
@@ -174,8 +252,8 @@ def snippet_ids(rows):
 def snippet_tags(snippet_id):
     """Теги категории сниппета и его текст — прямой SQL, это скрипт-сверка.
 
-    get_cursor — штатный доступ к пулу (возврат соединения делает сам; conn.close()
-    соединение из пула не возвращает, а закрывал бы).
+    get_cursor — единственный канал доступа к пулу (соединение он возвращает в пул сам,
+    src/database.py:65-92); conn.close() соединение из пула не возвращает, а закрывал бы.
     """
     with database.get_cursor() as cur:
         cur.execute("SELECT tags, answer FROM knowledge_snippets WHERE id = %s", (snippet_id,))

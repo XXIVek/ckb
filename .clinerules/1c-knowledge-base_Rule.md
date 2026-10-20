@@ -11,6 +11,25 @@
 > регрессия — `tools/_p6_live_probe.py` (семь разделов, 38 проверок на живой БД, провалено 0)
 > и шаг 9 `validate_project.py` (`tools/check_search_rules_sync.py`).
 >
+> **Дополнение 20.10.2026 (группа «Представление» и общие свойства):** в слой `xml-format`
+> добавлены четыре якоря — `property-common-name-synonym-comment` (общие свойства `Name` /
+> `Synonym` / `Comment`: обязателен только `Name`, граница 80 символов, правило «синоним не задан —
+> используется имя», пустой `<Comment/>` → `NULL`, маршрут в БД), `configuration-ext-presentation-files`
+> (рабочая область, командный интерфейс, картинки разделов, логотип, заставка — это **файлы `Ext/`**,
+> а не свойства `<Properties>`), `property-configuration-presentation-root`
+> (`MainClientApplicationWindowMode` со значениями `Normal` / `Workplace` / `EmbeddedWorkplace` /
+> `FullscreenWorkplace` / `Kiosk` — значения `Maximized` в выгрузках нет; `DefaultStyle`,
+> `DefaultLanguage`, `BriefInformation`, адреса) и `property-configuration-default-forms`
+> (`DefaultReport*Form`, `DefaultReportAppearanceTemplate` — значение квалифицированное имя
+> `CommonForm.` / `CommonTemplate.`, а не uuid, и это значение по умолчанию, а не форма самого
+> отчёта). Основа — замер 8 XML-выгрузок (MinCfg, Config_NULL, BGU2, KomMag, BP3, UNF3, UT11, ZUP31).
+> Профиль свойств корня исправлен `update_snippet_tool` (строка та же, прежнее содержимое —
+> в `snippet_audit_log`, `action=fix`): из словаря убрано несуществующее `Maximized`, префикс
+> ссылки интерфейса — `Interface.`, а не `OtherConfiguration.`. Регрессия слоя —
+> **154 проверки, провалено 0** (двенадцать якорей: одиннадцать в `xml-format`, один в `platform`).
+> Попутно закрыт дефект `src/database.py`: `get_cursor` не возвращал соединение в пул, из-за чего
+> длинная скрипт-сверка валилась на середине с `PoolError` и часть проверок не выполнялась вовсе.
+>
 > **Дополнение 19.10.2026 (карточка одного свойства):** в слой введён формат `===PROPERTY_CARD` —
 > одна карточка на одно свойство: «XML-имя → колонка БД → допустимые значения → происхождение».
 > Образец — `property-configuration-defaultrunmode` (`DefaultRunMode`, «Основной режим» →
@@ -190,6 +209,10 @@ add_aliases_tool(aliases="synonym,synonyms", groups_id=52977)
 | `configuration-dump-layout-catalogs` | состав каталога XML-выгрузки **конфигурации**: 42 каталога видов метаданных со счётчиками, полный состав `Ext/` конфигурации, единая раскладка объекта (`<Имя>.xml` + `Ext/*.bsl` + `Forms/` + `Templates/`), какие виды в эталонной выгрузке отсутствуют | `xml-format` | замер 17.10.2026 по выгрузке BGU2 (158 925 XML, 14 812 `.bsl`; на момент замера — `C:\1C_LLM\LoadDoc\BGU2`, с 18.10.2026 — `C:\1C_LLM\LoadDoc\Configurations\XML_files\BGU2`) |
 | `configdumpinfo-index-structure` | структура `ConfigDumpInfo.xml`: `ConfigVersions`/`Metadata name|id|configVersion`, иерархия дочерних элементов именем через точку, два стиля идентификаторов дочерних (v4 и составной `<uuid>.1`), готовый перечень объектов и признак изменения | `xml-format` | тот же замер: 86 379 пар `name`/`id`, 45 видов, 67 887 `configVersion` |
 | `configuration-object-uuid-location` | где брать uuid объекта конфигурации (`<Catalog uuid=…>`, `<CommonModule uuid=…>` — тег вида, второй уровень), чем это отличается от внешнего объекта (`<ExternalReport uuid>` + `ContainedObject`/`ClassId`), правило сверки с `ConfigDumpInfo.xml`, словарь «каталог множественный ↔ вид сингулярный» | `xml-format` | замеры по `Catalogs\АналитическиеКодыКПС.xml`, `CommonModules\АвтоматическоеПолучениеЭДО.xml` + `ConfigDumpInfo.xml` (совпадение uuid подтверждено) |
+| `property-common-name-synonym-comment` | **общие свойства** `Name` / `Synonym` / `Comment` — есть у всех объектов метаданных и у корня: обязателен только `Name` (в `Configuration.xml` свойства `Name` нет вовсе — значение берётся из имени каталога выгрузки), у форм и элементов формы `Synonym`/`Comment` не выгружаются; граница `Name` — 80 символов (замер 171 280 пар `Metadata id`/`name` по `ConfigDumpInfo.xml` BGU2: максимум 79), у внешнего объекта имя дотягивает до 129 — граница относится к объектам конфигурации; правило ИТС «если синоним не задан, используется имя» (замер: синоним пуст у 122 797 объектов из 171 280); пустой `<Comment/>` читается как `NULL`, а не как пустая строка; маршрут в БД (`external_report.name/synonym/comment`, `attributes`, `tabular_sections`, `forms`, `configurations.name/synonym/comment`) | `xml-format` | замер 8 XML-выгрузок + живой SQL по `external_report`/`attributes`/`configurations`; словарь `SYNONYM_FIELDS`/`COMMENT_FIELDS` и разбор `_prop_text`/`_read_multilang` в `src/external_meta_parser.py` |
+| `configuration-ext-presentation-files` | что из группы «Представление» задаётся **файлами `Ext/`**, а не свойствами: `HomePageWorkArea.xml` (рабочая область), `MainSectionCommandInterface.xml` + `CommandInterface.xml` (командный интерфейс), `MainSectionPicture.xml` (картинки разделов), `ClientApplicationInterface.xml`, `Logo.xml` (логотип), `Splash.xml` (заставка); в `<Properties>` корня этих свойств нет; где они лежат в выгрузке конфигурации и чем отличаются от `Templates/` объекта метаданных; что для них нет колонок в `configurations` | `xml-format` | замер `MinCfg` (19.10.2026) и `Config_NULL` (пустой состав); живой SQL: колонок под файлы представления в `configurations` нет |
+| `property-configuration-presentation-root` | свойства представления корня: `MainClientApplicationWindowMode` (`Normal`/`Workplace`/`EmbeddedWorkplace`/`FullscreenWorkplace`/`Kiosk`, по умолчанию `Normal`; значения `Maximized` ни в одной из 8 выгрузок нет), `DefaultStyle` (`Style.<имя>`), `DefaultLanguage` (`Language.<имя>`), `BriefInformation`→`short_info`, `DetailedInformation`→`detailed_info`, `Copyright`→`copyright`, `VendorInformationAddress`→`vendor_url`, `ConfigurationInformationAddress`→`config_url`, `UpdateCatalogAddress`→`update_url`; что из них не имеет колонки | `xml-format` | профиль свойств корня `property-profile-configuration` (строки свойств), замер 8 выгрузок; словарь `CONFIGURATION_FIELDS` в `src/configuration_meta_parser.py` |
+| `property-configuration-default-forms` | свойства основных форм и макета оформления **отчётов** в корне конфигурации: `DefaultReportForm`/`DefaultVariantForm`/`DefaultSettingsForm` (`CommonForm.<имя>`), `DefaultReportAppearanceTemplate` (`CommonTemplate.<имя>`); по умолчанию пусто = «не задано»; отличие от свойства `DefaultForm` самого отчёта (там значение — имя формы этого отчёта); колонок в `configurations` нет | `xml-format` | профиль `property-profile-configuration`, замер `MinCfg`/`Config_NULL` |
 
 Факты, которые слой фиксирует потому, что они противоречат расхождению «это просто UUID v4»
 (замер 15.10.2026, 915 XML конфигурации BGU2, расширения TSD_R, внешних отчётов/обработок):
@@ -225,8 +248,8 @@ add_aliases_tool(aliases="synonym,synonyms", groups_id=52977)
 - о ссылках данных (v1 time-based ради B-Tree) в слое прямо записано «нашим замером не
   подтверждено»: в XML-выгрузке метаданных ссылок записей нет.
 
-Регрессия доступности слоя — `python tools/check_xml_format_layer.py` (проверок 96, провалено 0;
-итог печатает сам скрипт):
+Регрессия доступности слоя — `python tools/check_xml_format_layer.py` (проверок 154, провалено 0;
+итог печатает сам скрипт; двенадцать якорей — одиннадцать в `xml-format`, один в `platform`):
 по каждому якорю проверяются разрешимость алиасами, принадлежность нужной категории,
 неотдача чужими категориями, маркеры текста профиля и находимость терминов по алиасам
 (имена вида `ClassId`, `DefaultForm` FTS не берёт). Для слоёв структуры выгрузки конфигурации
@@ -238,6 +261,25 @@ add_aliases_tool(aliases="synonym,synonyms", groups_id=52977)
 а соответствующие колонки `configurations` из XML не разрешимы в принципе. Один алиас не может служить
 якорем двух слоёв: привязка якоря `configuration-dump-layout-catalogs` к сниппету про uuid
 дала провал проверки маркеров (один якорь — один слой).
+
+Карточки группы «Представление» заведены **тремя** якорями, а не одним, потому что у настроек
+разное хранение: `HomePageWorkArea.xml`, `MainSectionCommandInterface.xml`, `CommandInterface.xml`,
+`MainSectionPicture.xml`, `ClientApplicationInterface.xml`, `Logo.xml`, `Splash.xml` — файлы `Ext/`
+у корня выгрузки (в `<Properties>` их нет, и карточка свойства о них соврала бы); свойства
+представления корня лежат в `<Properties>` и частично маппятся в `configurations`
+(`BriefInformation → short_info`, `DetailedInformation → detailed_info`, `Copyright → copyright`,
+`VendorInformationAddress → vendor_url`, `ConfigurationInformationAddress → config_url`,
+`UpdateCatalogAddress → update_url`, `DefaultLanguage → default_language`), а
+`MainClientApplicationWindowMode`, `DefaultStyle`, `DefaultReport*Form` колонок не имеют; значения
+основных форм — квалифицированные имена (`CommonForm.ФормаОтчета`, `CommonTemplate.<макет>`), а не
+uuid. Маркеры держат опровергнутые значения: потеря `FullscreenWorkplace`/`Kiosk`, возврат
+`Maximized` или возврат префикса `OtherConfiguration.` — провал проверки.
+
+Скрипт-сверка ходит в БД только через `database.get_cursor`. С 20.10.2026 он возвращает соединение
+в пул (`release_connection` в `finally`, `src/database.py:71-92`); до этого каждый вызов навсегда
+занимал одно из 10 соединений `SimpleConnectionPool`, и прогон слоя падал с
+`PoolError: connection pool exhausted`, не выполнив части проверок, — а молчаливый ноль проверок
+выглядит как «всё хорошо», поэтому итоговое число печатает сам скрипт.
 
 ## 🔄 Сценарии загрузки
 
@@ -368,11 +410,11 @@ XML-имя, имя колонки БД, русская формулировка,
 1. **groups_id = NULL для HTML/FAQ/Markdown:** При добавлении сниппетов из не-BSL источников НЕ передавайте groups_id
 2. **Алиасы на snippets vs groups:** Алиасы, привязанные напрямую к snippets_id, имеют приоритет rank=3.0 над групповыми (rank=2.0)
 3. **description содержит ВЕСЬ body HTML** — это может быть большой объём данных
-4. **Статус БД (замер 19.10.2026, после карточки свойства `DefaultRunMode`):**
-   groups: 25 495, snippets: 2 887 — разбивка: 1 226 PDF
+4. **Статус БД (замер 20.10.2026, после слоя представления конфигурации):**
+   groups: 25 495, snippets: 2 903 — разбивка: 1 226 PDF
    руководства разработчика (тег `pdf`/`its`, из них 15 режимом «файл целиком»), 1 496 BSL с
-   `groups_id`, 165 без группы (ручные, `cc-1c-skills`; из них 8 — слой `xml-format`); сумма
-   разбивки равна общему числу. aliases: 208 529, из них 7 745 к PDF-сниппетам и 264 к
+   `groups_id`, 181 без группы (ручные, `cc-1c-skills`; из них 24 — слой `xml-format`); сумма
+   разбивки равна общему числу. aliases: 208 961, из них 7 745 к PDF-сниппетам и 696 к
    `xml-format`. `get_db_state_tool()` даёт только общие числа; **разбивку печатает
    `python tools/count_snippet_breakdown.py`** и там же проверяется равенство суммы частей
    общему числу. Число в правилах без этого замера писать нельзя: прежняя строка («154 без
@@ -393,19 +435,23 @@ XML-имя, имя колонки БД, русская формулировка,
      `doc_categories`, раздельно группы / сниппеты / алиасы, с учётом наследования от
      группы-родителя. Прежний запрос (жёсткий `'language'` + COUNT всех сниппетов) показывал
      одинаковые числа у всех категорий, и по ним нельзя было судить о пустоте категории.
-     Замер 19.10.2026 (после карточки свойства `DefaultRunMode`): `language` — 25 495
+     Замер 20.10.2026 (после карточек группы «Представление»): `language` — 25 495
      групп / 1 496 сниппетов / 198 632 алиаса, `its` — 1 229 / 7 804, `platform` — 17 / 425,
-     `methodology` — 4 / 82, `xml-format` — 8 сниппетов / 264 алиаса (профиль свойств
+     `methodology` — 4 / 82, `xml-format` — 24 сниппета / 696 алиаса (профиль свойств
      `ExternalDataProcessor`; профиль свойств корневого `Configuration.xml` — узлы V32/V33;
      профиль идентификаторов `ClassId`/`ObjectId`/`TypeId`/`ValueId` — в алиасы профиля
      включены и опровергнутые Guid `d69d52f4…`, `c48e8ff8…`, чтобы поиск по ошибочному значению
-     вёл в опровержение; и три слоя структуры выгрузки конфигурации: состав
+     вёл в опровержение; три слоя структуры выгрузки конфигурации: состав
      каталогов видов метаданных, индекс `ConfigDumpInfo.xml`, расположение uuid объекта
-     конфигурации; см. раздел «Слой знаний `xml-format`» — слой покрыл внешнюю обработку,
-     свойства конфигурации, идентификаторы метаданных и структуру конфигурации, остальные классы не покрыты);
+     конфигурации; карточка общих свойств `Name`/`Synonym`/`Comment` и три карточки группы
+     «Представление» — файлы `Ext/`, свойства представления корня, основные формы и макет
+     оформления отчётов; см. раздел «Слой знаний `xml-format`» — слой покрыл внешнюю обработку,
+     свойства конфигурации (в том числе общие свойства и группу «Представление»), идентификаторы
+     метаданных и структуру конфигурации; свойства видов метаданных (каталог, документ, форма),
+     содержимое форм и макетов — по-прежнему не покрыты);
    - проверка обоих фактов и доступности слоя — `python tools/check_category_filter.py`
-     (14 проверок, провалено 0) и `python tools/check_xml_format_layer.py` (проверок 96,
-     провалено 0 — по всем якорям слоя: семь в `xml-format`, один в `platform`; итоговое число
+     (14 проверок, провалено 0) и `python tools/check_xml_format_layer.py` (проверок 154,
+     провалено 0 — по всем якорям слоя: одиннадцать в `xml-format`, один в `platform`; итоговое число
      печатает сам скрипт, его и нужно указывать после изменения `LAYERS`). Второй скрипт заодно фиксирует, что живого резолвера
      алиасов в живой
      схеме нет: `src/aliases.py` (`resolve_aliases`, `search_aliases`, `upsert_aliases`)
