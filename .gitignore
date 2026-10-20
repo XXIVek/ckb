@@ -82,4 +82,13 @@ _its_pdf_*.txt
 # tools/check_quarantine_round_trip.py, tools/purge_marked_snippets.py.
 _q3_*.txt
 _purge_*.txt
+# --- Логи одноразовых замеров 19–20.10.2026 (COM/ibcmd apply/DCS, профили свойств) ---
+# Нормативы ссылаются на имена логов как на доказательства замера (`_d3_apply_full.txt`,
+# `_d8_apply2.txt`, `_d9_session_meta_check.txt`), но сами логи в репозиторий не входят —
+# по тому же правилу, что `_q3_*.txt` и `_v*.txt`. Исключение осознанное: скрипт-проверка,
+# на которую норматив ссылается как на воспроизводимую, трекается — `_d10_state_note.py`.
+_d*.txt
+_p*.txt
+_its_5450.txt
+tools/_d*_out.txt
 

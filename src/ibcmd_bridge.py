@@ -19,10 +19,19 @@
     «успешно завершено» и ни одного созданного файла. Значим только факт: ожидаемые
     `<база>.xml` и `<база>/` существуют;
   * L8: имена файлов содержимого у ibcmd совпадают с эталонной выгрузкой, расхождений нет;
-  * A1 (закрыта 15.10.2026, шаги G1–G7): имена типов (`cfg:CatalogRef.Организации`) появляются,
-    если в ИБ **загружена** конфигурация (`config load <файл.cf>`, 99 с на БП3); `config apply`
-    для этого не нужен. Без конфигурации тот же файл даёт `<v8:TypeId>` вместо имён — обёртка
-    обязана назвать это прямо, а не показать пустой тип;
+  * A1 (закрыта 15.10.2026, шаги G1–G7): имена типов (`cfg:CatalogRef.Организации`) появляются
+    в РАЗБОРЕ XML, если в ИБ **загружена** конфигурация (`config load <файл.cf>`, 99 с на БП3);
+    `config apply` для разбора не нужен. Без конфигурации тот же файл даёт `<v8:TypeId>` вместо
+    имён — обёртка обязана назвать это прямо, а не показать пустой тип;
+  * A1.1 (замер 19.10.2026, `_d3_apply_full.txt`, `_d8_apply2.txt`, `_d9_session_meta_check.txt`):
+    граница «load достаточно» относится ТОЛЬКО к `config export`/`import`. Сеансу 1С (COM/V8COM)
+    загруженной конфигурации мало: без применения он отвечает «Разрешение имени объекта метаданных
+    не поддерживается в данном контексте» и «Не существует стандартного вида документа "Нет"».
+    Применяет конфигурацию `config apply --force` (241 с впервые, 202 с повторно, 125 с без
+    предшествующего load); после применения метаданные видны в сессии (BGU — 3329 объектов
+    отчётов, БП3 — 1936), и отчёт `СравнениеУСНИ90_2` компилируется. Обёртка `apply` не
+    выполняет, но состояние `applied` различает: см. `CONFIG_STATE_APPLIED`,
+    `config_is_present`, `note_config_applied`.
   * A2: дорогая часть одноразовая (создание ИБ + загрузка конфигурации ≈104 с), повторная
     конвертация — 13–15 с, поэтому ИБ переиспользуется, а не создаётся на каждый файл;
   * именование вывода: `export … <база>` даёт пару `<база>.xml` + `<база>/`; лишний суффикс
@@ -79,6 +88,18 @@ STATE_FILE_NAME = "ckb_ibcmd_state.json"
 CONFIG_STATE_UNKNOWN = "unknown"
 CONFIG_STATE_LOADED = "loaded"
 CONFIG_STATE_FAILED = "load_failed"
+# Замер 19.10.2026 (`_d3_apply_full.txt`, `_d8_apply2.txt`, `_d9_session_meta_check.txt`):
+# `config load` разрешает имена в РАЗБОРЕ XML, но сеанс 1С отвечает «Разрешение имени объекта
+# метаданных не поддерживается в данном контексте», пока конфигурация не применена
+# (`config apply --force`: 241 с впервые, 202 с повторно, 125 с без предшествующего load).
+# Значит «load» и «apply» — два разных состояния ИБ, и метка обязана различать их: иначе
+# применённая ИБ читалась бы как «конфигурация не загружена» (живой случай: ib_bp3 с
+# config_state = load_failed при применённой конфигурации и видимых в сессии метаданных).
+CONFIG_STATE_APPLIED = "applied"
+# «Конфигурация в ИБ есть» — одно утверждение, которому удовлетворяют оба состояния:
+# применённая конфигурация по определению и загружена. Сравнивать состояние с одним
+# значением — значит для применённой ИБ соврать обратное (см. config_is_present).
+CONFIG_STATES_PRESENT = (CONFIG_STATE_LOADED, CONFIG_STATE_APPLIED)
 
 
 def _decode(raw):
@@ -224,11 +245,28 @@ def ensure_infobase(db_path=None, timeout=TIMEOUT_INFOBASE):
 def configuration_state(db_path=None):
     """Состояние конфигурации в ИБ по метке обёртки (L3).
 
+    Значения ровно четыре: `unknown` (метки нет или ИБ создана без обёртки), `loaded`
+    (загружено успешно), `load_failed` (загрузка отказала), `applied` (загружено и применено —
+    конфигурация видна сеансу 1С, а не только разбору XML).
+
     Значение фактом не является: реальное представление типов проверяется по разобранному XML
-    (type_name_counts). Метка нужна только чтобы не грузить конфигурацию повторно.
+    (type_name_counts), видимость метаданных сеансу — живым подключением. Метка нужна только
+    чтобы не грузить конфигурацию повторно и чтобы не назвать её отсутствующей там, где она есть.
     """
     return read_state(os.path.abspath(str(db_path or DEFAULT_DB_PATH))).get(
         "config_state", CONFIG_STATE_UNKNOWN)
+
+
+def config_is_present(db_path=None):
+    """Загружена или применена ли конфигурация в ИБ — одним утверждением (оба состояния).
+
+    `applied` включает `loaded`: конфигурацию сначала загружают, потом применяют. Поэтому
+    проверять состояние сравнением с `CONFIG_STATE_LOADED` — значит для применённой ИБ сказать
+    обратное. Живой случай 19.10.2026: у `ib_bp3` в метке стояло `load_failed`, конфигурация
+    была загружена и применена, и `_context_note` для объекта без `cfg:`-имён выдал бы
+    «Конфигурация в ИБ не загружена: загрузите её параметром config_file» — ложь про ИБ.
+    """
+    return configuration_state(db_path) in CONFIG_STATES_PRESENT
 
 
 def type_name_counts(root_xml):
@@ -342,9 +380,14 @@ def import_from_layout(root_xml, out_binary, db_path=None, timeout=TIMEOUT_EXPOR
 def load_configuration(db_path=None, config_file=None, timeout=TIMEOUT_LOAD_CONFIG):
     """Загрузить конфигурацию в ИБ (`config load <файл.cf>`) — закрытие точки A1.
 
-    `config apply` (обновление конфигурации базы данных) не выполняется: замер 15.10.2026
-    показал, что для разрешения имён типов достаточно загруженной конфигурации (99 с на БП3),
-    а `apply` добавляет ещё 155 с и ничего к разрешению имён не даёт.
+    Граница (замер 19.10.2026, `_d3_apply_full.txt`, `_d8_apply2.txt`): `load` достаточно для
+    `config export`/`import` — там имена типов даёт загруженная конфигурация (99 с на БП3). Для
+    сеанса 1С этого НЕ достаточно: без применения конфигурации сессия отвечает «Разрешение имени
+    объекта метаданных не поддерживается в данном контексте». Применяет конфигурацию
+    `config apply --force` (241 с впервые, 202 с повторно); обёртка эту команду сейчас не
+    выполняет — факт применения фиксирует `note_config_applied()` (состояние `applied`).
+    Поэтому после `load` метка ставится `loaded`, а не `applied`: называть применённой ИБ,
+    которой apply не делали, — значит соврать в обратную сторону.
     """
     db_path = os.path.abspath(str(db_path or DEFAULT_DB_PATH))
     if not config_file or not os.path.isfile(str(config_file)):
@@ -377,6 +420,37 @@ def load_configuration(db_path=None, config_file=None, timeout=TIMEOUT_LOAD_CONF
     write_state(db_path, state)
     return {"success": True, "db_path": db_path, "config_file": os.path.abspath(str(config_file)),
             "seconds": run["seconds"], "state": state}
+
+
+def note_config_applied(db_path, config_file=None, source="manual_ibcmd_apply"):
+    """Зафиксировать в метке состояние `applied` — «конфигурация загружена и применена».
+
+    Мост `config apply` не выполняет (обратной сборки XML из БД, узел V18, ещё нет; команду
+    apply делает оператор вручную), но учёт обязан это пережить: без `applied` следующий вызов
+    `_context_note` для объекта без `cfg:`-имён сказал бы про применённую ИБ «Конфигурация в ИБ
+    не загружена» (живой случай `ib_bp3`, 19.10.2026).
+
+    Функция ничего не проверяет сама: она записывает факт, полученный вне обёртки (успешный
+    `ibcmd config apply --force` или живое подключение к сессии с видимыми метаданными).
+    Поэтому вызывается только по явной команде оператора или проверочным скриптом — автоматом
+    состояние `applied` не ставится.
+    """
+    db_path = os.path.abspath(str(db_path or DEFAULT_DB_PATH))
+    if not infobase_exists(db_path):
+        return _error(f"Информационная база не найдена: {db_path}",
+                      "Метку состояния пишет только существующая ИБ: каталог с 1Cv8.1CD.")
+    state = read_state(db_path)
+    before = state.get("config_state", CONFIG_STATE_UNKNOWN)
+    state["config_state"] = CONFIG_STATE_APPLIED
+    state["config_source"] = str(source)
+    state["config_applied_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    if config_file:
+        state["config_file"] = os.path.abspath(str(config_file))
+    if not write_state(db_path, state):
+        return _error(f"Не удалось записать метку состояния: {_state_path(db_path)}",
+                      "Каталог ИБ доступен, но файл метки не записан.")
+    return {"success": True, "db_path": db_path, "state_before": before,
+            "state_after": CONFIG_STATE_APPLIED, "state": state}
 
 
 def convert_and_load(binary_path, config_file=None, db_path=None, work_dir=None, force=False,
@@ -468,22 +542,33 @@ def _context_note(db_path, facts, config_now):
                 + str(facts.get("reason")), configuration_state(db_path))
 
     if facts.get("types_resolved"):
-        if configuration_state(db_path) != CONFIG_STATE_LOADED:
+        # Факт сильнее метки: имена разрешились — конфигурация в ИБ есть. Метку дописываем,
+        # если её не было вовсе; существующее `applied` не понижаем до `loaded` — apply здесь
+        # никто не отменял, и обратное утверждение было бы новой ложью.
+        if not config_is_present(db_path):
             state = read_state(db_path)
             state["config_state"] = CONFIG_STATE_LOADED
             state["config_source"] = "inferred_from_layout"
             write_state(db_path, state)
-        return ("", CONFIG_STATE_LOADED)
+            return ("", CONFIG_STATE_LOADED)
+        return ("", configuration_state(db_path))
 
-    if config_now or configuration_state(db_path) == CONFIG_STATE_LOADED:
+    if config_now or config_is_present(db_path):
+        state_now = configuration_state(db_path)
+        if config_now:
+            presence = "Конфигурация в ИБ загружена этим вызовом"
+        elif state_now == CONFIG_STATE_APPLIED:
+            presence = "Конфигурация в ИБ загружена и применена (apply выполнялся вне обёртки)"
+        else:
+            presence = "Конфигурация в ИБ загружена"
         return (
-            "Конфигурация в ИБ загружена, но имён `cfg:` в разборе нет (cfg: — 0, "
+            "%s, но имён `cfg:` в разборе нет (cfg: — 0, "
             "<v8:TypeId> — %s): либо типов этого объекта в данной конфигурации нет, либо объект "
             "опирается на стандартные и примитивные типы, которые ibcmd отдаёт без ссылки на "
             "конфигурацию. Это довод в пользу того, что объект может не быть привязан к "
             "конфигурации, но утверждает привязку только оператор (правило D4)."
-            % facts.get("type_id_elements"),
-            CONFIG_STATE_LOADED,
+            % (presence, facts.get("type_id_elements")),
+            state_now,
         )
     return (
         "Типы реквизитов не разрешились: имён `cfg:` — 0, элементов `<v8:TypeId>` — %s. "

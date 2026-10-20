@@ -22,11 +22,19 @@ r"""tools/check_xml_format_layer.py — слой знаний формата XML
 идентификатора (ClassId) находится только по алиасу. Это не дефект проверки, а причина, по
 которой алиасы имени обязательны: случай фиксируется, чтобы ограничение не «исчезло» из правил.
 
-Слои (LAYERS): профиль свойств ExternalDataProcessor, профиль идентификаторов
+Слои (LAYERS): профиль свойств ExternalDataProcessor, профиль свойств Configuration.xml
+(55 свойств корня конфигурации: что маппится в configurations, что без колонки, а что не
+заполняется осознанно — узлы V32/V33, замер MinCfg 19.10.2026), профиль идентификаторов
 ClassId/ObjectId/TypeId/ValueId и три слоя структуры выгрузки конфигурации (состав каталогов
 видов метаданных, индекс ConfigDumpInfo.xml, расположение uuid объекта конфигурации) — все
 категории xml-format; профиль версий UUID — категории platform (его сниппет намеренно размечен
 и xml-format, поэтому xml-format у него в «чужих» категориях не проверяется).
+
+Профиль свойств Configuration.xml заведён отдельно от профиля ExternalDataProcessor, хотя
+маркеры формата строк у них общие: у профиля конфигурации значимы счётчики `found=/mapped=`
+и раздел ROOT_EXT_MODULES (модули предопределённых программ находятся только как файлы Ext/,
+соответствующие им колонки конфигурации загрузчик не заполняет) — без этих маркеров профиль
+смыкался бы с профилем внешнего объекта и перестал бы отвечать на вопрос «что теряется».
 
 Запуск:
     [Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $env:PYTHONIOENCODING='utf-8'
@@ -57,6 +65,35 @@ LAYERS = [
         "category": "xml-format",
         "markers": ("===PROPERTY_PROFILE", "path|kind|required|default|allowed|provenance"),
         "terms": ["DefaultForm", "AuxiliaryForm"],
+        "foreign": FOREIGN_BASE + ["platform"],
+    },
+    {
+        # Профиль свойств корня конфигурации (замер MinCfg, 19.10.2026): 55 свойств,
+        # 22 из них маппятся в configurations, 33 без колонки (6 непустых — слепые зоны),
+        # 5 колонок не заполняются осознанно. Маркеры счётчиков и раздела модулей —
+        # доказательство, что это профиль конфигурации, а не внешнего объекта.
+        "name": "профиль свойств Configuration.xml (заголовок конфигурации)",
+        "anchor": "property-profile-configuration",
+        "category": "xml-format",
+        "markers": ("===PROPERTY_PROFILE", "path|kind|required|default|allowed|provenance",
+                    "===MAPPING_SUMMARY", "found=55 mapped=22", "===ROOT_EXT_MODULES"),
+        "terms": ["ConfigurationExtensionCompatibilityMode", "MainClientApplicationWindowMode",
+                  "ObjectAutonumerationMode", "DatabaseTablespacesUseMode"],
+        "foreign": FOREIGN_BASE + ["platform"],
+    },
+    {
+        # Карточка ОДНОГО свойства корня (образец для остальных свойств и дочерних объектов):
+        # «свойство XML → колонка БД → допустимые значения». Смысл узла V38 в том, чтобы ответ
+        # выдавался по ключевому слову сразу, а не собирался из словаря маппинга, замеров
+        # выгрузок и XSD в момент вопроса. Маркеры — заголовок карточки, колонка БД и ровно два
+        # допустимых значения: подмена значений (например «Normal» вместо «OrdinaryApplication»)
+        # роняет проверку, и это ровно тот дефект, который карточка и должна ловить.
+        "name": "карточка свойства DefaultRunMode (Основной режим) -> main_mode",
+        "anchor": "property-configuration-defaultrunmode",
+        "category": "xml-format",
+        "markers": ("===PROPERTY_CARD", "column=configurations.main_mode",
+                    "ManagedApplication", "OrdinaryApplication"),
+        "terms": ["DefaultRunMode", "main_mode", "основной режим"],
         "foreign": FOREIGN_BASE + ["platform"],
     },
     {
