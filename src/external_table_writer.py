@@ -693,12 +693,26 @@ class ConfigurationRowWriter(TableRowWriter):
     Колонки, которых в таблице нет вовсе (`version` есть, `update_address`/`help_url`/
     `mobile_functions` — нет), писатель не выдумывает: в `configurations` ровно те
     имена, что живые.
+
+    Узел V39 (21.10.2026; дефект найден 20.10.2026) меняет тип шести колонок на jsonb: `synonym`, `short_info`,
+    `detailed_info`, `copyright`, `vendor_url`, `config_url` принимают многоязычное
+    значение выгрузки (`v8:item`/`v8:lang`/`v8:content`). Пока они были текстовыми,
+    пять из них не заполнялись вовсе (разбор читал составной элемент как текст и получал
+    None), а шестой терял языки, кроме одного. Схема меняется парой: шаг 2
+    (`create_1c_configurations_db.sql`) + аддитивная
+    `migrate_v39_multilang_configuration_text.sql`; иначе `python _cmp_ddl.py`
+    зафиксировал бы расхождение.
     """
 
     TABLE = "configurations"
+    # Узел V39: шесть многоязычных колонок пишутся видом `jsonb_nullable`, а не
+    # `jsonb_object`. Разница принципиальная: `jsonb_object` пустое значение превращает в
+    # '{}', и «значения в выгрузке нет» читалось бы как «значение есть, но пустое».
+    # Для заголовка конфигурации это ровно тот дефект, который узел V39 и закрывает
+    # (пять колонок были NULL, а не '{}'), поэтому пустое значение остаётся NULL.
     COLUMNS = {
         "name": "text",
-        "synonym": "text",
+        "synonym": "jsonb_nullable",
         "comment": "text",
         "version": "text",
         "vendor_name": "text",
@@ -708,11 +722,15 @@ class ConfigurationRowWriter(TableRowWriter):
         "embedded_language": "text",
         "main_roles": "text_array",
         "default_language": "text",
-        "short_info": "text",
-        "detailed_info": "text",
-        "copyright": "text",
-        "vendor_url": "text",
-        "config_url": "text",
+        # Узел V39: многоязычные свойства заголовка — jsonb-словарь по языкам
+        # (BriefInformation / DetailedInformation / Copyright / VendorInformationAddress /
+        # ConfigurationInformationAddress). UpdateCatalogAddress остаётся text: в выгрузке
+        # это простой текст без v8:item (замер 20.10.2026 по восьми XML).
+        "short_info": "jsonb_nullable",
+        "detailed_info": "jsonb_nullable",
+        "copyright": "jsonb_nullable",
+        "vendor_url": "jsonb_nullable",
+        "config_url": "jsonb_nullable",
         "update_url": "text",
         "help_included": "bool",
         "lock_mode_default": "text",
@@ -724,6 +742,10 @@ class ConfigurationRowWriter(TableRowWriter):
 
     # VARCHAR(N) живой схемы: значение длиннее — отказ с названными колонками, а не
     # обрезка (молча укоротить реквизит = соврать о содержимом конфигурации).
+    # Узел V39: многоязычные колонки (synonym, short_info, detailed_info, copyright,
+    # vendor_url, config_url) из перечня убраны — у них тип jsonb, лимита длины в схеме
+    # больше нет, и выдумывать его здесь означало бы вернуть прежнее молчаливое ограничение
+    # (copyright/vendor_url/config_url были VARCHAR(500) и резали бы значение по лимиту).
     MAX_LENGTHS = {
         "name": 255,
         "version": 50,
@@ -732,10 +754,6 @@ class ConfigurationRowWriter(TableRowWriter):
         "usage_purpose": 100,
         "embedded_language": 50,
         "default_language": 50,
-        "short_info": 255,
-        "copyright": 500,
-        "vendor_url": 500,
-        "config_url": 500,
         "update_url": 500,
         "lock_mode_default": 50,
         "modality_mode": 100,

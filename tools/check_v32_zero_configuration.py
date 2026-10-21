@@ -26,6 +26,31 @@ Test3_Otchet_Null; эталонная пара (Test1_Otchet, Test2_Otchet) не
       неизвестной формы (пустая колонка называется предупреждением); `_has_value` по детям
       `Item` не считает заполненное свойство пустой слепой зоной; роль доходит до колонки
       `main_roles` (TEXT[]) и убирается за собой;
+  3d. многоязычные свойства заголовка (узел V39, 21.10.2026): шесть свойств — Synonym,
+      BriefInformation, DetailedInformation, Copyright, VendorInformationAddress,
+      ConfigurationInformationAddress — читаются словарём `{язык: текст}` и пишутся в колонки
+      JSONB. До узла доходило ноль из шести значений: пять колонок оставались NULL (разбор
+      звал `_text()` на составном `v8:item`), в `synonym` выживал один язык. Проверка держит:
+      тип шести колонок jsonb и НЕ переведённые границы (`UpdateCatalogAddress` — простой
+      текст по замеру восьми выгрузок, `config_extensions.synonym` — загрузчика расширения
+      нет, R7), отсутствие отдельных колонок под язык; словарь по каждому из шести свойств
+      без потерь; «значения нет» (NULL) отделено от «значение пустое» (пустой элемент и
+      `v8:item` с пустым `v8:content` дают NULL, а не `{}`); ключ `ru` при значении без
+      `v8:item` называется неподтверждённым; лимит текстовой колонки остаётся отказом, а
+      jsonb-колонка принимает длинное значение целиком; повторное применение миграции ничего
+      не меняет, а `'und'` (переходное состояние строк до V39) читается, пока остался в
+      строке, и снимается первой же перезагрузкой каталога;
+       Узел закрывает НЕ «в выгрузках два языка», а контракт формата: `v8:item` допускает
+       любое число пар `v8:lang`/`v8:content`, а текстовая колонка физически держит одну
+       форму. Замер восьми выгрузок (`python tools/measure_multilang_properties.py`) называет
+       границы честно: элемент есть во всех восьми, заполнен `v8:item` у шести-семи (Synonym —
+       7, остальные пять — по 6), языки везде одни и те же — `ru`, строк с двумя и более
+       языками — 0, пустого `v8:lang` — 0, текста без `v8:item` — 0. `UpdateCatalogAddress`
+       при этом даёт простой текст (заполнен у 6, `v8:item` — ни у одной), поэтому его колонка
+       осталась текстовой. То есть в наших выгрузках потеря второй формы невидима: она
+       наступает вместе с первой многоязычной конфигурацией, а цена её — молчаливое
+       исчезновение формы, которой в колонке не места.
+
 
   4. фикстура `Config_NULL` (её проверяет только этот инструмент): индекс состава пуст —
      общая точка входа удерживает загрузку ДО записи (узел V33: частичного индекса не
@@ -71,6 +96,7 @@ Test3_Otchet_Null; эталонная пара (Test1_Otchet, Test2_Otchet) не
 Код возврата 0 — все проверки пройдены, 1 — есть расхождения.
 """
 import argparse
+import re
 import shutil
 import sys
 import tempfile
@@ -127,6 +153,44 @@ V33_CREATED_TABLES = ["configuration_objects"]
 NOT_CREATED_TABLES = ["config_languages", "config_modules",
                      "modified_objects", "config_export_log"]
 
+# ─── многоязычные свойства заголовка (узел V39, 21.10.2026) ───
+#
+# Узел V39 (21.10.2026). Замер 20.10.2026 по восьми XML-выгрузкам (BGU2, BP3, KomMag, UNF3, UT11, ZUP31,
+# Config_NULL, MinCfg): шесть свойств корня заполнены у шести из восьми и ВСЕГДА имеют форму
+# `v8:item / v8:lang / v8:content` — значений без `v8:item` проход по файлам не дал ни одного.
+# В текстовой колонке такой словарь необратим: пять колонок оставались NULL при заполненных
+# значениях (разбор звал `_text()` на составном элементе — дефект, названный слоем знаний
+# `property-configuration-development`), а в `synonym` выживал один язык. Словарь `{язык: текст}`
+# и тип jsonb — тот же контракт, которым шесть писателей внешнего объекта пишут `synonym` с узла
+# V12; отдельной колонки под язык нет: язык — часть значения, а не отдельный факт.
+MULTILANG_COLUMNS = {
+    "synonym": "Synonym",
+    "short_info": "BriefInformation",
+    "detailed_info": "DetailedInformation",
+    "copyright": "Copyright",
+    "vendor_url": "VendorInformationAddress",
+    "config_url": "ConfigurationInformationAddress",
+}
+# Границы узла по тому же замеру восьми выгрузок. Свойства дают в выгрузке простой текст —
+# вложенности `v8:item` в них нет, поэтому колонки остаются текстовыми и лимит длины у них
+# остаётся. `config_extensions.synonym` — по другой причине: загрузчика расширения нет (правило
+# R7, `config_extensions` пуста), менять тип нечем и проверять нечем — граница названа, а не
+# промолчана.
+SIMPLE_TEXT_COLUMNS = {
+    "update_url": "UpdateCatalogAddress",
+    "vendor_name": "Vendor",
+    "version": "Version",
+    "comment": "Comment",
+    "default_language": "DefaultLanguage",
+}
+TEXT_TYPES = {"text", "character varying", "varchar"}
+# Длинное языковое значение: раньше оно упиралось в лимит текстовой колонки (varchar(500) у
+# update_url / vendor_url / config_url). 1200 символов — больше любого из этих лимитов; у jsonb
+# лимита нет, и проверка называет это прямым запросом.
+LONG_TEXT_LEN = 1200
+DDL_BOOTSTRAP = ROOT / "create_1c_configurations_db.sql"
+V39_MIGRATION = ROOT / "migrate_v39_multilang_configuration_text.sql"
+
 failures = []
 counters = {"checks": 0}
 temp_dirs = []
@@ -178,6 +242,51 @@ def sql_rows(query, params=None):
 def sql_one(query, params=None):
     rows = sql_rows(query, params)
     return rows[0][0] if rows else None
+
+
+def try_text_update(cfg_id, column, value):
+    """Попытка записать текст в колонку: None при успехе, текст ошибки при отказе.
+
+    Нужна там, где отказ — ожидаемый ответ (лимит текстовой колонки): sql_write фиксирует
+    ошибку как провал проверки, а здесь ошибка и есть предмет проверки.
+    """
+    conn = None
+    try:
+        conn = connect()
+        cur = conn.cursor()
+        cur.execute(f"UPDATE {TABLE} SET {column} = %s WHERE id = %s", (value, cfg_id))
+        conn.commit()
+        return None
+    except Exception as exc:
+        if conn is not None:
+            conn.rollback()
+        return str(exc)
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def try_sql_script(script):
+    """Выполнить SQL-скрипт целиком: None при успехе, текст ошибки при отказе.
+
+    Отличие от `sql_write` — здесь важен сам факт выполнения, а не число строк:
+    rowcount у `DO`-блока в psycopg2 равен -1, и по нему нельзя судить об отказе
+    (иначе повторная миграция, которая обязана быть пустой, читалась бы провалом).
+    """
+    conn = None
+    try:
+        conn = connect()
+        cur = conn.cursor()
+        cur.execute(script)
+        conn.commit()
+        return None
+    except Exception as exc:
+        if conn is not None:
+            conn.rollback()
+        return str(exc)
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def sql_write(query, params=None):
@@ -520,7 +629,8 @@ def check_parser_negatives():
     check("битый (обрезанный) XML: отказ «не разобран», а не пустая строка заголовка",
           not res.get("success") and "не разобран" in str(res.get("error", "")), repr(res)[:260])
 
-    # многоязычный синоним: вторая языковая форма теряется — это называется
+    # V39: вторая языковая форма не теряется — в текстовой колонке она терялась, jsonb-колонка
+    # хранит словарь по каждой v8:lang. Проверка называет ровно то, что обязан делать разбор.
     multi = new_catalog()
     edit_xml(multi / "Configuration.xml",
              [("<Synonym/>",
@@ -528,9 +638,11 @@ def check_parser_negatives():
                '</v8:item><v8:item><v8:lang>en</v8:lang><v8:content>Null</v8:content>'
                "</v8:item></Synonym>")])
     res = parse_configuration_meta(str(multi / "Configuration.xml"))
-    check("многоязычный синоним: сохранён язык ru, потеря второй формы названа предупреждением",
-          res.get("success") and res["configuration"]["synonym"] == "Нулевая"
-          and any("Synonym многоязычен" in w and "en" in w for w in res["warnings"]),
+    check("многоязычный синоним: обе формы (ru + en) разобраны словарём, "
+          "предупреждения о потере формы больше нет",
+          res.get("success")
+          and res["configuration"]["synonym"] == {"ru": "Нулевая", "en": "Null"}
+          and not any("многоязыч" in w for w in res.get("warnings", [])),
           repr([res["configuration"].get("synonym"),
                 [w[:80] for w in res.get("warnings", [])][:4]]))
 
@@ -555,8 +667,8 @@ def check_parser_negatives():
                '<Synonym><v8:item><v8:lang>en</v8:lang><v8:content>Null</v8:content>'
                "</v8:item></Synonym>")])
     res = parse_configuration_meta(str(en_only / "Configuration.xml"))
-    check("синоним только на en: значение сохранено как есть (первый доступный язык)",
-          res.get("success") and res["configuration"]["synonym"] == "Null",
+    check("синоним только на en: ключ 'en' и ничего больше — язык 'ru' не подставляется",
+          res.get("success") and res["configuration"]["synonym"] == {"en": "Null"},
           repr(res["configuration"].get("synonym")))
 
 
@@ -1028,6 +1140,353 @@ def check_load_path():
 
 # ─────────── 6. ⚠️ уже загружено: карточка конфигурации, а не внешнего объекта ───────────
 
+# ─────── 3d. многоязычные свойства заголовка: v8:item -> JSONB (узел V39) ───────
+
+def multilang_property_xml(tag, forms):
+    """Значение свойства в замерной форме выгрузки: `v8:item / v8:lang / v8:content`."""
+    if not forms:
+        return f"<{tag}/>"
+    inner = "".join(f"<v8:item><v8:lang>{lang}</v8:lang>"
+                    f"<v8:content>{text}</v8:content></v8:item>" for lang, text in forms)
+    return f"<{tag}>{inner}</{tag}>"
+
+
+def fill_multilang(xml_path, values):
+    """Заменить пустые элементы копии фикстуры замерной формой (пустой элемент по каждому есть).
+
+    Возвращает число пустых элементов, которые реально были в XML: без этого раздел
+    проверял бы вакуум — шесть отсутствующих элементов дали бы шесть NULL, и фразу
+    «словарь не теряет форму» было бы нечем проверить.
+    """
+    text = xml_path.read_text(encoding="utf-8")
+    found = sum(1 for tag in values if f"<{tag}/>" in text)
+    edit_xml(xml_path, [(f"<{tag}/>", multilang_property_xml(tag, forms))
+                        for tag, forms in values.items()])
+    return found
+
+
+def multilang_probe_values():
+    """По две языковые формы на каждое из шести свойств; тексты разные — проверка на потерю.
+
+    Языки — настоящие коды `v8:lang` (`ru`, `en`), а не метки свойств: проверки
+    «ключ читается оператором `->>`» и «ключа `de` нет» имеют смысл только на кодах
+    языка, каких-то других в выгрузке не бывает (замер восьми выгрузок).
+    """
+    return {tag: [("ru", f"{tag} — форма на русском"),
+                  ("en", f"{tag} form in English")]
+            for tag in MULTILANG_COLUMNS.values()}
+
+
+def multilang_expected(values):
+    """Ожидаемые колонки {колонка: {язык: текст}} — из тех же значений, что и XML."""
+    return {column: dict(values[tag]) for column, tag in MULTILANG_COLUMNS.items()}
+
+
+def column_types(table):
+    """Типы колонок таблицы из живой схемы: сравнивать контракт нужно со схемой, а не с памятью."""
+    return {row[0]: row[1] for row in sql_rows(
+        "SELECT column_name, data_type FROM information_schema.columns "
+        "WHERE table_schema = 'public' AND table_name = %s", (table,))}
+
+
+def multilang_stored(cfg_id):
+    """Значения шести колонок одной строки как есть: psycopg2 читает jsonb словарём."""
+    return sql_dict(f"SELECT {', '.join(MULTILANG_COLUMNS)} FROM {TABLE} WHERE id = %s",
+                    (cfg_id,)) or {}
+
+
+def multilang_shape_case(column):
+    """CASE: значение есть, но словарём не является (строка, массив, пустой объект)."""
+    return ("CASE WHEN {0} IS NOT NULL AND (jsonb_typeof({0}) <> 'object' "
+            "OR {0} = '{{}}'::jsonb) THEN 1 ELSE 0 END").format(column)
+
+
+def bad_multilang_values(cfg_id=None):
+    """Сколько значений шести колонок не являются словарём по языку (0 = контракт цел)."""
+    where = f"WHERE id = {int(cfg_id)}" if cfg_id else ""
+    total = " + ".join(multilang_shape_case(column) for column in MULTILANG_COLUMNS)
+    return int(sql_one(f"SELECT {total} FROM {TABLE} {where}") or 0)
+
+
+def check_multilang_properties():
+    """Схема, парсер, запись, длинное значение и миграция: шесть свойств как словарь по языку."""
+    section("3d. МНОГОЯЗЫЧНЫЕ СВОЙСТВА: v8:item -> словарь {язык: текст}, колонка JSONB (V39)")
+    # Имена заголовков пробы фиксированы: на них проверяется и force=True (перенос имени),
+    # и отказ на не-jsonb значении. Цена фиксации — остаток после прерванного прогона:
+    # строка справочника пережила бы аварию, и первая загрузка раздела дала бы name_conflict,
+    # т. е. прогон проверял бы чужое состояние вместо своего. Остатки снимаются до базовой
+    # линии и называются — молча перезаписать их force=True значит скрыть аварию прошлого запуска.
+    probe_names = [f"{PROBE}multi", f"{PROBE}long"]
+    leftovers = sql_rows(f"SELECT id, name FROM {TABLE} WHERE name = ANY(%s)", (probe_names,))
+    if leftovers:
+        note(f"в справочнике остались строки прерванного прогона ({len(leftovers)}): они сняты "
+             "до базовой линии, иначе первая загрузка раздела ответила бы name_conflict "
+             "на чужой строке, а не своим исходом")
+        for left in leftovers:
+            delete_configuration(cfg_id=int(left[0]))
+    before = db_counts()
+
+    # ── А. тип колонок и границы, которые V39 не трогал ──
+    types = column_types(TABLE)
+    want_jsonb = {column: "jsonb" for column in MULTILANG_COLUMNS}
+    got = {column: types.get(column) for column in MULTILANG_COLUMNS}
+    if not check("шесть свойств заголовка — колонки jsonb: словарь по языку в текст не кладётся",
+                 got == want_jsonb, repr(got)):
+        return
+    check("свойства, дающие в выгрузке простой текст, остались текстовыми (замер восьми выгрузок)",
+          all(types.get(column) in TEXT_TYPES for column in SIMPLE_TEXT_COLUMNS),
+          repr({column: types.get(column) for column in SIMPLE_TEXT_COLUMNS}))
+    extension_types = column_types("config_extensions")
+    check("config_extensions.synonym остался text: загрузчика расширения нет (R7) — граница названа",
+          extension_types.get("synonym") in TEXT_TYPES, repr(extension_types.get("synonym")))
+    extra_lang = sorted(column for column in types
+                        if column not in MULTILANG_COLUMNS
+                        and any(column.startswith(base) for base in MULTILANG_COLUMNS))
+    check("под языковые формы не заводили отдельных колонок (synonym_en, short_info_lang): "
+          "язык — часть значения", not extra_lang, repr(extra_lang))
+    check("в живых строках нет значений шести колонок, не являющихся словарём по языку",
+          bad_multilang_values() == 0, repr(bad_multilang_values()))
+    # Правка схемы идёт парой «миграция + бутстрап» (п. 17): иначе _cmp_ddl.py зафиксирует
+    # расхождение, а чистая установка БД вернётся к текстовым колонкам.
+    ddl = DDL_BOOTSTRAP.read_text(encoding="utf-8", errors="replace")
+    block = re.search(r"(?is)CREATE TABLE IF NOT EXISTS configurations\s*\((.*?)\n\);", ddl)
+    declared = {name.lower(): kind.lower() for name, kind in re.findall(
+        r"(?mi)^\s*(\w+)\s+(jsonb|text\[\]|text|varchar)\b",
+        block.group(1) if block else "")}
+    check("бутстрап шага 2 объявляет те же jsonb-колонки, что живая схема (правка идёт парой)",
+          block is not None
+          and all(declared.get(column) == "jsonb" for column in MULTILANG_COLUMNS),
+          repr({column: declared.get(column) for column in MULTILANG_COLUMNS}))
+    text_limit = sql_one("SELECT character_maximum_length FROM information_schema.columns "
+                         "WHERE table_schema = 'public' AND table_name = %s "
+                         "AND column_name = 'update_url'", (TABLE,))
+    check("лимит оставшейся текстовой колонки назван и не снят: update_url varchar(500)",
+          text_limit == 500, repr(text_limit))
+    # ── Б. парсер: словарь по каждой v8:lang, без потерь и без выдуманного языка ──
+    values = multilang_probe_values()
+    # Многострочное значение: текстовая колонка сохраняла его как есть, jsonb не должен резать
+    # перенос — иначе многострочная справка (DetailedInformation) потерялась бы и здесь.
+    values["DetailedInformation"] = [("ru", "Первая строка\nвторая строка"),
+                                    ("en", "line one\nline two")]
+    catalog = synth_catalog("v39_multi", name_mode="fixed", name_value=probe_names[0])
+    replaced = fill_multilang(catalog / "Configuration.xml", values)
+    check("копия фикстуры получила шесть заполненных свойств: иначе проверка была бы вакуумной",
+          replaced == len(MULTILANG_COLUMNS), repr(replaced))
+    parsed = parse_configuration_meta(str(catalog / "Configuration.xml"))
+    if not check("копия фикстуры с шестью заполненными свойствами разобрана",
+                 parsed.get("success"), repr(parsed)[:300]):
+        return
+    row, counts, warnings = parsed["configuration"], parsed["counts"], parsed["warnings"]
+    expected = multilang_expected(values)
+    for column, tag in MULTILANG_COLUMNS.items():
+        check(f"{tag} → {column}: обе языковые формы разобраны словарём, форма не потеряна",
+              row.get(column) == expected[column], repr(row.get(column)))
+    fixture = parse_configuration_meta(str(CONFIG_XML))
+    check("заполненное свойство не считается пустым: счётчик заполненных вырос ровно на шесть",
+          counts["properties_filled"] == (fixture["counts"]["properties_filled"] + 6),
+          repr([fixture["counts"]["properties_filled"], counts["properties_filled"]]))
+    check("предупреждения «значение многоязычно, форма потеряна» больше нет: словарь не теряет",
+          not any("многоязыч" in w for w in warnings),
+          repr([w[:90] for w in warnings][:4]))
+
+    # «значения нет» отделено от «значение пустое»; язык не выдумывается
+    check("пустой элемент по шести свойствам даёт NULL по шести колонкам: пустой словарь "
+          "в контракт не кладётся",
+          all(fixture["configuration"][column] is None for column in MULTILANG_COLUMNS),
+          repr({column: fixture["configuration"].get(column)
+                for column in ("synonym", "short_info")}))
+
+    empty_item = new_catalog()
+    edit_xml(empty_item / "Configuration.xml",
+             [("<Copyright/>", "<Copyright><v8:item><v8:lang>ru</v8:lang>"
+                               "<v8:content></v8:content></v8:item></Copyright>")])
+    res = parse_configuration_meta(str(empty_item / "Configuration.xml"))
+    check("v8:item с пустым v8:content — NULL, а не {'ru': ''} и не {}: пустое значение и "
+          "отсутствие значения в колонке неразличимы осознанно",
+          res.get("success") and res["configuration"]["copyright"] is None,
+          repr(res["configuration"].get("copyright")))
+
+    nil_item = new_catalog()
+    edit_xml(nil_item / "Configuration.xml",
+             [("<ConfigurationInformationAddress/>",
+               '<ConfigurationInformationAddress><v8:item><v8:lang>ru</v8:lang>'
+               '<v8:content xsi:nil="true"/></v8:item></ConfigurationInformationAddress>')])
+    res = parse_configuration_meta(str(nil_item / "Configuration.xml"))
+    check("xsi:nil на v8:content — NULL: тот же ответ, что у пустого значения",
+          res.get("success") and res["configuration"]["config_url"] is None,
+          repr(res["configuration"].get("config_url")))
+
+    plain = new_catalog()
+    edit_xml(plain / "Configuration.xml",
+             [("<BriefInformation/>", "<BriefInformation>текст без v8:item</BriefInformation>")])
+    res = parse_configuration_meta(str(plain / "Configuration.xml"))
+    check("значение без v8:item не теряется: общий разбор даёт ключ 'ru' И называет его "
+          "неподтверждённым (в восьми выгрузках такой формы нет)",
+          res.get("success")
+          and res["configuration"]["short_info"] == {"ru": "текст без v8:item"}
+          and any("BriefInformation" in w and "не подтверждён" in w for w in res["warnings"]),
+          repr([res["configuration"].get("short_info"),
+                [w[:90] for w in res.get("warnings", [])][:3]]))
+
+    nolang = new_catalog()
+    edit_xml(nolang / "Configuration.xml",
+             [("<BriefInformation/>",
+               "<BriefInformation><v8:item><v8:content>без языка</v8:content>"
+               "</v8:item></BriefInformation>")])
+    res = parse_configuration_meta(str(nolang / "Configuration.xml"))
+    check("v8:item без v8:lang: язык не выдумывается, в колонку ничего не пишется, "
+          "но потеря названа предупреждением",
+          res.get("success") and res["configuration"]["short_info"] is None
+          and any("BriefInformation" in w and "v8:lang" in w for w in res["warnings"]),
+          repr([res["configuration"].get("short_info"),
+                [w[:90] for w in res.get("warnings", [])][:3]]))
+
+    only_en = new_catalog()
+    edit_xml(only_en / "Configuration.xml",
+             [("<VendorInformationAddress/>",
+               multilang_property_xml("VendorInformationAddress",
+                                     [("en", "http://example.invalid/only-en")]))])
+    res = parse_configuration_meta(str(only_en / "Configuration.xml"))
+    check("значение только на en: ключ 'en' и ничего больше — язык 'ru' не подставляется",
+          res.get("success")
+          and res["configuration"]["vendor_url"] == {"en": "http://example.invalid/only-en"},
+          repr(res["configuration"].get("vendor_url")))
+
+    dup = new_catalog()
+    edit_xml(dup / "Configuration.xml",
+             [("<VendorInformationAddress/>",
+               multilang_property_xml("VendorInformationAddress",
+                                     [("ru", "первая"), ("ru", "вторая")]))])
+    res = parse_configuration_meta(str(dup / "Configuration.xml"))
+    check("повтор одного языка: один ключ, молчаливого склеивания двух форм нет",
+          res.get("success") and res["configuration"]["vendor_url"] == {"ru": "вторая"},
+          repr(res["configuration"].get("vendor_url")))
+    # ── В. запись: jsonb принимает словарь целиком ──
+    res = load_catalog(str(catalog))
+    cfg_id = int(res.get("id") or 0)
+    state.setdefault("multilang_cfgs", []).append(cfg_id)
+    if not check("исход «загружено»: многоязычные значения загрузке не мешают",
+                 res.get("status") == "loaded" and cfg_id > 0,
+                 format_load_result(res)[:400]):
+        return
+    kinds = dict(zip(MULTILANG_COLUMNS, sql_rows(
+        "SELECT " + ", ".join(f"coalesce(jsonb_typeof({column}), 'NULL')"
+                              for column in MULTILANG_COLUMNS)
+        + f" FROM {TABLE} WHERE id = %s", (cfg_id,))[0]))
+    check("jsonb-колонки хранят объект (jsonb_typeof = 'object'), а не строку и не массив",
+          all(kind == "object" for kind in kinds.values()), repr(kinds))
+    stored = multilang_stored(cfg_id)
+    check("значение прочитано из БД целиком и совпадает с разбором: обе формы каждого свойства",
+          {column: stored.get(column) for column in MULTILANG_COLUMNS} == expected,
+          repr({column: stored.get(column)
+                for column in ("synonym", "detailed_info")})[:400])
+    pair = sql_rows(f"SELECT synonym->>'ru', synonym->>'en', synonym ? 'de' FROM {TABLE} "
+                    "WHERE id = %s", (cfg_id,))
+    check("ключи читаются операторами jsonb: ->> по ru и en отдают обе формы, ключа de нет",
+          bool(pair) and pair[0][0] == expected["synonym"]["ru"]
+          and pair[0][1] == expected["synonym"]["en"] and pair[0][2] is False,
+          repr(pair))
+    check("в записанной строке нет значений, не являющихся словарём (ни строки, ни массива, ни {})",
+          bad_multilang_values(cfg_id) == 0, repr(bad_multilang_values(cfg_id)))
+
+    # ── Г. длинное значение: у jsonb-колонки лимита нет, у текстовой он остался ──
+    long_id = 0
+    long_catalog = synth_catalog("v39_long", name_mode="fixed", name_value=probe_names[1])
+    address = "http://example.invalid/" + "u" * LONG_TEXT_LEN
+    edit_xml(long_catalog / "Configuration.xml",
+             [("<BriefInformation/>",
+               multilang_property_xml("BriefInformation", [("ru", "Д" * LONG_TEXT_LEN)])),
+              ("<ConfigurationInformationAddress/>",
+               multilang_property_xml("ConfigurationInformationAddress", [("ru", address)]))])
+    res_long = load_catalog(str(long_catalog))
+    long_id = int(res_long.get("id") or 0)
+    state.setdefault("multilang_cfgs", []).append(long_id)
+    if check("загружена копия с длинными языковыми формами",
+             res_long.get("status") == "loaded" and long_id > 0,
+             format_load_result(res_long)[:300]):
+        sizes = sql_rows("SELECT length(short_info->>'ru'), length(config_url->>'ru') "
+                         f"FROM {TABLE} WHERE id = %s", (long_id,))
+        check(f"длины дошли целиком ({LONG_TEXT_LEN} симв.): лимит текстовой колонки "
+              "jsonb-колонке не нужен, обрезки нет",
+              bool(sizes) and sizes[0][0] == LONG_TEXT_LEN and sizes[0][1] == len(address),
+              repr(sizes))
+        too_long = try_text_update(long_id, "update_url", "u" * (LONG_TEXT_LEN + 1))
+        fits = try_text_update(long_id, "update_url", "u" * (text_limit or 500))
+        check("текстовой колонке лимит оставлен: значение длиннее varchar(500) отклоняется, "
+              "ровно в лимит — проходит",
+              too_long is not None and "too long" in too_long and fits is None,
+              repr([too_long[:120] if too_long else None, fits]))
+    # ── Д. миграция: повторное применение ничего не меняет, 'und' — переходное состояние ──
+    mig_sql = (V39_MIGRATION.read_text(encoding="utf-8", errors="replace")
+               if V39_MIGRATION.exists() else "")
+    check("миграция V39 существует и пропускает уже jsonb-колонку (повтор не переупаковывает)",
+          bool(mig_sql) and "col_type = 'jsonb' THEN" in mig_sql and "CONTINUE;" in mig_sql,
+          repr(V39_MIGRATION.exists()))
+    check("прежний текст упаковывается ключом 'und': язык снятых до V39 строк не выдумывается",
+          "jsonb_build_object(''und''" in mig_sql,
+          repr([line.strip() for line in mig_sql.splitlines()
+                if "jsonb_build_object" in line]))
+    check("пробел до узла не становится значением: btrim → THEN NULL",
+          "btrim(" in mig_sql and "THEN NULL" in mig_sql, "")
+    check("граница R7 названа самим файлом миграции и SQL её не трогает",
+          "config_extensions.synonym" in mig_sql and "R7" in mig_sql
+          and "public.config_extensions" not in mig_sql,
+          repr([line.strip() for line in mig_sql.splitlines()
+                if "config_extensions" in line][:2]))
+
+    seeded = sql_write(f"UPDATE {TABLE} SET synonym = synonym || %s::jsonb WHERE id = %s",
+                       ('{"und": "текст до V39"}', cfg_id))
+    check("переходное состояние строк до V39 читается: ключ 'und' дописан к существующему словарю",
+          seeded == 1 and sql_one(f"SELECT synonym ? 'und' FROM {TABLE} WHERE id = %s",
+                                  (cfg_id,)) is True,
+          repr([seeded, sql_one(f"SELECT synonym::text FROM {TABLE} WHERE id = %s", (cfg_id,))]))
+    before_mig = multilang_stored(cfg_id)
+    types_before = column_types(TABLE)
+    applied = try_sql_script(mig_sql)
+    check("повторное применение миграции к прогретой БД не падает (тип уже jsonb)",
+          applied is None, repr(applied)[:300])
+    check("повторная миграция не меняет ни типа колонок, ни значений: 'und' остаётся ровно "
+          "там, где записан",
+          column_types(TABLE) == types_before
+          and multilang_stored(cfg_id) == before_mig,
+          repr({column: (multilang_stored(cfg_id).get(column) or {})
+                for column in ("synonym", "short_info")}))
+
+    again = load_catalog(str(catalog), force=True)
+    again_id = int(again.get("id") or 0)
+    state.setdefault("multilang_cfgs", []).append(again_id)
+    und_keys = " OR ".join(f"{column} ? 'und'" for column in MULTILANG_COLUMNS)
+    check("force=True снимает переходное состояние: ключей 'und' в новой строке нет",
+          again.get("status") == "reloaded" and again_id > 0
+          and sql_one(f"SELECT COUNT(*) FROM {TABLE} WHERE id = %s AND ({und_keys})",
+                      (again_id,)) == 0,
+          repr([again.get("status"), again_id,
+                sql_one(f"SELECT synonym::text FROM {TABLE} WHERE id = %s", (again_id,))]))
+    check("после перезагрузки словари равны разбору: 'und' — состояние строки, а не тип колонки",
+          {column: multilang_stored(again_id).get(column)
+           for column in MULTILANG_COLUMNS} == expected,
+          repr(multilang_stored(again_id))[:400])
+
+    # jsonb-колонка не принимает не-jsonb: отказ ловит база, а не код писателя. Без этой
+    # проверки утверждение «колонка jsonb» было бы пустым — ту же строку правят иначе,
+    # и мусор лёг бы в неё молча (строка вместо словаря по языку).
+    garbage = try_text_update(again_id, "copyright", "<не json>")
+    check("не-jsonb значение в jsonb-колонку не кладётся: UPDATE отклонён базой",
+          garbage is not None, repr(garbage)[:200])
+    check("после отказа значение осталось словарём по языку: неудавшаяся правка не испортила строку",
+          (multilang_stored(again_id).get("copyright") or {}) == expected["copyright"],
+          repr(multilang_stored(again_id).get("copyright"))[:200])
+
+    for cfg in (cfg_id, again_id, long_id):
+        delete_configuration(cfg_id=cfg)
+    check("раздел убирает за собой: счётники БД равны началу прогона",
+          db_counts() == before, repr([before, db_counts()]))
+    note("граница узла: V39 меняет ХРАНЕНИЕ, а не создаёт обратную операцию — выгрузить словарь "
+         "обратно в v8:item можно только сборкой XML из строк БД (узлы V18/V29), её нет. "
+         "Ключ 'und' — переходное состояние строк, снятых до V39: он остаётся, пока строку не "
+         "перезагрузили из выгрузки (force=True); проверка называет это прямым запросом.")
+
+
 def check_duplicate():
     """R5: дубликат ищется по uuid; карточка обязана быть карточкой конфигурации."""
     cfg_id, cfg_uuid = probe["cfg_id"], probe["cfg_uuid"]
@@ -1382,6 +1841,13 @@ def cleanup_rows():
             delete_configuration(cfg_id=cfg_id)
     for header_id in state.get("probe_headers", []):
         sql_write("DELETE FROM configurations WHERE id = %s", (header_id,))
+    for header_id in state.get("multilang_cfgs", []):
+        # Раздел 3d снимает свои строки сам. Здесь — страховка для прогона, прерванного
+        # до его уборки: без неё в справочнике остаётся заголовок пробы, и следующий запуск
+        # отвечает name_conflict на чужой строке. Снимается инструментом, а не SQL: у строки
+        # есть состав, и его снимает каскад загрузчика — внешнего ключа с ON DELETE нет.
+        if header_id:
+            delete_configuration(cfg_id=int(header_id))
     if probe.get("ext_uuid"):
         delete_external_object(uuid_val=probe["ext_uuid"], obj_type="external_report")
 
@@ -1442,6 +1908,8 @@ SECTIONS = [
     ("parser", "3. разбор Configuration.xml", check_parser, ()),
     ("parser-negatives", "3b. отказ разбора с причиной", check_parser_negatives, ()),
     ("roles", "3c. перечень ссылок: дети Item и Value", check_roles, ()),
+    ("multilang", "3d. многоязычные свойства: v8.item -> jsonb (V39)",
+     check_multilang_properties, ()),
     ("null-index", "4. фикстура Config_NULL: пустой индекс", check_null_fixture, ()),
     ("load", "5. загрузка копии: путь записи", check_load_path, ()),
     ("duplicate", "6. дубликат без force (R5)", check_duplicate, ("load",)),

@@ -22,16 +22,20 @@ r"""tools/check_xml_format_layer.py — слой знаний формата XML
 идентификатора (ClassId) находится только по алиасу. Это не дефект проверки, а причина, по
 которой алиасы имени обязательны: случай фиксируется, чтобы ограничение не «исчезло» из правил.
 
-Слои (LAYERS, 12): профиль свойств ExternalDataProcessor; профиль свойств Configuration.xml
+Слои (LAYERS, 16): профиль свойств ExternalDataProcessor; профиль свойств Configuration.xml
 (55 свойств корня конфигурации: что маппится в configurations, что без колонки, а что не
 заполняется осознанно — узлы V32/V33, замер MinCfg 19.10.2026); карточки отдельных свойств
 корня (DefaultRunMode и др.); общие свойства Name / Synonym / Comment; профиль идентификаторов
 ClassId/ObjectId/TypeId/ValueId; три слоя структуры выгрузки конфигурации (состав каталогов
 видов метаданных, индекс ConfigDumpInfo.xml, расположение uuid объекта конфигурации); и слой
-представления (Представление) — три карточки: файлы Ext/ (HomePageWorkArea, CommandInterface,
-Logo, Splash, Help…), свойства представления в корне <Properties> (WindowMode, Style, Language,
-Info, Copyright, Addresses) и основные формы конфигурации вместе с макетами оформления отчётов
-(DefaultReportForm … DefaultReportAppearanceTemplate) — замер 8 XML-выгрузок, 20.10.2026.
+представления (Представление) — четыре карточки: файлы Ext/ (HomePageWorkArea, CommandInterface,
+Logo, Splash, Help…, точный состав каталога по 8 выгрузкам и формат картинок), свойства
+представления в корне <Properties> (WindowMode, Style, Language, Info, Copyright, Addresses),
+основные формы конфигурации (DefaultReportForm … DefaultCollaborationSystemUsersChoiceForm,
+полный измеренный перечень свойств Default*) и отдельная карточка макета оформления отчётов
+(configuration-report-appearance-template: предопределённые макеты платформы против общих
+макетов конфигурации с TemplateType=DataCompositionAppearanceTemplate, содержимое
+AppearanceTemplate со ссылками на стили вместо RGB) — замер 8 XML-выгрузок, 20.10.2026.
 Всё это категории xml-format; профиль версий UUID — категории platform (его сниппет намеренно
 размечен и xml-format, поэтому xml-format у него в «чужих» категориях не проверяется).
 
@@ -40,6 +44,10 @@ Info, Copyright, Addresses) и основные формы конфигурац�
 и раздел ROOT_EXT_MODULES (модули предопределённых программ находятся только как файлы Ext/,
 соответствующие им колонки конфигурации загрузчик не заполняет) — без этих маркеров профиль
 смыкался бы с профилем внешнего объекта и перестал бы отвечать на вопрос «что теряется».
+С узла V39 (21.10.2026) к маркерам профиля добавлены раздел достижимости `===REACHABILITY===`
+и значение провенанса `dump8`: профиль обязан различать описание свойства в XML и то, доходит
+ли значение до колонки (шесть многоязычных свойств корня с V39 пишутся jsonb-словарём, а не
+теряются).
 
 Карточки представления заведены тремя строками, а не одной, потому что у них разные источники
 истины: «рабочая область», «интерфейс команд», «логотип», «заставка» в <Properties> не лежат
@@ -84,13 +92,40 @@ LAYERS = [
         # 22 из них маппятся в configurations, 33 без колонки (6 непустых — слепые зоны),
         # 5 колонок не заполняются осознанно. Маркеры счётчиков и раздела модулей —
         # доказательство, что это профиль конфигурации, а не внешнего объекта.
+        # Маркеры V39 (раздел достижимости, provenance dump8) в ЭТОЙ записи не ставят: якорь
+        # профиля разрешается тремя строками (5917 профиль + объединённые карточки модулей
+        # 5927 и хранилищ 5928), а проверка маркеров обязана пройти в каждой из них — у
+        # карточек модулей и хранилищ раздела достижимости нет и быть не должно. Раздел
+        # достижимости сторожит отдельная запись со своим уникальным якорем (см. ниже):
+        # один алиас не может служить якорем двух слоёв.
         "name": "профиль свойств Configuration.xml (заголовок конфигурации)",
         "anchor": "property-profile-configuration",
         "category": "xml-format",
         "markers": ("===PROPERTY_PROFILE", "path|kind|required|default|allowed|provenance",
                     "===MAPPING_SUMMARY", "found=55 mapped=22", "===ROOT_EXT_MODULES"),
         "terms": ["ConfigurationExtensionCompatibilityMode", "MainClientApplicationWindowMode",
-                  "ObjectAutonumerationMode", "DatabaseTablespacesUseMode"],
+                  "ObjectAutonumerationMode", "DatabaseTablespacesUseMode",
+                  "configurations.short_info", "configurations.vendor_url"],
+        "foreign": FOREIGN_BASE + ["platform"],
+    },
+    {
+        # Раздел достижимости профиля (узел V39, 21.10.2026): профиль обязан различать
+        # «свойство описано в XML» и «значение дошло до колонки». Шесть многоязычных свойств
+        # корня (BriefInformation, DetailedInformation, Copyright, VendorInformationAddress,
+        # ConfigurationInformationAddress, Synonym) с V39 пишутся jsonb-словарём и доходят до
+        # колонок; до V39 пять из них терялись на разборе (вид "text" вместо составного
+        # <v8:item><v8:content/>). Маркеры называют именно исправление: имя разбора
+        # _multilang_value и имя миграции, — поэтому карточка не может снова застыть в
+        # описании дефекта как в факте. Запись заведена ОТДЕЛЬНО от профиля: якорь профиля
+        # разрешается и объединёнными карточками 5927/5928, у которых раздела достижимости
+        # нет, а якорь обязан быть уникальным для слоя (правило «один алиас — один слой»).
+        "name": "раздел достижимости профиля (что из XML доходит до колонок, узел V39)",
+        "anchor": "configuration-reachability-section",
+        "category": "xml-format",
+        "markers": ("===REACHABILITY===", "dump8", "_multilang_value",
+                    "migrate_v39_multilang_configuration_text.sql"),
+        "terms": ["достижимость свойств конфигурации", "что доходит до колонки",
+                  "configuration-reachability-section"],
         "foreign": FOREIGN_BASE + ["platform"],
     },
     {
@@ -169,16 +204,21 @@ LAYERS = [
         # и у любого объекта метаданных — поэтому одна карточка на тройку (решение оператора
         # 20.10.2026). Маркеры берут ограничения и правила, а не общие слова: потеря
         # границы длины имени (80), правила "синоним не задан - используется имя" или
-        # маршрута synonym в БД (TEXT у конфигурации против JSONB у внешнего объекта)
-        # роняет проверку, и именно эти утверждения карточка обязана сохранять.
+        # маршрута synonym в БД роняет проверку. С узла V39 (21.10.2026) маршрут у
+        # Synonym один — JSONB и у конфигурации, и у внешнего объекта; маркер называет
+        # именно это состояние, а карточка обязана хранить и историю (до V39 у
+        # конфигурации был TEXT), и границу: config_extensions.synonym остаётся TEXT,
+        # потому что загрузчика расширений нет (правило R7).
         "name": "карточка общих свойств Name/Synonym/Comment (конфигурация и любой объект)",
         "anchor": "property-common-name-synonym-comment",
         "category": "xml-format",
         "markers": ("===PROPERTY_CARD", "xml=Name,Synonym,Comment",
                     "НЕ БОЛЕЕ 80 СИМВОЛОВ", "ЕСЛИ СИНОНИМ НЕ ЗАДАН — ИСПОЛЬЗУЕТСЯ ИМЯ",
-                    "configurations.synonym — колонка TEXT"),
+                    "configurations.synonym — колонка JSONB",
+                    "config_extensions.synonym остаётся TEXT"),
         "terms": ["Name", "Synonym", "Comment", "синоним объекта", "80 символов",
-                  "configurations.name", "представление объекта конфигурации"],
+                  "configurations.name", "configurations.synonym",
+                  "представление объекта конфигурации"],
         "foreign": FOREIGN_BASE + ["platform"],
     },
     # --- группа «Представление» (замер 8 выгрузок, 20.10.2026) ------------------------------
@@ -193,12 +233,21 @@ LAYERS = [
         "name": "файлы Ext/ представления конфигурации (рабочая область, командный интерфейс, картинки)",
         "anchor": "configuration-ext-presentation-files",
         "category": "xml-format",
+        # Маркеры дополнены замером 20.10.2026 (20.10.2026, список каталога Ext/ по 8 выгрузкам):
+        # точный состав каталога, правило «пяти файлов управляемого интерфейса нет у конфигурации
+        # на обычных формах» (KomMag) и файлы Ext/, к представлению НЕ относящиеся
+        # (MobileClientSignature.bin, StandaloneConfigurationContent.bin). Без них карточка
+        # читалась бы как «в Ext/ лежат только настройки вида».
         "markers": ("===PRESENTATION_EXT_LAYER", "HomePageWorkArea.xml",
                     "MainSectionCommandInterface.xml", "ClientApplicationInterface.xml",
-                    "ExtPicture", "TwoColumnsVariableWidth"),
+                    "ExtPicture", "TwoColumnsVariableWidth",
+                    "точный состав файлов Ext/", "OrdinaryApplication",
+                    "MobileClientSignature.bin", "StandaloneConfigurationContent.bin",
+                    "Picture.jpg", "Picture.svg"),
         "terms": ["HomePageWorkArea", "MainSectionPicture", "ClientApplicationInterface",
                   "Splash.xml", "рабочая область начальной страницы",
-                  "картинка основного раздела"],
+                  "картинка основного раздела", "Logo.xml", "Picture.jpg",
+                  "MobileClientSignature.bin", "StandaloneConfigurationContent.bin"],
         "foreign": FOREIGN_BASE + ["platform"],
     },
     {
@@ -228,6 +277,83 @@ LAYERS = [
         "terms": ["DefaultReportVariantForm", "DefaultDataHistoryVersionDifferencesForm",
                   "DefaultReportAppearanceTemplate", "основной макет оформления отчета",
                   "макет оформления отчета"],
+        "foreign": FOREIGN_BASE + ["platform"],
+    },
+    {
+        # Пункт 23 («Основной макет оформления отчета») — отдельная карточка, а не строка
+        # карточки основных форм. Причина: у макета оформления свой способ идентификации
+        # (признак TemplateType в ФАЙЛЕ РЕГИСТРАЦИИ, а не корневой тег содержимого) и свой
+        # источник перечня — предопределённые макеты ПЛАТФОРМЫ плюс общие макеты конфигурации
+        # (методичка i8101592; в базе — строки 5939-5942). Прежняя формулировка «это список
+        # макетов конкретной конфигурации» была ошибкой и её возврат обязан ронять проверку,
+        # поэтому маркеры держат измеренное: тип AppearanceTemplateArea и ссылку на стиль
+        # (style:FormTextColor) вместо литерального RGB — именно это объясняет «меняется
+        # цветовая гамма», и перечень предопределённых макетов платформы.
+        "name": "карточка макета оформления отчёта (пункт 23, AppearanceTemplate)",
+        "anchor": "configuration-report-appearance-template",
+        "category": "xml-format",
+        "markers": ("===APPEARANCE_TEMPLATE_CARD", "DataCompositionAppearanceTemplate",
+                    "AppearanceTemplateArea", "style:FormTextColor", "Арктика",
+                    "БиблиотекаМакетовОформленияКомпоновкиДанных"),
+        "terms": ["DataCompositionAppearanceTemplate", "Арктика",
+                  "библиотека макетов оформления компоновки данных",
+                  "макет оформления компоновки данных", "основной макет оформления отчета",
+                  "item 23"],
+        "foreign": FOREIGN_BASE + ["platform"],
+    },
+    # --- категории свойств конфигурации В (Разработка), Г (Справочная информация),
+    # --- Д (Совместимость) — замер 8 XML-выгрузок, 20.10.2026 -------------------------
+    # Маркеры держат измеренные значения и измеренные границы, а не общие слова: подмена
+    # замера (возврат формы «downloads.v8.1c.furtmplts», утверждение «значение теряется» там,
+    # где оно доходит, или наоборот) роняет проверку. Карточка В обязана называть и дефект V32
+    # (BriefInformation/DetailedInformation/Copyright/адресы заполнены в XML, но не доходили
+    # до колонок, потому что разбор ждал скалярный текст, а значение многоязычное), и его
+    # снятие узлом V39 (21.10.2026): шесть свойств корня пишутся jsonb-словарём. Маркеры
+    # называют именно механизм исправления — имя разбора `_multilang_value` и имя миграции
+    # `migrate_v39_multilang_configuration_text.sql`: карточка не может снова застыть в
+    # описании дефекта как в факте, и не может объявить исправление без ссылки на код,
+    # который его делает. Граница (UpdateCatalogAddress остаётся TEXT) в тексте карточки есть,
+    # но маркером не проверяется: её формулировка меняется вместе с формулировкой колонки.
+    {
+        "name": "карточка категории «Разработка» (Vendor, Version, UpdateCatalogAddress)",
+        "anchor": "property-configuration-development",
+        "category": "xml-format",
+        "markers": ("===PROPERTY_CARD", "configurations.vendor_name",
+                    "downloads.v8.1c.ru/tmplts/", "Показать информацию о программе",
+                    "дефект загрузчика V32", "_multilang_value",
+                    "migrate_v39_multilang_configuration_text.sql", "jsonb"),
+        "terms": ["Vendor", "UpdateCatalogAddress", "Поставщик конфигурации",
+                  "Адрес каталога обновлений", "каталог обновлений"],
+        "foreign": FOREIGN_BASE + ["platform"],
+    },
+    {
+        # Отдельная карточка, а не строка карточки В: у пункта Г.2 XML-представления нет
+        # вовсе (замер 55 имён свойств корня идентичен во всех восьми выгрузках), и это
+        # утверждение обязано сохраняться — маркер «СВОЙСТВА С ТАКИМ ИМЕНЕМ … НЕТ».
+        # Второй маркер — измеренное значение по умолчанию новой конфигурации 8.3.27.
+        "name": "карточка категории «Справочная информация» (IncludeHelpInContents + Г.2)",
+        "anchor": "property-configuration-help-contents",
+        "category": "xml-format",
+        "markers": ("===PROPERTY_CARD", "configurations.help_included",
+                    "СВОЙСТВА С ТАКИМ ИМЕНЕМ В Configuration.xml НЕТ", "55 имён"),
+        "terms": ["IncludeHelpInContents", "help_included", "Включать в содержание справки",
+                  "справочная информация конфигурации"],
+        "foreign": FOREIGN_BASE + ["platform"],
+    },
+    {
+        # Категория «Совместимость»: карточка держит измеренные токены перечислений
+        # (NotAutoFree, TaxiEnableVersion8_2, Version8_3_27), измеренные значения по умолчанию
+        # новой конфигурации 8.3.27 и названную слепую зону ObjectAutonumerationMode (колонки
+        # нет). Возврат выдуманных токенов (Version8_2 как измеренный) или молчание о слепой
+        # зоне роняют проверку.
+        "name": "карточка категории «Совместимость» (Д.1-Д.6, режимы и токены перечислений)",
+        "anchor": "property-configuration-compatibility",
+        "category": "xml-format",
+        "markers": ("===PROPERTY_CARD", "configurations.lock_mode_default",
+                    "ObjectAutonumerationMode", "КОЛОНКИ НЕТ", "EnableCheckModal"),
+        "terms": ["DataLockControlMode", "ObjectAutonumerationMode",
+                  "InterfaceCompatibilityMode", "NotAutoFree",
+                  "режим совместимости интерфейса", "EnableCheckModal"],
         "foreign": FOREIGN_BASE + ["platform"],
     },
 ]

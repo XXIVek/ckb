@@ -1,5 +1,19 @@
 # Правила работы с MCP сервером "1c-configurations-core"
 
+> **Дополнение 21.10.2026 (п. 28):** закрыт узел **V39** — многоязычные свойства заголовка
+> конфигурации. Шесть колонок `configurations` (`synonym`, `short_info`, `detailed_info`,
+> `copyright`, `vendor_url`, `config_url`) переведены `text → jsonb`, разбор читает их новым видом
+> `"multilang"` в словарь `{язык: текст}` тем же общим `_multi_text`, которым пишутся синонимы
+> внешнего объекта (узел V12). До узла пять колонок оставались `NULL` при заполненных значениях в
+> XML, шестой терял языки, кроме одного. Схема меняется парой: шаг 2 + аддитивная
+> `migrate_v39_multilang_configuration_text.sql` (текст, записанный до узла, упаковывается под
+> ключом `und`, а не `ru`). Дата решения (20.10.2026) и дата реализации (21.10.2026) различаются и
+> в текстах называются каждая своей. Замер восьми выгрузок (`tools/measure_multilang_properties.py`)
+> основанием выбрал **форму значения**, а не число языков: `языков>=2 = 0` везде, языки только `ru`.
+> Проверки: `tools/check_v32_zero_configuration.py` раздел `3d` (прогон **220 проверок, провалено 0**),
+> `_cmp_ddl.py` rc=0 (счётчики схемы не меняются — меняются типы, и их сверка ловит: `_cmp_ddl.py`
+> сравнивает колонки по `data_type`), `tools/check_xml_format_layer.py` — 225 проверок, провалено 0.
+>
 > **Дополнение 19.10.2026 (п. 27):** добавлен эталон **широты видов** — минимальная конфигурация
 > `MinCfg` (`Configurations\XML_files\MinCfg`, 34 каталога видов, индекс 196 записей); профиль
 > свойств корневого `Configuration.xml` (55 свойств) зафиксирован слоем знаний `xml-format` с якорем
@@ -193,11 +207,14 @@ MCP сервер `1c-configurations-core` (server_configurations_core.py) — э
 |---|---|---|
 | 1 | `src/ddl_external_report.sql` (генерация: `src/generate_ddl.py`) | `external_report`, `attributes`, `tabular_sections`, `forms`, `form_ext`, `templates`, витрины `v_form_elements`, `v_form_events` |
 | 1b | `src/ddl_enrichment.sql` (узел V17) | `config_aliases`, `config_snippets`, `config_snippet_dependencies`, `config_cross_references`, витрины `v_enrichment_targets`, `v_enrichment_objects`; все FK — на шаг 1, поэтому шаг 1b идёт строго после него |
-| 2 | `create_1c_configurations_db.sql` | `configurations`, `config_extensions`, `bsl_modules`, `configuration_objects` (узел V33 — индекс состава конфигурации по `ConfigDumpInfo.xml`: `configuration_id`, `object_type`, `object_name`, `child_type`, `parent_name`, `depth`, `object_id`, `uuid`, `config_version`; уникальность по `name` и по `object_id` — одна строка на объект метаданных в базе); таблица `external_processing` из файла удалена узлом V22 (заголовок обработки — строка `external_report` с `object_kind='external_processing'`) |
+| 2 | `create_1c_configurations_db.sql` | `configurations`, `config_extensions`, `bsl_modules`, `configuration_objects` (узел V33 — индекс состава конфигурации по `ConfigDumpInfo.xml`: `configuration_id`, `object_type`, `object_name`, `child_type`, `parent_name`, `depth`, `object_id`, `uuid`, `config_version`; уникальность по `name` и по `object_id` — одна строка на объект метаданных в базе); таблица `external_processing` из файла удалена узлом V22 (заголовок обработки — строка `external_report` с `object_kind='external_processing'`); шесть многоязычных колонок заголовка (`synonym`, `short_info`, `detailed_info`, `copyright`, `vendor_url`, `config_url`) с узла V39 имеют тип `jsonb` — словарь `{язык: текст}`; `update_url` остаётся `VARCHAR`: в выгрузке это простой текст без `v8:item` |
 
 Для уже существующей БД вместо шага 1b — аддитивная `migrate_v17_enrichment.sql` (тот же SQL +
 заполнение `target_key`/`target_uuid` у заполненных ранее таблиц); вместо создания
 `configuration_objects` шагом 2 — аддитивная `migrate_v33_configuration_objects.sql` (узел V33);
+для живых БД вместо смены типов шести многоязычных колонок `configurations` — аддитивная
+`migrate_v39_multilang_configuration_text.sql` (узел V39: `text → jsonb`, уже записанный текст
+упаковывается под ключом `und`, а не `ru` — настоящий язык этих строк потерян до узла);
 вместо ревизионных колонок и витрин `v_current_*` шагов 1 и 1b — аддитивная
 `migrate_v19_revisions.sql` (узел V19: колонки `revision_no`/`changed_at`/`changed_by`, снятие
 прежних уникальностей и FK `parent_uuid`, `UNIQUE (uuid, revision_no)`, индексы разрешения текущей
@@ -1967,4 +1984,75 @@ composite_ids=58 uuid_filled=138 configversion=114`, дублей `object_id` 0,
 V38; эталон `MinCfg` не входит в `tools/restore_reference_pair.py` (тот скрипт поднимает только
 эталонную пару внешних объектов) — при очистительных регрессах он перезагружается явным вызовом
 точки входа.
+
+### 28. Многоязычные свойства заголовка конфигурации терялись: пять колонок были NULL при заполненных значениях в XML (узел V39)
+**Файлы:** `create_1c_configurations_db.sql`, `migrate_v39_multilang_configuration_text.sql` (новый),
+`src/configuration_meta_parser.py` (новый вид поля `"multilang"` + `_multilang_value`),
+`src/external_table_writer.py` (`ConfigurationRowWriter`: вид колонок `jsonb_nullable`, снятие
+лимитов `MAX_LENGTHS`), `tools/measure_multilang_properties.py` (новый замерщик),
+`tools/check_v32_zero_configuration.py` (раздел `3d`), `tools/check_xml_format_layer.py`
+(отдельная запись слоя `configuration-reachability-section`)
+**Проблема:** 20.10.2026 слой `xml-format` зафиксировал противоречие двух своих строк: карточки
+утверждали, что `BriefInformation` / `DetailedInformation` / `Copyright` / `VendorInformationAddress` /
+`ConfigurationInformationAddress` читаются парсером и ложатся в колонки, а замер живой БД (тогда
+`configurations.id=28`, BGU2) дал `NULL` по всем пяти при заполненных значениях в XML. Причина в коде:
+`CONFIGURATION_FIELDS` задавал этим свойствам вид `"text"`, а `_text()` на составном элементе
+`<v8:item><v8:lang>…</v8:lang><v8:content>…</v8:content></v8:item>` возвращает `None`. Шестое
+свойство — `Synonym` — читалось (`_synonym_text`), но теряло все языковые формы, кроме одной:
+предупреждение об этом печаталось, а значение всё равно было одноязычным.
+**Статус:** ✅ **Реализовано 21.10.2026 (узел V39).** Решение принято 20.10.2026, реализация —
+следующим днём; дата замера и дата реализации в текстах называются каждая своей, подмена одной
+другой даёт ложную историю. Модель:
+- шесть свойств корня (`Synonym`, `BriefInformation`, `DetailedInformation`, `Copyright`,
+  `VendorInformationAddress`, `ConfigurationInformationAddress`) читаются новым видом поля
+  `"multilang"` в словарь `{язык: текст}`. Второй интерпретации языков у проекта нет:
+  `_multilang_value` вызывает общий `_multi_text` — тот же контракт, которым шесть писателей
+  внешнего объекта пишут `synonym jsonb` (узел V12). Своя интерпретация в модуле-вызывателе была бы
+  тем же классом дефекта, что собственный `max(revision_no)` до узла V19 или свой разбор причины
+  карантина до `src/quarantine.py`;
+- тип колонок — `jsonb`: шаг 2 (`create_1c_configurations_db.sql`) + аддитивная
+  `migrate_v39_multilang_configuration_text.sql` (пара обязательна, иначе `_cmp_ddl.py` зафиксировал
+  бы расхождение). Писатель использует вид `jsonb_nullable`, а **не** `jsonb_object`: пустое значение
+  остаётся `NULL`, поэтому «значения в выгрузке нет» отличается от «значение есть, но пустое»; пустой
+  `{}` в контракт не кладётся — ровно тот дефект, который узел и закрывает (пять колонок были `NULL`,
+  а не `{}`);
+- лимиты `MAX_LENGTHS` для шести колонок сняты: `copyright`/`vendor_url`/`config_url` были
+  `VARCHAR(500)` и резали бы значение по лимиту, а языковая форма делает длину непредсказуемой;
+  выдумать лимит в писателе — значит вернуть молчаливое ограничение;
+- миграция упаковывает уже записанный текст под ключом `und` (ISO-639 «язык не определён»), потому
+  что настоящий язык этих строк потерян до узла, и подписать его `ru` значило бы заявить то, чего
+  замер не подтверждал. При первой перезагрузке выгрузки (`force=True`) на место `und` приходят
+  настоящие ключи из `v8:lang`. Идемпотентность: колонка уже `jsonb` — пропускается (повторный
+  `ALTER` переупаковал бы готовый словарь ещё раз); таблицы нет — миграция ничего не делает;
+- две слепые зоны названы самим разбором, а не промолчаны: (1) структуры `v8:item`/`v8:lang` нет, а
+  текст есть — общий разбор относит значение к `ru`, и ключ `ru` выгрузкой не подтверждён;
+  (2) `v8:item` без `v8:lang` — общий разбор язык не выдумывает и такую форму отбрасывает. Замер
+  восьми выгрузок: второй формы нет ни в одной, но отбрасывать молча — значит повторить дефект V39
+  в миниатюре;
+- **границы названы явно:** `UpdateCatalogAddress` остаётся текстовой (`update_url VARCHAR(500)`) —
+  в восьми выгрузках это простой текст без `v8:item` (замер: `текст_без_item=6`);
+  `config_extensions.synonym` остаётся `TEXT` — вариант «расширение» заглушка (правило R7),
+  загрузчика у таблицы нет, менять тип нечем и второго контракта здесь не появляется.
+
+**Что замер НЕ подтверждает (формулировка, которую нельзя возвращать):** основанием `jsonb` служит
+**форма значения** — словарь по языкам, который в TEXT необратим, — а не наблюдение двух языков.
+`tools/measure_multilang_properties.py` по восьми выгрузкам (замер 21.10.2026) по каждому из шести
+свойств даёт: элемент есть везде (8/8), `v8:item` — 6–7 из 8, **`языков>=2 = 0` во всех**, языки
+только `{'ru': …}`, пустых значений 1–2. Утверждение «у реальных конфигураций два языка» ошибочно.
+**Проверка:** `python tools/check_v32_zero_configuration.py` — **220 проверок, провалено 0**
+(до узла было 156; новый раздел `3d` проверяет `v8:item → словарь`, запись в `jsonb`, отказ на
+не-jsonb значении, `force=True` с переносом имени и уборку за собой); `python _cmp_ddl.py` rc=0 —
+**481 колонка, 72 индекса/уникальных ограничения, 55 ограничений в `pg_constraint`, 12 витрин**,
+расхождений нет: смена типа ловится, потому что сверка сравнивает колонки вместе с `data_type`
+(`information_schema.columns`), а не только по именам; живая БД после загрузки держит значения
+словарями `{"ru": …}` (замер 21.10.2026: `configurations.id=151` BGU2, `id=152` MinCfg,
+`configuration_objects` — 122 360 строк = 122 164 BGU2 + 196 MinCfg, битых привязок внешних объектов
+0); доступность знания в слое — `python tools/check_xml_format_layer.py` — **225 проверок,
+провалено 0** (см. `.clinerules/1c-knowledge-base_Rule.md`); `python validate_project.py` —
+`ALL VALIDATIONS PASSED`; `python tools/check_mcp_tool_wiring.py` rc=0 (core 4, enrichment 21,
+export 1).
+**Что осталось вне объёма:** `config_extensions` (заглушка); содержимое видов метаданных — у объектов
+конфигурации `Synonym`/`Comment` в таблицы не пишутся вовсе (модель хранения дочерних объектов —
+группы A–H, п. 27, узел V38 не реализован), поэтому их многоязычность узлом V39 не затрагивается;
+33 несохранённых свойства корня (п. 27) остаются слепыми зонами до V38.
 

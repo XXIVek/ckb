@@ -22,9 +22,14 @@ MCP-инструментов нет), вариант определяется п
     `Русский`, DefaultRoles `Role.Х` → `Х`. Колонки называются default_language и
     main_roles, поэтому префикс вида метаданных в них не пишется (иначе читатель решил
     бы, что значение испорчено);
-  * synonym (TEXT): многоязычный синоним сохраняется одним текстом — язык ru, иначе
-    первый доступный; если языков больше одного, это называется предупреждением
-    (вторая языковая форма при скалярной колонке теряется), jsonb в TEXT не сериализуем;
+  * многоязычные значения (узел V39, 21.10.2026; дефект найден 20.10.2026): шесть свойств — Synonym, BriefInformation,
+    DetailedInformation, Copyright, VendorInformationAddress, ConfigurationInformationAddress —
+    читаются видом "multilang" в словарь {язык: текст} и пишутся в колонки JSONB. До узла V39
+    им стоял вид "text": _text() на составном элементе возвращает None, и пять колонок были
+    NULL при заполненных значениях в XML (замер по восьми выгрузкам). Общий разбор
+    (_multi_text) здесь не переопределяется: тот же контракт используют писатели внешнего
+    объекта; отсутствие структуры v8:item при непустом значении называется предупреждением,
+    потому что ключ ru в этом случае выгрузкой не подтверждён;
   * usage_purpose (VARCHAR(100)) / main_roles (TEXT[]): UsePurposes и DefaultRoles —
     перечни. Одно значение в скалярную колонку пишется как есть, несколько — через
     запятую с предупреждением (список в скалярной колонке помещается нечестно);
@@ -53,14 +58,23 @@ from external_meta_parser import (UUID_RE, _bool, _child, _children, _is_nil, _l
 
 # Свойства Properties конфигурации -> колонки таблицы configurations.
 # Вид: text | bool | ref (ссылочное значение -> имя) | ref_list (TEXT[]) |
-#      value_list (перечень v8:Value в скалярную колонку) | synonym (многоязычный текст).
+#      value_list (перечень v8:Value в скалярную колонку) |
+#      multilang (словарь {язык: текст} в колонку JSONB — узел V39).
 # Имена свойств взяты из живой выгрузки Config_NULL_XML (замер 17.10.2026), а не из
 # памяти об XSD: в выгрузке свойство называется InterfaceCompatibilityMode (не
 # "Compatability"), и у корня есть ConfigurationExtensionCompatibilityMode, которого
 # в колонках нет.
+# multilang — шесть свойств (Synonym, BriefInformation, DetailedInformation, Copyright,
+# VendorInformationAddress, ConfigurationInformationAddress): в выгрузке их значение —
+# составной элемент <v8:item><v8:lang>…</v8:lang><v8:content>…</v8:content></v8:item>.
+# До узла V39 им стоял вид "text", и разбор звал _text(): на составном элементе она
+# возвращает None, поэтому пять колонок были NULL при заполненных значениях в XML (замер
+# 20.10.2026 по восьми выгрузкам). Вид multilang читает тот же общий разбор _multi_text,
+# которым пользуются шесть писателей внешнего объекта (synonym jsonb) — второй
+# интерпретации языков в проекте быть не должно.
 CONFIGURATION_FIELDS = {
     "Name": ("name", "text"),
-    "Synonym": ("synonym", "synonym"),
+    "Synonym": ("synonym", "multilang"),
     "Comment": ("comment", "text"),
     "Version": ("version", "text"),
     "Vendor": ("vendor_name", "text"),
@@ -69,11 +83,11 @@ CONFIGURATION_FIELDS = {
     "ScriptVariant": ("embedded_language", "text"),
     "DefaultRoles": ("main_roles", "ref_list"),
     "DefaultLanguage": ("default_language", "ref"),
-    "BriefInformation": ("short_info", "text"),
-    "DetailedInformation": ("detailed_info", "text"),
-    "Copyright": ("copyright", "text"),
-    "VendorInformationAddress": ("vendor_url", "text"),
-    "ConfigurationInformationAddress": ("config_url", "text"),
+    "BriefInformation": ("short_info", "multilang"),
+    "DetailedInformation": ("detailed_info", "multilang"),
+    "Copyright": ("copyright", "multilang"),
+    "VendorInformationAddress": ("vendor_url", "multilang"),
+    "ConfigurationInformationAddress": ("config_url", "multilang"),
     "UpdateCatalogAddress": ("update_url", "text"),
     "IncludeHelpInContents": ("help_included", "bool"),
     "DataLockControlMode": ("lock_mode_default", "text"),
@@ -181,26 +195,50 @@ def _has_value(element):
     return bool(_text(element)) or bool(list(element))
 
 
-def _synonym_text(element, warnings):
-    """Многоязычный синоним -> один текст для колонки TEXT (synonym).
+def _multilang_value(element, warnings, prop_name=None, column=None):
+    """Многоязычное значение -> словарь {язык: текст} для колонки JSONB (узел V39).
 
-    Пустой синоним -> NULL (D-D). Языков больше одного -> предупреждение: вторая
-    языковая форма при скалярной колонке теряется, и сказать об этом обязан разбор,
-    а не читатель пустой колонки.
+    Разбор отдаёт ровно то, что отдал общий `_multi_text` — тот же контракт, которым шесть
+    писателей внешнего объекта пишут `synonym jsonb`. Второй интерпретации языков у проекта
+    быть не должно: ровно так же разъехались бы два способа читать синоним (узел V19 лечил
+    свой `max(revision_no)` в каждом модуле, карантин — свой разбор причины).
+
+    Пустой элемент, xsi:nil и отсутствующее свойство -> None (NULL в колонке): «значения
+    нет» и «значение пустое» различимы, пустой словарь в БД не пишется. Тот же ответ даёт
+    `v8:item` с пустым `v8:content` (или с `xsi:nil`) — пустой словарь `{}` в контракт не
+    кладётся, потому что читатель не отличил бы «пустое значение» от «значения нет».
+
+    О значении, которое общий разбор не берёт, обязан сказать разбор — молча пустая колонка
+    выглядит как «в конфигурации этого нет». Таких случая два, и оба названы:
+      * структуры `v8:item`/`v8:lang` нет, а собственный текст есть — общий разбор относит
+        значение к `ru` (его документированное поведение для сокращённых выгрузок), и ключ
+        `ru` в колонке выгрузкой не подтверждён;
+      * `v8:item` есть, но у него нет `v8:lang` — общий разбор язык не выдумывает и такую
+        форму отбрасывает. Замер восьми выгрузок: формы без языка нет ни в одной, но
+        отбрасывать молча — значит повторить дефект V39 в миниатюре.
     """
-    forms = _multi_text(element)
-    if not forms:
+    if element is None or _is_nil(element):
         return None
-    text = forms.get("ru") or next(iter(forms.values()), None)
-    if len(forms) > 1:
-        langs = ", ".join(sorted(forms))
-        chosen = "ru" if forms.get("ru") else "первый доступный"
+    forms = _multi_text(element)
+    items = _children(element, "item")
+    if not items:
+        if forms:
+            warnings.append(
+                f"Properties/{prop_name}: структуры v8:item/v8:lang нет, а значение есть — "
+                f"общий разбор отнёс его к языку 'ru'; в колонке {column} ключ ru "
+                "выгрузкой не подтверждён (слепая зона названа)"
+            )
+        return forms or None
+    lost = sorted({_text(_child(item, "content")) for item in items
+                   if _text(_child(item, "lang")) is None
+                   and _text(_child(item, "content"))})
+    if lost:
         warnings.append(
-            f"Synonym многоязычен ({len(forms)} языков: {langs}) — колонка synonym имеет "
-            f"тип TEXT, сохранён только язык {chosen}; остальные языки синонима в "
-            "конфигурациях не помещаются"
+            f"Properties/{prop_name}: {len(lost)} v8:item без v8:lang — общий разбор "
+            f"(_multi_text) язык не выдумывает и такую форму не берёт; в колонку {column} "
+            f"значение не попало: {lost[0][:60]!r}"
         )
-    return text
+    return forms or None
 
 
 def read_configuration_document(xml_path):
@@ -282,8 +320,8 @@ def _read_configuration(config):
                     f"колонка {column} скалярная — перечень сохранён через запятую; "
                     "для перечисления это нечестно (слепая зона названа)"
                 )
-        elif kind == "synonym":
-            value = _synonym_text(element, warnings)
+        elif kind == "multilang":
+            value = _multilang_value(element, warnings, name, column)
         else:
             value = _text(element)
         row[column] = value

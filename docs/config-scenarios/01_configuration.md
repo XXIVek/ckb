@@ -323,6 +323,19 @@ XSD **нет** для 19 каталогов BGU2: `CommandGroups`, `CommonAttrib
   слепые зоны), 5 колонок таблицы не заполняются осознанно (`NOT_FILLED_COLUMNS`). Профиль
   зафиксирован слоем знаний `xml-format`, якорь `property-profile-configuration`, регресс
   доступности — `tools/check_xml_format_layer.py` (проверок 85, провалено 0);
+- **достижимость маппинга (узел V39, 21.10.2026)**: из 22 маппингов шесть — `Synonym`,
+  `BriefInformation`, `DetailedInformation`, `Copyright`, `VendorInformationAddress`,
+  `ConfigurationInformationAddress` — давали `NULL` в `configurations` при заполненных значениях в
+  XML: значение многоязычное (`v8:item`/`v8:lang`), а разбор брал только первую форму. Узел это закрыл:
+  свойства читаются видом `"multilang"` в словарь `{язык: текст}`, колонки
+  `synonym`/`short_info`/`detailed_info`/`copyright`/`vendor_url`/`config_url` имеют тип `jsonb`
+  (шаг 2 `create_1c_configurations_db.sql` + аддитивная `migrate_v39_multilang_configuration_text.sql`);
+  `update_url` остаётся текстом — у `UpdateCatalogAddress` в восьми выгрузках нет `v8:item`. Замер
+  `tools/measure_multilang_properties.py`: элемент 8/8, `v8:item` 6–7, **языков ≥ 2 — 0**, языки только
+  `ru` — значит `jsonb` нужен из-за **формы** значения (словарь), а не из-за числа наблюдаемых языков.
+  Норматив узла — п. 28 `.clinerules/1c-configurations-core_Rule.md`; знание в слое — якорь
+  `configuration-reachability-section` (отдельная запись `LAYERS`, раздел `===REACHABILITY===` профиля).
+
 - **модули предопределённых программ**: свойства `AppModule`/`SessionModule`/`DataProcessorsModule`/
   `ExternalConnectionModule` в `Configuration.xml` **отсутствуют** — модуль задаётся только файлом
   в `Ext/`. Поэтому колонки `app_module_id`/`session_module_id`/`data_proc_module_id`/

@@ -59,7 +59,17 @@
 CREATE TABLE IF NOT EXISTS configurations (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) UNIQUE NOT NULL,
-    synonym TEXT,
+    -- Узел V39 (21.10.2026; дефект найден 20.10.2026): synonym и пять информационных свойств (short_info,
+    -- detailed_info, copyright, vendor_url, config_url) — многоязычные значения вида
+    -- <v8:item><v8:lang>…</v8:lang><v8:content>…</v8:content></v8:item>. В TEXT они
+    -- означали бы молчаливый выбор одного языка: замер 20.10.2026 показал, что пять
+    -- колонок вообще оставались NULL (разбор не читал составной элемент), а synonym
+    -- терял вторую языковую форму. Хранятся JSONB-словарём {язык: текст} — тот же
+    -- контракт, что `synonym` в таблицах внешнего объекта (узел V12).
+    -- Пустое значение — NULL, а не '{}': «значения нет» и «значение пустое» различимы.
+    -- Граница: config_extensions.synonym остаётся TEXT — загрузчика расширения нет
+    -- (вариант 2 заглушка), менять тип нечем.
+    synonym JSONB,
     comment TEXT,
     version VARCHAR(50),
     vendor_name VARCHAR(255),
@@ -75,11 +85,17 @@ CREATE TABLE IF NOT EXISTS configurations (
     ext_conn_module_id INT,
     mobile_functionality TEXT[],
     default_language VARCHAR(50),
-    short_info TEXT,
-    detailed_info TEXT,
-    copyright VARCHAR(500),
-    vendor_url VARCHAR(500),
-    config_url VARCHAR(500),
+    -- Узел V39: многоязычные свойства корня (BriefInformation, DetailedInformation,
+    -- Copyright, VendorInformationAddress, ConfigurationInformationAddress) — JSONB по
+    -- языкам. Прежние VARCHAR(500) к тому же резали бы значение по лимиту (отказ до
+    -- вставки), а языковая форма делает длину непредсказуемой: лимита у jsonb нет.
+    -- UpdateCatalogAddress (update_url) остаётся TEXT: в выгрузке это простой текст без
+    -- v8:item — замер 20.10.2026 по восьми XML подтверждает разницу форм.
+    short_info JSONB,
+    detailed_info JSONB,
+    copyright JSONB,
+    vendor_url JSONB,
+    config_url JSONB,
     update_url VARCHAR(500),
     help_included BOOLEAN DEFAULT FALSE,
     lock_mode_default VARCHAR(50),
