@@ -41,10 +41,23 @@ MCP-инструментов нет), вариант определяется п
     схеме, поэтому допустимые имена перечислены словарём `LIST_CHILD_TAGS` (ниже), а
     не вшиты в вызов;
   * свойства, для которых в configurations НЕТ колонки, не молчат: непустые называются
-    поимённо, пустые — числом (слепая зона названа, а не спрятана);
-  * ChildObjects, UsedMobileApplicationFunctionalities, InternalInfo корня
-    (ClassId/ObjectId) — тоже слепые зоны, они называются в warnings; колонок под них
-    в таблице конфигураций нет, и решение D-D их не заводить принято осознанно.
+    поимённо, пустые — числом (слепая зона названа, а не спрятана). С узла V42
+    (21.10.2026) таких свойств в выгрузке не остаётся: замер 8 выгрузок дал 55 свойств,
+    из них 22 имели колонку, 19 непусты и колонки не имели, 14 пусты везде — словарь
+    CONFIGURATION_FIELDS покрыл все 55, а колонки предопределённых модулей
+    (app_module_id, session_module_id, data_proc_module_id, ext_conn_module_id) и
+    mobile_functionality TEXT[] из заголовка сняты: свойства таких модулей в
+    <Properties> нет вовсе (узел V40), а направление связи задаёт
+    bsl_modules.configuration_id -> configurations.id. Механизм называния слепых зон
+    сохранён: он обязан работать для любого свойства, которого нет в словаре (выгрузка
+    будущего формата может дать и такие);
+  * ChildObjects и InternalInfo корня (ClassId/ObjectId) — по-прежнему слепые зоны, они
+    называются в warnings: колонок под них в таблице конфигураций нет, содержимое видов
+    метаданных относится к узлу V38, а пары ClassId/ObjectId — к слою xml-format.
+    UsedMobileApplicationFunctionalities слепой зоной больше не является (jsonb-колонка),
+    и разбор вместо предупреждения о слепой зоне сверяет число групп выгрузки с числом
+    сохранённых записей.
+
 
 Namespace-агностичные помощники (_local/_child/_children/_text/_bool/_multi_text/_ref)
 переиспользуются из src/external_meta_parser.py: разбор выгрузки во всём проекте ищет
@@ -95,18 +108,93 @@ CONFIGURATION_FIELDS = {
     "SynchronousPlatformExtensionAndAddInCallUseMode": ("ext_comp_sync_mode", "text"),
     "InterfaceCompatibilityMode": ("interface_compat_mode", "text"),
     "CompatibilityMode": ("compatibility_mode", "text"),
+    # ── узел V42 (21.10.2026): остальные свойства <Properties> корня ──────────────
+    # Замер 8 выгрузок (MinCfg, BP3, KomMag, BGU2, UNF3, UT11, ZUP31, Config_NULL):
+    # в Configuration.xml 55 свойств, из них 22 имели колонку, 19 непусты и колонки не
+    # имели, 14 пусты везде. Ниже — оставшиеся 33, покрытие становится 55/55: слепая
+    # зона по свойствам корня закрывается целиком, а не перекладывается в warnings.
+    # Вид выбран по ФОРМЕ значения, измеренной в выгрузке:
+    #   text          — скалярный токен или qualified-имя (значение читается ЦЕЛИКОМ,
+    #                   префикс вида метаданных не снимается: CommonForm./SettingsStorage./
+    #                   Style./Interface. несут смысл, в отличие от default_language и
+    #                   main_roles узла V32, где колонка названа именем);
+    #   bool          — флаг true/false;
+    #   json_records  — перечень записей: пары сохраняются только объектом, в TEXT[]
+    #                   (прежняя mobile_functionality) functionality и use разъехались бы.
+    # Скалярные токены перечислений (непусты во всех 8 выгрузках).
+    "ConfigurationExtensionCompatibilityMode":
+        ("configuration_extension_compatibility_mode", "text"),
+    "DatabaseTablespacesUseMode": ("database_tablespaces_use_mode", "text"),
+    "MainClientApplicationWindowMode": ("main_client_application_window_mode", "text"),
+    "ObjectAutonumerationMode": ("object_autonumeration_mode", "text"),
+    # Флаги: значения РАЗЛИЧАЮТСЯ по выгрузкам (BP3/BGU2/UNF3/UT11/ZUP31 — true,
+    # MinCfg/KomMag/Config_NULL — false), поэтому молча опускать их нельзя.
+    "UseManagedFormInOrdinaryApplication":
+        ("use_managed_form_in_ordinary_application", "bool"),
+    "UseOrdinaryFormInManagedApplication":
+        ("use_ordinary_form_in_managed_application", "bool"),
+    # Перечни записей (форма детей измерена): pairs functionality+use и
+    # mime/uti/ext/processingVariant/isCustom.
+    "UsedMobileApplicationFunctionalities":
+        ("mobile_application_functionalities", "json_records"),
+    "AllowedIncomingShareRequestTypes":
+        ("allowed_incoming_share_request_types", "json_records"),
+    # Qualified-имена (непусты частично — от 1 до 5 выгрузок из 8).
+    "CommonSettingsStorage": ("common_settings_storage", "text"),
+    "ReportsVariantsStorage": ("reports_variants_storage", "text"),
+    "ReportsUserSettingsStorage": ("reports_user_settings_storage", "text"),
+    "FormDataSettingsStorage": ("form_data_settings_storage", "text"),
+    "DynamicListsUserSettingsStorage": ("dynamic_lists_user_settings_storage", "text"),
+    "DefaultReportForm": ("default_report_form", "text"),
+    "DefaultReportVariantForm": ("default_report_variant_form", "text"),
+    "DefaultReportSettingsForm": ("default_report_settings_form", "text"),
+    "DefaultStyle": ("default_style", "text"),
+    "DefaultInterface": ("default_interface", "text"),
+    "DefaultConstantsForm": ("default_constants_form", "text"),
+    # Форма этих свойств НЕ подтверждена ни одной выгрузкой: элементы присутствуют,
+    # но пустые везде. Тип выбран по форме имени и по измеренному однотипному соседу
+    # (скалярное имя объекта метаданных -> text, перечень -> json_records). Это
+    # предположение, а не замер; если в выгрузке у свойства появятся дети неизвестной
+    # формы, json_records сохранит их как есть, а не потеряет.
+    "DefaultSearchForm": ("default_search_form", "text"),
+    "DefaultDynamicListSettingsForm": ("default_dynamic_list_settings_form", "text"),
+    "DefaultCollaborationSystemUsersChoiceForm":
+        ("default_collaboration_system_users_choice_form", "text"),
+    "DefaultDataHistoryChangeHistoryForm":
+        ("default_data_history_change_history_form", "text"),
+    "DefaultDataHistoryVersionDataForm":
+        ("default_data_history_version_data_form", "text"),
+    "DefaultDataHistoryVersionDifferencesForm":
+        ("default_data_history_version_differences_form", "text"),
+    "DefaultReportAppearanceTemplate": ("default_report_appearance_template", "text"),
+    "URLExternalDataStorage": ("url_external_data_storage", "text"),
+    "NamePrefix": ("name_prefix", "text"),
+    "MobileApplicationURLs": ("mobile_application_urls", "json_records"),
+    "RequiredMobileApplicationPermissions":
+        ("required_mobile_application_permissions", "json_records"),
+    "StandaloneConfigurationRestrictionRoles":
+        ("standalone_configuration_restriction_roles", "json_records"),
+    "AdditionalFullTextSearchDictionaries":
+        ("additional_full_text_search_dictionaries", "json_records"),
+    "Content": ("content", "json_records"),
 }
 
-# Колонки configurations, которые загрузчик V32 НЕ заполняет осознанно. Причина у каждой
-# называется прямо (её печатает карточка загрузки из этого словаря), потому что NULL
-# без причины читается как «в выгрузке этого нет», а это не всегда так.
-NOT_FILLED_COLUMNS = {
-    "app_module_id": "свойств предопределённых модулей (AppModule и др.) в выгрузке нет",
-    "session_module_id": "свойств предопределённых модулей в выгрузке нет",
-    "data_proc_module_id": "свойств предопределённых модулей в выгрузке нет",
-    "ext_conn_module_id": "свойств предопределённых модулей в выгрузке нет",
-    "mobile_functionality": "решение D-D: признак use в TEXT[] теряется, слепая зона названа",
-}
+
+# Колонки configurations, которые загрузчик НЕ заполняет ОСОЗНАННО (с причиной у каждой):
+# NULL без причины читается как «в выгрузке этого нет», а это не всегда так.
+# Узел V42 (21.10.2026) закрывает словарь: прежних пяти колонок в схеме больше нет.
+#   * app_module_id / session_module_id / data_proc_module_id / ext_conn_module_id —
+#     свойств предопределённых модулей в <Properties> нет вовсе (узел V40 подтвердил
+#     индексом: модуль корня существует записью Configuration.<Имя>.SessionModule и файлом
+#     Ext/<Имя>.bsl). Разрешать ссылку было не из чего, а направление связи уже задаёт
+#     bsl_modules.configuration_id -> configurations.id;
+#   * mobile_functionality TEXT[] — признак use терялся; свойство отдаёт значение парами,
+#     поэтому узел V42 кладёт его в mobile_application_functionalities jsonb.
+# Пустой словарь — честное состояние: незаполненных колонок не осталось. Ключ контракта
+# `not_filled_columns` сохранён: карточка загрузки и load_readiness() читают именно его, и
+# отсутствие ключа значило бы «проверка не выполнена», а не «проверено — пусто».
+NOT_FILLED_COLUMNS = {}
+
 
 CONFIGURATION_TITLE = "конфигурация"
 ROOT_CONFIGURATION_TAG = "Configuration"
@@ -241,7 +329,95 @@ def _multilang_value(element, warnings, prop_name=None, column=None):
     return forms or None
 
 
+def _json_fields(element):
+    """Дети элемента -> словарь «имя поля -> значение» (узел V42).
+
+    Имена берутся из выгрузки локально (`_local`), потому что префикс пространства имён
+    в одном и том же свойстве меняется от файла к файлу: `UsedMobileApplication…` отдаёт
+    детей в `ns1:` (managed-application/core), `AllowedIncomingShareRequestTypes` — сразу
+    в трёх пространствах. Поиск по полному имени потерял бы эти поля молча.
+    Повторяющееся имя собирается в список, а не перезаписывается: две одноимённые части
+    значения — это две части значения, а не одна.
+    """
+    fields = {}
+    for child in element:
+        name = _local(child.tag)
+        if not name:
+            continue
+        value = _json_field(child)
+        if name in fields:
+            existing = fields[name]
+            if not isinstance(existing, list):
+                fields[name] = [existing]
+            existing.append(value)
+        else:
+            fields[name] = value
+    return fields
+
+
+def _json_field(element):
+    """Значение поля записи: текст выгрузки, вложенная структура либо None (узел V42).
+
+    Тип из значения НЕ выводится: `true` остаётся строкой "true", `0` — строкой "0".
+    Вывести из текста bool/decimal — значит заставить колонку утверждать то, чего разбор
+    не проверял (тот же класс дефекта, что молчаливая обрезка по VARCHAR-лимиту до V39).
+    Пустой элемент и xsi:nil дают None: «поля нет» и «поле пустое» различимы в JSON.
+    """
+    if element is None or _is_nil(element):
+        return None
+    if list(element):
+        return _json_fields(element)
+    return _text(element)
+
+
+def _json_records(element, warnings=None, prop_name=None, column=None):
+    """Перечень записей свойства -> список для колонки JSONB (узел V42).
+
+    Зачем отдельный вид. Значения двух свойств измерены в выгрузке и имеют форму
+    повторяющихся групп:
+      * `UsedMobileApplicationFunctionalities` -> `<functionality>` c полями
+        `functionality` + `use`;
+      * `AllowedIncomingShareRequestTypes` -> `<Value xsi:type="app:…">` c полями
+        `mime`/`uti`/`ext`/`processingVariant`/`isCustom`.
+    Прежняя колонка `mobile_functionality TEXT[]` такую форму не сохраняла: строки
+    перечня и флаги `use` — два разных ряда, и в массиве они разъехались бы по позициям
+    (именно поэтому решение D-D колонку не заполнять). Объект в JSONB держит пару
+    вместе; пустая группа остаётся пустым объектом, а не исчезает.
+
+    Конвертер НЕ требует знать состав детей заранее — он нужен и тем перечням, чья форма
+    ни одной выгрузкой не подтверждена (14 свойств пусты везде). Поэтому:
+      * группа с детьми -> объект по её детям (имена полей — из выгрузки);
+      * одиночный скаляр-ребёнок -> его текст (строкой в списке): перечень имён тоже
+        значение, и потерять его молча — значит повторить дефект V39 в миниатюре;
+      * дети есть, а извлечь нечего -> предупреждение, а не пустой NULL: пустая колонка
+        перечня читается как «в конфигурации этого нет».
+    Пустой элемент, xsi:nil и отсутствующее свойство -> None (NULL в колонке).
+    """
+    if element is None or _is_nil(element):
+        return None
+    records = []
+    for entry in element:
+        if list(entry):
+            record = _json_fields(entry)
+            records.append(record if record else None)
+        else:
+            value = _text(entry)
+            if value is not None:
+                records.append(value)
+    if records:
+        return records
+    if list(element) and warnings is not None:
+        child_names = sorted({(_local(child.tag) or "<пустое имя>") for child in element})
+        warnings.append(
+            f"Properties/{prop_name}: детей перечня {len(list(element))} "
+            f"(имена: {', '.join(child_names)}), а в колонку {column} не попало ничего — "
+            "форма перечня не разобрана (слепая зона названа)"
+        )
+    return None
+
+
 def read_configuration_document(xml_path):
+
     """Прочитать XML и вернуть элемент Configuration с его uuid; ошибки — форматом отказа."""
     try:
         root = ET.parse(str(xml_path)).getroot()
@@ -322,7 +498,12 @@ def _read_configuration(config):
                 )
         elif kind == "multilang":
             value = _multilang_value(element, warnings, name, column)
+        elif kind == "json_records":
+            # узел V42: перечень записей сохраняется списком объектов — пары
+            # (functionality + use) в скаляре или TEXT[] разъехались бы
+            value = _json_records(element, warnings, name, column)
         else:
+
             value = _text(element)
         row[column] = value
         if value not in (None, "", [], {}, False):
@@ -371,9 +552,11 @@ def parse_configuration_meta(xml_path):
             "непустые слепые зоны перечислены строками выше"
         )
 
-    # ChildObjects: у «нулевой» конфигурации их нет, у живой — есть, и ни один объект
-    # метаданных в БД не сохраняется (таблиц объектов нет, узел V18). Назвать это обязан
-    # разбор, а не молчаливый нулевой счётчик в карточке.
+    # ChildObjects: у «нулевой» конфигурации их нет, у живой — есть. Ни одно СОДЕРЖИМОЕ
+    # объекта метаданных (реквизиты, формы, макеты, модули) в таблицы не пишется: индекс
+    # состава (`configuration_objects`, узел V33) перечисляет объекты и их идентификаторы,
+    # но не их свойства — содержимое видов метаданных относится к узлу V38 (группы A–H).
+    # Назвать это обязан разбор, а не молчаливый нулевой счётчик в карточке.
     child_objects = _child(config, "ChildObjects")
     child_counts = {}
     for element in list(child_objects) if child_objects is not None else []:
@@ -390,12 +573,17 @@ def parse_configuration_meta(xml_path):
             )
         else:
             warnings.append(
-                f"ChildObjects/{tag}: {count} — объекты метаданных конфигурации в БД не "
-                "сохраняются (таблиц объектов нет, узел V18)"
+                f"ChildObjects/{tag}: {count} — объекты перечислены индексом состава "
+                "(configuration_objects, узел V33), но их содержимое в БД не сохраняется "
+                "(содержимое видов метаданных — узел V38)"
             )
 
-    # UsedMobileApplicationFunctionalities: решение D-D — не сохранять; признак use в
-    # TEXT[] теряется, и об этом говорится прямо.
+    # UsedMobileApplicationFunctionalities: с узла V42 значение сохраняется в
+    # mobile_application_functionalities jsonb (прежняя TEXT[] теряла признак use, и
+    # решение D-D состоял в том, чтобы колонку не заполнять). Теперь сверка обязана
+    # сравнить число групп выгрузки с числом сохранённых записей: расхождение значит,
+    # что часть формы детей не разобрана, а молчать об этом нельзя (тот же принцип, что
+    # с предупреждением про «значений извлечено 0» у ref_list).
     mobile_root = _child(properties, "UsedMobileApplicationFunctionalities")
     mobile_total, mobile_use_true = 0, []
     for entry in list(mobile_root) if mobile_root is not None else []:
@@ -404,14 +592,14 @@ def parse_configuration_meta(xml_path):
         mobile_total += 1
         if _bool(_child(entry, "use")):
             mobile_use_true.append(_text(_child(entry, "functionality")) or "без имени")
-    if mobile_total:
-        detail = (f", use=true у {len(mobile_use_true)} ({', '.join(mobile_use_true)})"
-                  if mobile_use_true else ", все флаги use=false")
+    mobile_stored = row.get("mobile_application_functionalities") or []
+    if mobile_total and len(mobile_stored) != mobile_total:
         warnings.append(
-            f"UsedMobileApplicationFunctionalities: {mobile_total} записей{detail} — "
-            "колонка mobile_functionality не заполняется (решение D-D): признак use в "
-            "TEXT[] теряется, слепая зона названа"
+            f"UsedMobileApplicationFunctionalities: групп с парой functionality/use в "
+            f"выгрузке {mobile_total}, в колонку mobile_application_functionalities "
+            f"попало {len(mobile_stored)} — часть формы детей не разобрана"
         )
+
 
     # InternalInfo корня: пары ClassId/ObjectId предопределённых ссылок платформы.
     # Колонок под них нет; версии UUID считаются, потому что часть этих идентификаторов
@@ -457,8 +645,12 @@ def parse_configuration_meta(xml_path):
             "properties_unstored_nonempty": unstored_nonempty,
             "properties_unstored_empty": unstored_empty,
             "child_objects": child_counts,
-            "mobile_functionality_total": mobile_total,
-            "mobile_functionality_use_true": mobile_use_true,
+            # узел V42: ключи переименованы — колонки `mobile_functionality` больше нет,
+            # а счётчики теперь описывают и выгрузку, и то, что реально легло в jsonb.
+            "mobile_functionalities_total": mobile_total,
+            "mobile_functionalities_use_true": mobile_use_true,
+            "mobile_functionalities_stored": len(mobile_stored),
+
             "root_identifier_pairs": identifier_pairs,
             "root_identifier_versions": version_counts,
         },

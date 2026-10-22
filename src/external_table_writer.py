@@ -684,11 +684,30 @@ class ConfigurationRowWriter(TableRowWriter):
     (`information_schema.columns`, 17.10.2026). В спецификации НЕТ:
 
       * `id` (bigserial), `created_at`/`updated_at` (`DEFAULT NOW()`) — их ведёт схема;
-      * `app_module_id`, `session_module_id`, `data_proc_module_id`,
-        `ext_conn_module_id`, `mobile_functionality` — слепые зоны (решение D-D):
-        читались в `Configuration.xml`, но не разобраны, поэтому остаются NULL;
       * `origin_path`, `origin_kind` — провенанс для конфигурации не вводится
         (решение D-C по умолчанию, граница узла V31): путь источника в БД не пишется.
+
+    Узел V42 (21.10.2026): из спецификации сняты пять колонок — `app_module_id`,
+    `session_module_id`, `data_proc_module_id`, `ext_conn_module_id`,
+    `mobile_functionality`. Их нет и в таблице (миграция
+    `migrate_v42_configuration_header_fields.sql`):
+      * четырёх колонок предопределённых модулей — потому что свойств этих модулей в
+        `<Properties>` корневого `Configuration.xml` нет вовсе (узел V40 подтвердил это
+        индексом состава: модуль корня существует записью `Configuration.<Имя>.SessionModule`
+        и файлом `Ext/<Имя>.bsl`). Разрешать ссылку было не из чего, поэтому колонки были
+        вечно NULL и числились слепыми зонами не из лени. Направление связи уже задаёт
+        `bsl_modules.configuration_id -> configurations.id` — оно и остаётся единственным;
+      * `mobile_functionality TEXT[]` — потому что значение
+        `UsedMobileApplicationFunctionalities` отдаётся парами (`functionality` + `use`),
+        и в массиве строк признак `use` терялся. То же значение теперь пишется в
+        `mobile_application_functionalities` (jsonb), где пара сохраняется.
+
+    Добавлены 33 колонки — остальные свойства `<Properties>` корня (см. шапку
+    `CONFIGURATION_FIELDS` в `configuration_meta_parser.py`: замер 8 выгрузок, покрытие
+    свойств становится 55/55). Виды: `text` (скалярные токены перечислений и
+    qualified-имена — значение целиком, префикс вида не снимается), `bool` (флаги),
+    `jsonb_nullable` (перечни записей).
+
 
     Колонки, которых в таблице нет вовсе (`version` есть, `update_address`/`help_url`/
     `mobile_functions` — нет), писатель не выдумывает: в `configurations` ровно те
@@ -738,7 +757,55 @@ class ConfigurationRowWriter(TableRowWriter):
         "ext_comp_sync_mode": "text",
         "interface_compat_mode": "text",
         "compatibility_mode": "text",
+        # Узел V42 (21.10.2026): остальные свойства <Properties> корня. Порядок и имена —
+        # те же, что в словаре CONFIGURATION_FIELDS и в шаге 2 установки; колонок
+        # предопределённых модулей и mobile_functionality в спецификации нет, потому что
+        # их нет в таблице.
+        # Скалярные токены перечислений (непусты во всех восьми выгрузках).
+        "configuration_extension_compatibility_mode": "text",
+        "database_tablespaces_use_mode": "text",
+        "main_client_application_window_mode": "text",
+        "object_autonumeration_mode": "text",
+        # Флаги: значения различаются по выгрузкам (BP3/BGU2/UNF3/UT11/ZUP31 — true,
+        # MinCfg/KomMag/Config_NULL — false), поэтому они пишутся, а не опускаются.
+        "use_managed_form_in_ordinary_application": "bool",
+        "use_ordinary_form_in_managed_application": "bool",
+        # Перечни записей — jsonb_nullable: пустое значение остаётся NULL. Вид тот же,
+        # что у многоязычных колонок V31/V39: `'[]'` читалось бы как «перечень есть, но
+        # пустой», а это не то же самое, что «свойство пустое во всех выгрузках».
+        "mobile_application_functionalities": "jsonb_nullable",
+        "allowed_incoming_share_request_types": "jsonb_nullable",
+        # Qualified-имена объектов метаданных: значение пишется ЦЕЛИКОМ с префиксом вида
+        # (CommonForm./SettingsStorage./Style./Interface.) — префикс несёт смысл.
+        "common_settings_storage": "text",
+        "reports_variants_storage": "text",
+        "reports_user_settings_storage": "text",
+        "form_data_settings_storage": "text",
+        "dynamic_lists_user_settings_storage": "text",
+        "default_report_form": "text",
+        "default_report_variant_form": "text",
+        "default_report_settings_form": "text",
+        "default_style": "text",
+        "default_interface": "text",
+        "default_constants_form": "text",
+        # Форма этих свойств ни одной выгрузкой не подтверждена (свойства пусты везде):
+        # тип — предположение по форме имени и по измеренному однотипному соседу.
+        "default_search_form": "text",
+        "default_dynamic_list_settings_form": "text",
+        "default_collaboration_system_users_choice_form": "text",
+        "default_data_history_change_history_form": "text",
+        "default_data_history_version_data_form": "text",
+        "default_data_history_version_differences_form": "text",
+        "default_report_appearance_template": "text",
+        "url_external_data_storage": "text",
+        "name_prefix": "text",
+        "mobile_application_urls": "jsonb_nullable",
+        "required_mobile_application_permissions": "jsonb_nullable",
+        "standalone_configuration_restriction_roles": "jsonb_nullable",
+        "additional_full_text_search_dictionaries": "jsonb_nullable",
+        "content": "jsonb_nullable",
     }
+
 
     # VARCHAR(N) живой схемы: значение длиннее — отказ с названными колонками, а не
     # обрезка (молча укоротить реквизит = соврать о содержимом конфигурации).
@@ -760,7 +827,38 @@ class ConfigurationRowWriter(TableRowWriter):
         "ext_comp_sync_mode": 100,
         "interface_compat_mode": 100,
         "compatibility_mode": 50,
+        # Узел V42: лимиты совпадают с типом колонки в шаге 2 (VARCHAR(50) для токенов
+        # перечислений, VARCHAR(255) для qualified-имён). Без записи в этот словарь
+        # переполнение колонки показалось бы ошибкой psycopg2 без имён полей, а контракт
+        # писателя — отказать ДО транзакции и назвать колонки. Замер 8 выгрузок: ни одно
+        # значение лимита не превышает (самое длинное — qualified-имена форм/хранилищ),
+        # поэтому лимит здесь — защита от будущего значения, а не подгонка под прошлое.
+        "configuration_extension_compatibility_mode": 50,
+        "database_tablespaces_use_mode": 50,
+        "main_client_application_window_mode": 50,
+        "object_autonumeration_mode": 50,
+        "common_settings_storage": 255,
+        "reports_variants_storage": 255,
+        "reports_user_settings_storage": 255,
+        "form_data_settings_storage": 255,
+        "dynamic_lists_user_settings_storage": 255,
+        "default_report_form": 255,
+        "default_report_variant_form": 255,
+        "default_report_settings_form": 255,
+        "default_style": 255,
+        "default_interface": 255,
+        "default_constants_form": 255,
+        "default_search_form": 255,
+        "default_dynamic_list_settings_form": 255,
+        "default_collaboration_system_users_choice_form": 255,
+        "default_data_history_change_history_form": 255,
+        "default_data_history_version_data_form": 255,
+        "default_data_history_version_differences_form": 255,
+        "default_report_appearance_template": 255,
+        "url_external_data_storage": 255,
+        "name_prefix": 255,
     }
+
 
     @classmethod
     def overlong_fields(cls, row: dict) -> list:

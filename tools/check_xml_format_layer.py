@@ -22,7 +22,8 @@ r"""tools/check_xml_format_layer.py — слой знаний формата XML
 идентификатора (ClassId) находится только по алиасу. Это не дефект проверки, а причина, по
 которой алиасы имени обязательны: случай фиксируется, чтобы ограничение не «исчезло» из правил.
 
-Слои (LAYERS, 16): профиль свойств ExternalDataProcessor; профиль свойств Configuration.xml
+Слои (их перечисляет список LAYERS ниже; итоговое число проверок печатает сам прогон,
+в тексте этого файла оно не является текущим): профиль свойств ExternalDataProcessor; профиль свойств Configuration.xml
 (55 свойств корня конфигурации: что маппится в configurations, что без колонки, а что не
 заполняется осознанно — узлы V32/V33, замер MinCfg 19.10.2026); карточки отдельных свойств
 корня (DefaultRunMode и др.); общие свойства Name / Synonym / Comment; профиль идентификаторов
@@ -36,6 +37,10 @@ Logo, Splash, Help…, точный состав каталога по 8 выг�
 (configuration-report-appearance-template: предопределённые макеты платформы против общих
 макетов конфигурации с TemplateType=DataCompositionAppearanceTemplate, содержимое
 AppearanceTemplate со ссылками на стили вместо RGB) — замер 8 XML-выгрузок, 20.10.2026.
+Слой дополнен карточкой состава заголовка конфигурации в БД (configuration-header-full-columns-v42:
+полные 55 свойств корня читаются и пишутся в configurations — 55 колонок, из них 13 jsonb для
+структурных значений; карточка опирается на замеры V39/V40 и на проверку
+tools/check_v42_configuration_header.py) — узел V42, 21.10.2026.
 Всё это категории xml-format; профиль версий UUID — категории platform (его сниппет намеренно
 размечен и xml-format, поэтому xml-format у него в «чужих» категориях не проверяется).
 
@@ -47,7 +52,11 @@ AppearanceTemplate со ссылками на стили вместо RGB) — �
 С узла V39 (21.10.2026) к маркерам профиля добавлены раздел достижимости `===REACHABILITY===`
 и значение провенанса `dump8`: профиль обязан различать описание свойства в XML и то, доходит
 ли значение до колонки (шесть многоязычных свойств корня с V39 пишутся jsonb-словарём, а не
-теряются).
+теряются). С узла V42 (21.10.2026) маркером покрытия является `found=55 mapped=55` и раздел
+`===V42_ALL_MAPPED`, а не прежний `found=55 mapped=22`: покрытие свойств полное, и маркер,
+описывающий состояние «до узла», перестал быть истиной (прежние числа остаются в тексте только
+как датированная история). У карточки «Совместимость» прежний маркер слепой зоны «КОЛОНКИ НЕТ»
+заменён именами колонок, которые V42 добавил, — по той же причине.
 
 Карточки представления заведены тремя строками, а не одной, потому что у них разные источники
 истины: «рабочая область», «интерфейс команд», «логотип», «заставка» в <Properties> не лежат
@@ -88,10 +97,15 @@ LAYERS = [
         "foreign": FOREIGN_BASE + ["platform"],
     },
     {
-        # Профиль свойств корня конфигурации (замер MinCfg, 19.10.2026): 55 свойств,
-        # 22 из них маппятся в configurations, 33 без колонки (6 непустых — слепые зоны),
-        # 5 колонок не заполняются осознанно. Маркеры счётчиков и раздела модулей —
-        # доказательство, что это профиль конфигурации, а не внешнего объекта.
+        # Профиль свойств корня конфигурации (замер MinCfg, 19.10.2026): 55 свойств. До V42
+        # 22 из них маппились в configurations, 33 не имели колонки, 5 колонок не заполнялись
+        # осознанно. С узла V42 (21.10.2026) покрытие полное: found=55 mapped=55, unmapped=0,
+        # not_filled_columns=0 (словарь NOT_FILLED_COLUMNS пуст — пустой словарь это состояние,
+        # ключ контракта сохранён). Числа 22/33/5 остаются в тексте только как датированная
+        # история, поэтому маркером слоя является актуальный счётчик 55/55 и раздел
+        # ===V42_ALL_MAPPED: маркер обязан описывать текущее состояние карточки, а не то,
+        # каким она была до узла. Маркеры счётчиков и раздела модулей — доказательство, что
+        # это профиль конфигурации, а не внешнего объекта.
         # Маркеры V39 (раздел достижимости, provenance dump8) в ЭТОЙ записи не ставят: якорь
         # профиля разрешается тремя строками (5917 профиль + объединённые карточки модулей
         # 5927 и хранилищ 5928), а проверка маркеров обязана пройти в каждой из них — у
@@ -102,7 +116,8 @@ LAYERS = [
         "anchor": "property-profile-configuration",
         "category": "xml-format",
         "markers": ("===PROPERTY_PROFILE", "path|kind|required|default|allowed|provenance",
-                    "===MAPPING_SUMMARY", "found=55 mapped=22", "===ROOT_EXT_MODULES"),
+                    "===MAPPING_SUMMARY", "found=55 mapped=55", "===V42_ALL_MAPPED",
+                    "===ROOT_EXT_MODULES"),
         "terms": ["ConfigurationExtensionCompatibilityMode", "MainClientApplicationWindowMode",
                   "ObjectAutonumerationMode", "DatabaseTablespacesUseMode",
                   "configurations.short_info", "configurations.vendor_url"],
@@ -126,6 +141,38 @@ LAYERS = [
                     "migrate_v39_multilang_configuration_text.sql"),
         "terms": ["достижимость свойств конфигурации", "что доходит до колонки",
                   "configuration-reachability-section"],
+        "foreign": FOREIGN_BASE + ["platform"],
+    },
+    {
+        # Узел V42 (21.10.2026): заголовок конфигурации загружается полностью. До узла из 55
+        # свойств корня колонку имели 22, ещё 19 были непустыми без колонки (слепая зона),
+        # 5 колонок числились незаполняемыми, а TEXT[] терял признак use у групп перечня.
+        # Карточка описывает ТЕКУЩЕЕ состояние: 55/55 маппингов, 33 новые колонки, снятые 5,
+        # перечень со сложной формой значения идёт видом разбора json_records в jsonb (7 колонок).
+        # Маркеры называют артефакты кода (имя миграции, имя проверки узла, имя вида разбора),
+        # а не статусные пометки — урок узла V39: маркер обязан доказывать реализацию, а не
+        # наличие строки в тексте. Запись заведена ОТДЕЛЬНО от профиля и от раздела достижимости:
+        # якорь профиля разрешается строками 5917/5927/5928, а карточка узла — своя строка со
+        # своим якорем (правило «один алиас — один слой»). Возврат в карточку формулировки
+        # «33 без колонки», потеря признака use у functionalities или подмена вида перечня на
+        # TEXT[] — провал проверки.
+        "name": "узел V42: полный заголовок конфигурации (33 колонки, перечни в jsonb)",
+        # ЯКОРЬ ОБЯЗАН РАЗРЕШАТЬСЯ ТОЛЬКО В СТРОКУ УЗЛА: проверка требует маркеры от каждой
+        # строки, которую отдаёт якорь (правило узла V39). Термин
+        # «configuration-header-v42-columns» ведёт и в карточки профиля (5917/5927/5928) —
+        # он оставлен в terms как перекрёстный, но якорем быть не может.
+        "anchor": "configuration-header-full-columns-v42",
+        "category": "xml-format",
+        "markers": ("===V42_HEADER_SCOPE", "===WHY_JSONB", "===PAIRS", "===CHECK",
+                    "json_records", "CONFIGURATION_FIELDS",
+                    "migrate_v42_configuration_header_fields.sql",
+                    "check_v42_configuration_header.py",
+                    "found=55 mapped=55 unmapped=0"),
+        "terms": ["UsedMobileApplicationFunctionalities", "AllowedIncomingShareRequestTypes",
+                  "MobileApplicationURLs", "StandaloneConfigurationRestrictionRoles",
+                  "AdditionalFullTextSearchDictionaries", "json_records",
+                  "configuration-header-v42-columns",
+                  "configuration-header-full-columns-v42"],
         "foreign": FOREIGN_BASE + ["platform"],
     },
     {
@@ -342,18 +389,44 @@ LAYERS = [
     },
     {
         # Категория «Совместимость»: карточка держит измеренные токены перечислений
-        # (NotAutoFree, TaxiEnableVersion8_2, Version8_3_27), измеренные значения по умолчанию
-        # новой конфигурации 8.3.27 и названную слепую зону ObjectAutonumerationMode (колонки
-        # нет). Возврат выдуманных токенов (Version8_2 как измеренный) или молчание о слепой
-        # зоне роняют проверку.
+        # (NotAutoFree, TaxiEnableVersion8_2, Version8_3_27) и измеренные значения по умолчанию
+        # новой конфигурации 8.3.27. До V42 ObjectAutonumerationMode был названной слепой зоной
+        # — колонки под значение не было, и маркером слоя была формулировка «КОЛОНКИ НЕТ». С узла
+        # V42 (21.10.2026) это утверждение устарело: колонки object_autonumeration_mode,
+        # configuration_extension_compatibility_mode и database_tablespaces_use_mode добавлены
+        # (миграция migrate_v42_configuration_header_fields.sql), поэтому маркером является имя
+        # колонки, а не прежняя слепая зона: карточка не должна застыть в описании состояния до
+        # узла. Возврат выдуманных токенов (Version8_2 как измеренный) или потеря имени колонки
+        # роняют проверку.
         "name": "карточка категории «Совместимость» (Д.1-Д.6, режимы и токены перечислений)",
         "anchor": "property-configuration-compatibility",
         "category": "xml-format",
         "markers": ("===PROPERTY_CARD", "configurations.lock_mode_default",
-                    "ObjectAutonumerationMode", "КОЛОНКИ НЕТ", "EnableCheckModal"),
+                    "ObjectAutonumerationMode", "configurations.object_autonumeration_mode",
+                    "configurations.configuration_extension_compatibility_mode",
+                    "configurations.database_tablespaces_use_mode", "EnableCheckModal"),
         "terms": ["DataLockControlMode", "ObjectAutonumerationMode",
                   "InterfaceCompatibilityMode", "NotAutoFree",
                   "режим совместимости интерфейса", "EnableCheckModal"],
+        "foreign": FOREIGN_BASE + ["platform"],
+    },
+
+    {
+        # Словарь «вид метаданных → слот модуля» (узел V40, замер 21.10.2026, восемь выгрузок).
+        # Маркеры — замерные числа и имена артефактов замера (_v40_slots_table.py, ключ
+        # slot_families): они отличают словарь от пересказа и не дают карточке «забыть», что
+        # модуль формы слотом вида не является (записей модуля формы в индексе — 0 при 28 896
+        # файлах) и что индекс шире файлов на пустые модули (41 582 против 41 511). Возврат
+        # CommonForm в словарь слотов видов или подмена числа пустых модулей числом пар — провал.
+        "name": "словарь «вид → слот модуля» (object_module против form_module, узел V40)",
+        "anchor": "configuration-module-slot-dictionary",
+        "category": "xml-format",
+        "markers": ("===MODULE_SLOT_LAYER", "===RULE:TWO_CLASSES",
+                    "===EVIDENCE:FORM_MODULE_NOT_A_KIND_SLOT", "===GROUP_C_IS_INDEXED",
+                    "_v40_slots_table.py", "slot_families", "28 896", "41 582"),
+        "terms": ["ObjectModule", "ManagerModule", "RecordSetModule", "ValueManagerModule",
+                  "CommandModule", "configuration-module-slot-dictionary",
+                  "CommonForm является формой"],
         "foreign": FOREIGN_BASE + ["platform"],
     },
 ]

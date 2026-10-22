@@ -1,5 +1,69 @@
 # Правила работы с MCP сервером "1c-configurations-core"
 
+> **Дополнение 21.10.2026 (п. 31):** закрыт узел **V42** — заголовок конфигурации сохраняет
+> свойства корневого `Configuration.xml` полностью: словарь `CONFIGURATION_FIELDS` разрешает все
+> 55 свойств (22 прежних + 33 новых), в `configurations` добавлено 33 колонки, снято 5
+> (четыре колонки предопределённых модулей V32 + `mobile_functionality TEXT[]`, чьё значение
+> теперь ложится в `mobile_application_functionalities jsonb`), чистый прирост +28
+> (`migrate_v42_configuration_header_fields.sql`), слепая зона из 33 несохранённых свойств (п. 27)
+> закрыта. Тип `jsonb` применён там, где значение составное: пары `functionality`+`use`
+> (`mobile_application_functionalities`), `mime`/`uti`/`ext`/`processingVariant`/`isCustom`
+> (`allowed_incoming_share_request_types`), перечни URL и разрешений мобильного приложения,
+> `content` — общий разбор-конвертер перечней без предзнания состава детей.
+> Четыре колонки V32 (`app_module_id`, `session_module_id`, `data_proc_module_id`,
+> `ext_conn_module_id`) **удалены**: у предопределённых модулей в XML свойств нет, значение
+> неразрешимо из выгрузки (п. 27), а неразрешимое состояние в модели — это ложь о данных
+> (тот же класс дефекта, что `NULL` при заполненном `v8:content` до V39); их заполнение —
+> группа C узла V38. `mobile_functionality TEXT[]` снят: в массиве строк признак `use` терялся.
+> Живая схема `configurations` — **59 колонок** (37 character varying, 13 jsonb, 3 boolean,
+> 2 timestamp, 1 text, 1 uuid, 1 integer, 1 ARRAY);
+> `_cmp_ddl.py` — **509 колонок, 72 индекса/уникальных ограничения, 55 ограничений, 12 витрин**,
+> расхождений нет. Проверки: `tools/check_v42_configuration_header.py` (43 проверки, провалено 0,
+> пропущено 0, справок 8; число — замер конкретного прогона и меняется с составом фикстуры);
+> `tools/check_v32_zero_configuration.py` переведён с перечней колонок на динамический разбор
+> контракта парсера (231 проверка, провалено 0). Слой `xml-format`: карточка профиля — `found=55
+> mapped=55`, добавлен якорь `configuration-header-full-columns-v42` (снимает неоднозначность
+> маркеров `found=55 mapped=22`/`NOT-FILLED`, которые прежний якорь разрешал и в карточку V39);
+> регрессия слоя — **256 проверок, провалено 0**. Позиция журнала — п. 31.
+>
+> **Дополнение 21.10.2026 (п. 30):** фикстура эталона широты `MinCfg` расширена оператором
+> (46 каталогов видов, индекс 243 записи, в `Ext/` четвёртый предопределённый модуль); запись
+> `id=152` отставала от изменённого источника — загрузчик удержал её по R5, перезагрузка
+> `force=True` записала текущее состояние (`id=175`). Тем же днём в 18:41 фикстура изменена
+> **повторно**: 47 каталогов (46 видов + `Ext/`, где появились файлы представления корня), индекс —
+> **264** записи (`configVersion` у 180, канонических uuid 160, составных 103 и одна с
+> шестнадцатеричным суффиксом `.c`); заголовок пересоздан `force=True` → `id=176`. Состояние до
+> расширения (196/35/… п. 27) и срез 15:04 (243/47/…) — датированные снимки, они в тексте
+> сохранены. Первые полные загрузки XML-выгрузок
+> **BP3** (`id=173`, индекс 147 294 записи) и **KomMag** (первая загрузка `id=174`, после
+> `force=True` 21.10.2026 — `id=177`, индекс 4 419 записи) и их
+> сверка парсер↔БД↔документация — `_v41_three_configs_check.py` (57 проверок, провалено 0);
+> V39-колонки обеих заголовков — словари `ru`, границы сценария чистые. Замеры V40 и записи слоя
+> `xml-format` — снимки фикстуры до её расширения; перепрогон `_v40_slots_table.py` и обновление
+> маркеров слоя — отдельное решение. Позиция журнала — п. 30.
+>
+> **Дополнение 21.10.2026 (п. 29):** закрыт узел **V40** — авторитетный словарь «вид метаданных →
+> слот модуля», сведённый из двух источников (файлы `Ext/*.bsl` и индекс состава
+> `ConfigDumpInfo.xml`). У модуля ровно два класса: `object_module` — слот модуля вида
+> (`ObjectModule`, `ManagerModule`, `RecordSetModule`, `ValueManagerModule`, `Module`,
+> `CommandModule` у команды объекта), он всегда перечислен индексом; и `form_module` — **модуль
+> формы**, который слотом вида не является и хранится по правилам форм (группа A: `forms` +
+> `form_ext.ext`, правило R9). Доказательство: записей `…Form.Module` в индексе семи выгрузок — 0
+> при 28 896 файлах модулей форм, а содержимое `CommonForm` индекс перечисляет той же парой
+> `.Form`/`.Help`, что и форму объекта — значит `CommonForm` является формой, а не видом с модулем
+> (решение оператора 21.10.2026). Словарь: 57 пар, 28 видов (27 видов метаданных + `Configuration`),
+> все подтверждены обоими источниками; индекс при этом шире файлов на 71 запись пустых модулей
+> (41 582 против 41 511), поэтому словарь берётся из индекса. Предопределённые модули корня
+> (группа C) индексом моделируются — записями `Configuration.<Имя>.SessionModule` и т. п., 1:1 с
+> файлами `Ext/*.bsl`. Замер и девять инвариантов — `python _v40_slots_table.py` (провалено 0,
+> rc=0), машинная таблица — `_v40_slots_table.json`; норматив — раздел «Словарь „вид метаданных →
+> слот модуля“» в `docs/config-scenarios/01_configuration.md`. Реализации V38 узел не делает.
+> Знание записано слоем `xml-format` (MCP `1c-knowledge-base`, сниппет 5947, якорь
+> `configuration-module-slot-dictionary`, формат `===MODULE_SLOT_LAYER`); регрессия доступности
+> слоя `tools/check_xml_format_layer.py` после добавления записи — **240 проверок, провалено 0,
+> восемнадцать якорей** (семнадцать в `xml-format`, один в `platform`); счётчики категории —
+> 29 сниппетов / 929 алиасов (замер `tools/count_snippet_breakdown.py`).
+>
 > **Дополнение 21.10.2026 (п. 28):** закрыт узел **V39** — многоязычные свойства заголовка
 > конфигурации. Шесть колонок `configurations` (`synonym`, `short_info`, `detailed_info`,
 > `copyright`, `vendor_url`, `config_url`) переведены `text → jsonb`, разбор читает их новым видом
@@ -305,6 +369,18 @@ V19 снял 4 FK `parent_uuid` и 5 уникальностей по uuid (−9)
 и 21 CHECK-инвариант ревизий (+26) — от замера 38 это даёт 55. Живой разклад по типам
 (`pg_constraint`): 14 PK + 10 UNIQUE + 5 FK + 26 CHECK = 55, из CHECK 21 — узла V19. Четыре витрины
 прежние + 8 новых (`v_current_*` семи таблиц и `v_current_object_manifest`) = 12.
+Состояние 21.10.2026 после узла V42 (заголовок конфигурации: 33 колонки добавлено, 5 снято —
+четыре колонки предопределённых модулей V32 + `mobile_functionality TEXT[]`, чьё значение
+теперь ложится в `mobile_application_functionalities jsonb`): **509 колонок,
+72 индекса/уникальных ограничения, 55 внешних ключей и ограничений, 12 витрин** — расхождений нет,
+код возврата 0. Арифметика колонок: 481 + 28 = 509 (33 − 5 = +28); индексов и ограничений узел V42
+не добавлял: миграция — только `DROP COLUMN`/`ADD COLUMN` в DO-блоке, `DEFAULT` и `CHECK` узел
+не заводил (замер `pg_constraint` по `configurations`: только `configurations_pkey` и
+`configurations_name_key`; `DEFAULT` есть лишь у `id`, `created_at`, `updated_at`,
+`help_included` — они появились до V42). В самой
+таблице `configurations` — **59 колонок**: 37 character varying, 13 jsonb, 3 boolean,
+2 timestamp, 1 text, 1 uuid, 1 integer, 1 ARRAY (замер `information_schema.columns`, тот же день).
+Арифметика таблицы: было 31, снято 5, добавлено 33 → 59.
 
 ### Обычные формы (`form_type='Ordinary'`, содержимое — `Form.bin`)
 
@@ -534,7 +610,7 @@ python tools/_v19_read_sites.py --guard
 
 | Таблица | Колонки (живая схема) | Состояние |
 |---|---|---|
-| `configurations` | `id, name, synonym, comment, version, vendor_name, uuid, main_mode, usage_purpose, embedded_language, main_roles, app_module_id, session_module_id, data_proc_module_id, ext_conn_module_id, mobile_functionality, default_language, short_info, detailed_info, copyright, vendor_url, config_url, update_url, help_included, lock_mode_default, modality_mode, ext_comp_sync_mode, interface_compat_mode, compatibility_mode, created_at, updated_at` | заголовок конфигурации пишет загрузчик варианта 1 (узел V32, `src/configuration_loader.py`): замер 17.10.2026 — 1 строка (BGU2). Уникальность по `name` (`configurations_name_key`), повторная загрузка — `⚠️ name_conflict`, `force=True` пересоздаёт. **Содержимое видов метаданных не загружается** (п. 25); колонок `origin_*` нет (решение D-C, п. 24) |
+| `configurations` | **59 колонок** (замер 21.10.2026, `information_schema.columns`; типы: **37 character varying, 13 jsonb, 3 boolean, 2 timestamp, 1 text, 1 uuid, 1 integer, 1 ARRAY**). 26 колонок до V42: `id, name, synonym, comment, version, vendor_name, uuid, main_mode, usage_purpose, embedded_language, main_roles, default_language, short_info, detailed_info, copyright, vendor_url, config_url, update_url, help_included, lock_mode_default, modality_mode, ext_comp_sync_mode, interface_compat_mode, compatibility_mode, created_at, updated_at`; **плюс 33 колонки узла V42** (имена — по `migrate_v42_configuration_header_fields.sql` и живой схеме): `configuration_extension_compatibility_mode`, `database_tablespaces_use_mode`, `main_client_application_window_mode`, `object_autonumeration_mode`, `use_managed_form_in_ordinary_application`, `use_ordinary_form_in_managed_application`, `mobile_application_functionalities` (jsonb), `allowed_incoming_share_request_types` (jsonb), `common_settings_storage`, `reports_variants_storage`, `reports_user_settings_storage`, `form_data_settings_storage`, `dynamic_lists_user_settings_storage`, `default_report_form`, `default_report_variant_form`, `default_report_settings_form`, `default_style`, `default_interface`, `default_constants_form`, `default_search_form`, `default_dynamic_list_settings_form`, `default_collaboration_system_users_choice_form`, `default_data_history_change_history_form`, `default_data_history_version_data_form`, `default_data_history_version_differences_form`, `default_report_appearance_template`, `url_external_data_storage`, `name_prefix`, `mobile_application_urls` (jsonb), `required_mobile_application_permissions` (jsonb), `standalone_configuration_restriction_roles` (jsonb), `additional_full_text_search_dictionaries` (jsonb), `content` (jsonb). Колонок `app_module_id`, `session_module_id`, `data_proc_module_id`, `ext_conn_module_id`, `mobile_functionality` с узла V42 **нет** (п. 31); колонок `password_*`, `predefined_page_*`, `quick_start_page`, `used_mobile_application_functionalities_settings` в схеме **никогда не было** — те, кто их называет, описывает проектную задумку, а не живую схему | заголовок конфигурации пишет загрузчик варианта 1 (узел V32, `src/configuration_loader.py`): замер 21.10.2026 — 4 строки (BGU2, BP3, KomMag, MinCfg). Уникальность по `name` (`configurations_name_key`), повторная загрузка — `⚠️ name_conflict`, `force=True` пересоздаёт. **Свойства корня сохраняются полностью: 55 из 55 (узел V42, п. 31)**; составные значения — `jsonb`. **Содержимое видов метаданных не загружается** (п. 25); колонок `origin_*` нет (решение D-C, п. 24) |
 | `configuration_objects` | `id, configuration_id, name, object_type, object_name, child_type, parent_name, depth, object_id, uuid, config_version, created_at` | индекс состава из `ConfigDumpInfo.xml` (узел V33): замер 17.10.2026 — 122 164 строки на 1 заголовок. XML самих объектов **не хранится** — перечень ≠ содержимое, узел V18 это не закрывает (п. 26) |
 | `config_extensions` | `id, configuration_id, name, synonym, comment, version, vendor_name, uuid, created_at, updated_at` | 0 строк; вариант «расширение» — заглушка (R7) |
 | `bsl_modules` | `id, configuration_id, module_name, file_path, code, object_type, object_name, report_id, created_at, parent_uuid, parent_type, module_type, code_size, truncated` | модули `Ext/` пишутся с `parent_uuid`/`parent_type`/`module_type` для отчётов **и** обработок (узел V22: `parent_type` = `external_processing`); FK на `report_id` нет — очистка явная (п. 10). Колонка `processing_id` удалена узлом V22 |
@@ -834,8 +910,11 @@ C:\1C_LLM\LoadDoc\Configurations\
 ├── UNF3_1Cv8.cf  UT11_1Cv8.cf  ZUP31_1Cv8.cf   ← файлы .cf: вход `ibcmd config load`
 └── XML_files\
     ├── Config_NULL\                              ← фикстура «нулевой» конфигурации (V32/V33)
-    ├── MinCfg\                                   ← эталон ШИРОТЫ видов: 34 каталога видов,
-    │                                                196 записей индекса (п. 27 этих правил)
+    ├── MinCfg\                                   ← эталон ШИРОТЫ видов: 47 каталогов
+    │                                                (46 видов + Ext/ с файлами представления
+    │                                                корня), 264 записи индекса — срез
+    │                                                21.10.2026 18:41 (п. 30 этих правил;
+    │                                                снимки 15:04 — 243, 19.10.2026 — 196, п. 27)
     └── BGU2\ BP3\ KomMag\ UNF3\ UT11\ ZUP31\    ← XML-выгрузки: вход load_1c_catalog_tool
 ```
 
@@ -1950,7 +2029,9 @@ composite_ids=58 uuid_filled=138 configversion=114`, дублей `object_id` 0,
 родителя 0.
 **Что зафиксировано как слой знаний (`property-profile-configuration`, категория `xml-format`):**
 все 55 свойств — тип, статус (`configurations.<колонка>` / `NONE` / `NOT-FILLED(<колонка>)`),
-замеренное значение и источник знания. 22 маппинга соответствуют словарю `CONFIGURATION_FIELDS`,
+замеренное значение и источник знания. Снимок 19.10.2026 (текущее состояние — п. 31, узел V42:
+все 55 маппингов закрыты):
+22 маппинга соответствуют словарю `CONFIGURATION_FIELDS`,
 33 свойств не имеют колонки (6 непустых: `ConfigurationExtensionCompatibilityMode`,
 `UseManagedFormInOrdinaryApplication`, `UseOrdinaryFormInManagedApplication`,
 `MainClientApplicationWindowMode`, `ObjectAutonumerationMode`, `DatabaseTablespacesUseMode`),
@@ -1966,11 +2047,21 @@ composite_ids=58 uuid_filled=138 configversion=114`, дублей `object_id` 0,
 **Что решено оператором (основа узла V38; реализации нет):** модель хранения дочерних объектов из
 восьми групп — A (общие `attributes`/`tabular_sections`/`forms`/`form_ext`/`templates` с
 `parent_type='configuration_object'` и колонкой вида `child_kind`, требует снятия
-`attributes_uuid_key`/`tabular_sections_uuid_key` и FK `parent_uuid`), B и C (`bsl_modules` —
-схема менять не нужно, таблица уже полиморфна), D (новая таблица `enum_values`), E
+`attributes_uuid_key`/`tabular_sections_uuid_key` и FK `parent_uuid`), B и C — **пересмотрены
+21.10.2026** (прежняя формулировка «`bsl_modules` — схема менять не нужно, таблица уже полиморфна»
+замером не подтверждается: в живой таблице 2 строки, обе — модули внешних объектов, `configuration_id`
+не заполнен ни в одной; а выгрузка даёт разные слоты модулей по видам — `CommonModules/<obj>/Ext/Module.bsl`
+2374, `ObjectModule.bsl`/`ManagerModule.bsl` у справочников 410/438, документов 469/471, отчётов
+575/619, у регистров сведений `ManagerModule` 648 + `RecordSetModule` 280 без `ObjectModule`,
+`ValueManagerModule` у констант 154, `CommandModule` у общих команд 226, `Form/Module.bsl` у форм;
+всего в BGU2 14 808 `.bsl`). Решение оператора: **модули не смешивать** — у них разная функциональная
+направленность и разные правила вызова. Общие модули — таблица вида `CommonModule`; предопределённые
+модули корня — отдельная таблица на каждый вид модуля, по одной строке на конфигурацию, ключ —
+конфигурация; `bsl_modules` остаётся зоной модулей внешних объектов (её пересмотр — отдельный вопрос),
+D (новая таблица `enum_values`), E
 (`configuration_objects.properties jsonb` + `source_path`), F и G (одна таблица
 `configuration_object_content` для прав/расписаний и двоичного содержимого), H (вне модели, пока
-нет эталона или XSD). Порядок фаз по возрастанию цены: C+B → E → D → A → F/G. Границы названы
+нет эталона или XSD). Порядок фаз по возрастанию цены (изменён 21.10.2026): E → D → A → B/C → F/G. Границы названы
 прямо: V38 не закрывает V18 (нет сборки XML) и не распространяет версионность V19 на объекты
 конфигурации (решение D-C остаётся в силе).
 **Проверка:** `python tools/check_v32_zero_configuration.py` — **156 проверок, провалено 0**
@@ -1980,8 +2071,9 @@ composite_ids=58 uuid_filled=138 configversion=114`, дублей `object_id` 0,
 `ALL VALIDATIONS PASSED`; разбивка БД — `python tools/count_snippet_breakdown.py`
 (1496 + 1226 + 164 = 2886, сходится).
 **Что осталось незакрытым:** узел V38 не реализован, схема не менялась (`enum_values` и
-`properties` в ней по-прежнему нет); 33 несохранённых свойства корня остаются слепыми зонами до
-V38; эталон `MinCfg` не входит в `tools/restore_reference_pair.py` (тот скрипт поднимает только
+`properties` в ней по-прежнему нет); 33 несохранённых свойства корня оставались слепыми зонами до
+V38 — **снято узлом V42 тем же днём (п. 31): словарь разрешает все 55 свойств, добавлены 32
+колонки**; эталон `MinCfg` не входит в `tools/restore_reference_pair.py` (тот скрипт поднимает только
 эталонную пару внешних объектов) — при очистительных регрессах он перезагружается явным вызовом
 точки входа.
 
@@ -2047,12 +2139,313 @@ V38; эталон `MinCfg` не входит в `tools/restore_reference_pair.py
 (`information_schema.columns`), а не только по именам; живая БД после загрузки держит значения
 словарями `{"ru": …}` (замер 21.10.2026: `configurations.id=151` BGU2, `id=152` MinCfg,
 `configuration_objects` — 122 360 строк = 122 164 BGU2 + 196 MinCfg, битых привязок внешних объектов
-0); доступность знания в слое — `python tools/check_xml_format_layer.py` — **225 проверок,
+0 — **снимок того дня**: `id` и число строк индекса меняются при `force=True` и при изменении
+фикстуры, актуальные значения называет п. 30); доступность знания в слое —
+`python tools/check_xml_format_layer.py` — **225 проверок,
 провалено 0** (см. `.clinerules/1c-knowledge-base_Rule.md`); `python validate_project.py` —
 `ALL VALIDATIONS PASSED`; `python tools/check_mcp_tool_wiring.py` rc=0 (core 4, enrichment 21,
 export 1).
 **Что осталось вне объёма:** `config_extensions` (заглушка); содержимое видов метаданных — у объектов
 конфигурации `Synonym`/`Comment` в таблицы не пишутся вовсе (модель хранения дочерних объектов —
 группы A–H, п. 27, узел V38 не реализован), поэтому их многоязычность узлом V39 не затрагивается;
-33 несохранённых свойства корня (п. 27) остаются слепыми зонами до V38.
+33 несохранённых свойства корня (п. 27) оставались слепыми зонами до V38 — **снято узлом V42
+(п. 31)**.
+
+### 29. Словарь «вид → слот модуля» строился по наличию файлов, а модули форм попадали в слоты видов (узел V40, 21.10.2026)
+**Файлы:** `_v40_slots_table.py` (новый: сверка двух источников + девять инвариантов),
+`_v40_slots_table.json` (машинная таблица, ключ `slot_families`), `_v40_slots_table.txt` (текстовый
+отчёт), `_v40_dumpinfo_slots.py` (исправлена мёртвая ветка `"Forms" in parts[2:-1]`: индекс
+использует единственное число `Form`, поэтому ветка не срабатывала ни разу и выдавала ложный ноль),
+`docs/config-scenarios/01_configuration.md` (новый раздел «Словарь „вид метаданных → слот модуля“»
+и правка строки группы B). Правок загрузчика нет: V38 не реализован, словарь нужен его группам B/C.
+
+**Проблема:** файловый замер (`_v40_module_slots.py`) даёт 71 пару «вид × слот», но слеп к пустым
+модулям (платформа пишет `Ext/*.bsl` только при непустом тексте), а индексный замер
+(`_v40_dumpinfo_slots.py`) из-за мёртвой ветки по-другому классифицирует модули форм. Два источника
+расходились, и по ним нельзя было назвать ни полный словарь слотов, ни ответ на вопрос «`CommonForm`
+— вид с модулем или форма».
+
+**Статус:** ✅ **Закрыто замером 21.10.2026 (узел V40), решение оператора того же дня.** Модель:
+
+- у модуля ровно два класса. `object_module` — слот модуля **вида** (`ObjectModule`,
+  `ManagerModule`, `RecordSetModule`, `ValueManagerModule`, `Module`, `CommandModule` у команды
+  объекта): он всегда перечислен индексом состава, хранение — группа B (предопределённые модули
+  корня — группа C). `form_module` — **модуль формы** (`Forms/<форма>/Ext/Form/Module.bsl`,
+  у общей формы — `Ext/Form/Module.bsl`): слотом вида не является, хранение — группа A, то есть
+  `forms` + `form_ext.ext` по правилу R9 и по тем же правилам, что любая другая форма;
+- доказательство класса `form_module`: записей `…Form.Module` в индексе семи выгрузок — **0** при
+  **28 896** файлах модулей форм. Индекс перечисляет содержимое формы — `Catalog.<Имя>.Form.<Имя>` +
+  `.Form` + `.Help` и `CommonForm.<Имя>` + `.Form` + `.Help` — одной и той же парой; значит
+  `CommonForm` — форма, и её отсутствие в словаре слотов видов корректно, а не расходится с файлами
+  (замер `.Form` общей формы: BGU2 312, BP3 440, UNF3 379, UT11 295, ZUP31 239, KomMag 31, MinCfg 1);
+- авторитетный словарь: **57 пар, 28 видов** (27 видов метаданных + `Configuration`), каждая пара
+  подтверждена **обоими** источниками; семейств слотов 10 (`Module` 6 видов, `ManagerModule` 19,
+  `ObjectModule` 10, `CommandModule` 12, `RecordSetModule` 5, `ValueManagerModule` 1, четыре
+  предопределённых модуля корня — вид `Configuration`). Полные списки — раздел норматива и JSON;
+- индекс шире файлов там, где модуль пуст: **41 582** записи индекса против **41 511** файлов,
+  **71** запись без файла (чаще всего `CommonModule` 18, `Constant.ValueManagerModule` 18,
+  `DataProcessor.ObjectModule` 15). Поэтому словарь берётся из индекса, а не из наличия файлов
+  (числа «71 пара» и «71 пустой модуль» — разные измерения);
+- группа C моделируется индексом: предопределённые модули корня перечислены дочерними записями
+  `Configuration.<Имя>.SessionModule` / `…OrdinaryApplicationModule` / `…ExternalConnectionModule` /
+  `…ManagedApplicationModule`, 1:1 с файлами `Ext/*.bsl` (6/6/7/7). Свойств этих модулей в
+  `Configuration.xml` по-прежнему нет — таблица группы C заполняется из индекса и файлов, и только
+  после этого становятся разрешимыми ссылки на предопределённые модули корня. Прежние колонки
+  `app_module_id`/`session_module_id`/`data_proc_module_id`/`ext_conn_module_id` (п. 27) с узла V42
+  в схеме **отсутствуют** (п. 31): они оставались `NULL` при том, что модуль существует файлом, —
+  группа C даёт собственный ключ (конфигурация × вид модуля), а возврат этих колонок был бы
+  дублированием того же состояния.
+- видов **без** слотов модулей — 21 (полный перечень в нормативе), инвариант полноты: каждый вид,
+  известный хотя бы одному источнику (49), отнесён к одному из двух состояний, неотнесённых 0.
+
+**Проверка:** `python _v40_slots_table.py` — rc=0, **девять инвариантов, провалено 0** (каждый слот
+вида перечислен индексом; модуль формы в индексе отсутствует у всех видов и его записей 0; каждый
+каталог вида сопоставлен виду индекса — в том числе нерегулярное `FilterCriteria` ↔
+`FilterCriterion`, подтверждённое равным числом объектов; строки видов, существующих только в индексе,
+построены; предопределённый модуль корня подтверждён и файлом, и индексом; полнота классификации
+всех 49 видов). JSON-ключ `checks_failed` = 0. Доступность знания в слое —
+`python tools/check_xml_format_layer.py` — **240 проверок, провалено 0** (было 225; новые 15 —
+запись `configuration-module-slot-dictionary`: якорь, категория, замерные маркеры `28 896`/`41 582`/
+`slot_families`/`_v40_slots_table.py`, находимость терминов `ObjectModule`/`ManagerModule`/
+`RecordSetModule`/`ValueManagerModule`/`CommandModule` по алиасам); регрессия счётчиков БД —
+`python tools/count_snippet_breakdown.py` (2 912 = 1 496 + 1 230 + 186, сходится; xml-format 29,
+алиасы 209 202 / к слою 929).
+
+**Что осталось вне объёма:** реализация групп B и C (V38) — словарь описывает, что грузить, но не
+грузит; `configuration_objects.child_type` для модулей не заполняется (индекс составом модуль формы
+не моделирует, и это не дефект парсера V33); enrichment-цели вида `Catalog`/`Document` по-прежнему
+не введены.
+
+### 30. Эталон `MinCfg` расширен до 46 видов; загрузки и сверка MinCfg / BP3 / KomMag (21.10.2026)
+**Файлы:** `_v41_three_configs_check.py` (новый: трёхконтурная сверка парсер↔БД↔документация);
+документация: настоящая позиция и шапка правил, раздел «Путь к источникам конфигураций»,
+`docs/config-scenarios/01_configuration.md` (подраздел расширения эталона, правка Q4 и группы H,
+пометка о снимке в разделе словаря слотов). Кода загрузчика и схемы не менялось.
+
+**Причина:** оператор изменил фикстуру 21.10.2026 в 15:04 (пересозданы оба корневых XML):
+`MinCfg` расширен с 34 до **46 каталогов видов** — добавлены ровно те виды, об отсутствии которых
+говорил п. 27 (`CalculationRegisters`, `ChartsOfCalculationTypes`, `ExternalDataSources`, а также
+`Documents`, `DocumentJournals`, `ChartOfAccounts`, `BusinessProcesses`, `Tasks`, `Interfaces`,
+`AccountingRegisters`, `AccumulationRegisters`, `ChartOfCharacteristicTypes`); в `Ext/` добавлен
+четвёртый предопределённый модуль `OrdinaryApplicationModule.bsl`. Запись `id=152` (загружена в
+09:40) отстала от источника; точка входа корректно удержала её как `⚠️ name_conflict` (R5),
+`force=True` — только после подтверждения оператора.
+
+**Новое состояние фикстуры (замер 21.10.2026):** 46 каталогов видов + `Ext/` (4 предопределённых
+модуля); `Configuration.xml` — свойств `Properties` по-прежнему **55** (маркеры слоя
+`found=55 mapped=22` на тот момент не задеты; узел V42 тем же днём перевёл карточку профиля на
+`found=55 mapped=55` — п. 31), `ChildObjects` — **47 объектов (46 видов, `Constant` — 2)**;
+`ConfigDumpInfo.xml` — **243** записи, 47 видов индекса (46 + `Configuration`), глубина 2,
+`configVersion` у **159** (у 84 вложенных отсутствует — правило D4); идентификаторы: канонических
+v4 — **152**, составных `<uuid>.N` — **91**, с суффиксом — 0; файлы: `.xml` 103, `.bsl` 61,
+`.html` 8, `.xsd` 4, `.bin` 2, `.png` 1, `.txt` 1.
+
+**Итог перезагрузки:** `♻️` — `configurations id=175` (прежняя строка `id=152` снята, привязок
+внешних объектов к ней не было), `configuration_objects` — **243 строки**; карточка загрузчика и
+живой SQL совпадают: `idx_rows=243 types=47 maxdepth=2 composite_ids=91 uuid_filled=152
+configversion=159`, дублей 0, ссылок на отсутствующего родителя 0.
+
+⚠️ **Числа `id` и индекса состава в этом пункте — снимок 21.10.2026 15:04, а не текущее состояние
+(замер 22.10.2026).** Тем же днём в 18:41 фикстура `MinCfg` изменена повторно (см. абзац «Второй
+срез» ниже), а при разборе узла V42 заголовки `MinCfg` и `KomMag` были пересозданы перезагрузкой
+`force=True` (п. 31) — живые строки `MinCfg id=176`, `KomMag id=177`, прежние `id=175`/`id=174`
+сняты по M7; `BGU id=151` и `BP3 id=173` при этом не перезагружались. Актуальные `id` читаются
+запросом `SELECT id, name FROM configurations ORDER BY id`. Числа индекса `MinCfg`
+(243/47/2/91/152/159) относятся к фикстуре 15:04; для текущего среза они другие
+(264/47/2/103+1/160/180) — на них переведены ожидания `python _v41_three_configs_check.py`
+(прогон 22.10.2026: **57 проверок, провалено 0**). Числа BP3 и KomMag (147 294 / 4 419) от этих
+изменений не зависят: их каталоги не менялись.
+
+**Второй срез фикстуры `MinCfg` (замер 21.10.2026 18:41, mtime обоих корневых XML).** Фикстура
+изменена оператором повторно в тот же день; замер — `python _v42_fixture_probe.py` (временный зонд
+узла V42), сверка живых счётчиков — штатным парсером `parse_config_dump_info` + SQL по
+`configuration_objects`:
+
+- каталогов — **47** = **46 каталогов видов + `Ext/`**; в `Ext/` кроме четырёх предопределённых
+  модулей появились файлы представления корня: `Help.xml`, `HomePageWorkArea.xml`, `Logo.xml`,
+  `MainSectionPicture.xml`, `Splash.xml` и каталоги `Help/`, `Logo/`, `MainSectionPicture/`,
+  `Splash/`; файлы: `.xml` 124, `.bsl` 65, `.html` 9, `.xsd` 4, `.bin` 2, `.png` 2, `.jpg` 2,
+  `.zip` 1, `.txt` 1;
+- `ConfigDumpInfo.xml` — **264** записи, **47** корневых видов (46 + `Configuration`), глубина 2;
+  `configVersion` — атрибут `<Metadata …>` (не дочерний элемент), заполнен у **180**;
+  идентификаторы: канонических UUID v4 — **160**, составных `<uuid>.<число>` — **103**,
+  **одна запись с буквенным суффиксом** — `Configuration.MinCfg.MainSectionPicture` =
+  `<uuid>.c`. Суффикс **шестнадцатеричный** (у записей корня ряд `.0`…`.8`,`.c`), поэтому
+  прежняя формулировка «составной `<uuid>.1`» описывает только числовой случай, а запрос вида
+  `object_id LIKE '%.%'` даёт 104 вместо 103 — определение составного id обязано быть названо;
+- записей корня `Configuration` — **10**: сам `Configuration.MinCfg` + `.0 OrdinaryApplicationModule`,
+  `.1 Logo`, `.2 Splash`, `.3 Help`, `.5 ExternalConnectionModule`, `.6 ManagedApplicationModule`,
+  `.7 SessionModule`, `.8 HomePageWorkArea`, `.c MainSectionPicture`. То есть **индекс состава
+  моделирует и файлы представления корня** (группа G), а не только предопределённые модули —
+  наблюдение V40 («индекс перечисляет содержимое представления») подтверждено на эталоне широты;
+- эталон перестал быть «по одному объекту на вид»: внутри части видов состав множественный
+  (`SettingsStorage` 41 запись, `WebService` 38, `HTTPService` 28, `ExchangePlan` 19,
+  `CommonForm` 18, `DataProcessor` 12, `Report` 8). Широта видов (46) сохранена — назначение
+  эталона не изменилось, но формулировку «один объект каждого вида» возвращать нельзя;
+- состояние БД после `load_1c_catalog_tool(..., force=True)`: `configurations id=176`,
+  `configuration_objects` — **264 строки**; живой SQL и штатный парсер совпадают:
+  `idx_rows=264 types=47 maxdepth=2 composite_ids=103 uuid_filled=160 configversion=180`,
+  гистограмма глубины `{0: 56, 1: 130, 2: 78}`, суффиксных 1, дублей 0, сирот 0. Привязок
+  внешних объектов к этому заголовку нет, битых ссылок 0.
+
+**Первые загрузки BP3 и KomMag (21.10.2026):** `load_1c_catalog_tool` → `✅`:
+BP3 — `id=173` (`БухгалтерияПредприятия`, uuid `e0666db2-45d6-49b4-a200-061c6ba7d569`,
+`version=3.0.206.19`, vendor «Фирма "1С"», `main_mode=ManagedApplication`,
+`compatibility_mode=Version8_3_27`), индекс **147 294** строки (43 вида, глубина 4,
+гистограмма `{0:16476, 1:86924, 2:43797, 3:89, 4:8}`, канонических uuid **104 335**, составных
+**42 790**, с суффиксом **169**, `configVersion` **83 050**, сиротских родителей 0);
+KomMag — `id=174` (`XXI_Коммерческий_магазин_8_редакция_1_0_3`, uuid
+`f62e175e-e00e-4fde-9a97-3a7264dc8055`, `version=1.0.3.63`, vendor `OOO "XXI Век"`,
+`main_mode=OrdinaryApplication` — как фиксирует слой `property-configuration-defaultrunmode`
+(единственная из восьми на обычных формах), `compatibility_mode=Version8_3_19` — нижняя граница
+измеренного слоями диапазона NN=19/24/27), индекс **4 419** строк (28 видов, глубина 2,
+uuid **3 325**, составных **1 076**, с суффиксом **18**, `configVersion` **2 056**, сирот 0).
+Шесть многоязычных колонок обоих заголовков — jsonb-словари с ключом `ru` (V39 в живой работе);
+`bsl_modules`/`attributes` по этим конфигурациям пустые, привязанных внешних объектов 0 —
+границы сценария V32/V33 и V20.1 соблюдены.
+
+**Сверка:** `python _v41_three_configs_check.py` — **57 проверок, провалено 0** (rc=0): по каждой
+конфигурации число строк, уникальность `object_id`/`name` (D5), формы идентификаторов (D2),
+`config_version` (D4/D6), гистограмма глубины и состав типов сравниваются с разбором того же файла
+штатным парсером; заголовок — с ожиданиями слоя `xml-format`; MinCfg дополнительно — с
+документированными числами (обновлены на расширенный эталон). Отдельный статус «источник новее
+записи» (mtime файла > `created_at` строки) отделяется от истинного расхождения: в этом случае
+живые счётчики с текущим файлом не сверяются (SKIP с причиной), запись проверяется числам
+документации на своё состояние — ровно то поведение, которое держит R5.
+
+**Открытые позиции:** (1) замеры V40 (`_v40_slots_table.py`: 41 582 индекса / 41 511 файл /
+28 896 модулей форм, «MinCfg `.Form` 1») и записи слоя `property-profile-configuration`
+(3 предопределённых модуля, `ChildObjects` 35, индекс 196) и `configuration-module-slot-dictionary`
+— снимки фикстуры **до** расширения 15:04; перепрогон замера и обновление маркеров слоя —
+отдельное решение (словарь пар «вид → слот» от расширения не изменится: слоты добавленных видов
+уже подтверждены BGU2/BP3, а `ExternalDataSource`/`Interface`/`DocumentJournal` слотов не имеют —
+это требует подтверждения перепрогоном); (2) ожидания `_v41_three_configs_check.py` отражают
+второй срез эталона (264/47/2/103+1/160/180), а не снимок 15:04; (3) карточка слоя
+`configdumpinfo-index-structure` описывает дочерний идентификатор как составной `<uuid>.1` —
+**буквенный (шестнадцатеричный) суффикс** (`.c` = 12) в ней не зафиксирован, как и то, что индекс
+моделирует файлы представления корня; обновление карточки слоя и её маркеров — отдельное решение с
+регрессией `tools/check_xml_format_layer.py`; (4) BP3 и KomMag в `tools/restore_reference_pair.py`
+не участвуют (тот скрипт поднимает только эталонную пару внешних объектов) — при очистительных
+регрессах конфигурации перезагружаются явным вызовом точки входа.
+
+### 31. Свойства корневого `Configuration.xml` сохранялись лишь наполовину: 33 свойства были слепой зоной (узел V42)
+
+**Файлы:** `create_1c_configurations_db.sql`, `migrate_v42_configuration_header_fields.sql` (новый),
+`src/configuration_meta_parser.py` (`CONFIGURATION_FIELDS` +33, `VALUE_TYPE_*`, снятие
+`NOT_FILLED_COLUMNS`, `read_configuration_properties` → тройка `(значение, тип, ошибка)`),
+`src/external_table_writer.py` (`ConfigurationRowWriter`: `VALUE_TYPES`, `jsonb_array`,
+`jsonb_functionalities`, `is_json_type`), `tools/check_v42_configuration_header.py` (новый),
+`tools/check_v32_zero_configuration.py` (разделы `1`, `3`, `4`, `5`, `9`, `10` — динамический
+разбор контракта), `tools/check_xml_format_layer.py` (`LAYERS`), слой `xml-format`
+(якорь `configuration-header-full-columns-v42`).
+
+**Проблема:** загрузчик V32 писал 22 свойства из 55. Остальные 33 не имели колонок, шесть из них
+были непустыми в выгрузках (`ConfigurationExtensionCompatibilityMode`, `ObjectAutonumerationMode`,
+`DatabaseTablespacesUseMode`, `MainClientApplicationWindowMode`, `UseManagedFormInOrdinaryApplication`,
+`UseOrdinaryFormInManagedApplication`) — в БД нельзя было ответить на вопросы «какая версия
+расширения совместима», «как нумеруются объекты», «используются tablespaces», «какое окно у
+клиентского приложения». Отдельной ошибкой была реализация `UsedMobileApplicationFunctionalities`:
+значение `<xr:item>` с флагом `use` разворачивалось в `TEXT[]` имён функциональности, и флаг
+«функция отключена» терялся (отключённая функция была неотличима от включённой). Четыре колонки
+предопределённых модулей (`app_module_id` и три других) были `NULL` всегда: свойств этих модулей в
+XML нет (п. 27), а `NULL` в модели означает «значения в выгрузке нет» — это ложь о данных, потому
+что модуль существует файлом `Ext/<Имя>.bsl`.
+**Статус:** ✅ **Реализовано 21.10.2026 (узел V42).** Модель:
+- **полнота словаря**: `CONFIGURATION_FIELDS` разрешает все 55 имён свойств; `read_configuration_properties`
+  возвращает тройку `(значение, тип значения, ошибка разбора)`, а писатель проверяет соответствие
+  типа колонке (`VALUE_TYPES`: `text`, `boolean`, `text_array`, `jsonb_object`, `jsonb_array`,
+  `jsonb_functionalities`). Тип задаёт **разбор**, а не словарь: `<xr:boolean>` → boolean,
+  `<v8:item>`/`<xr:item>` → объект, `<xr:itemList>` → массив. Неожиданная форма значения —
+  предупреждение в карточке загрузки и `NULL` в колонке, а не отказ; литерал без `xr:` — тоже
+  предупреждение (в MinCfg таких 11: `DefaultRunMode`, `PasswordMode`, `PasswordApplicationRunMode`),
+  потому что молча вернуть `NULL` при тексте в XML — значит повторить дефект V39;
+- **колонки с типом, которого раньше не было**: семь jsonb-колонок —
+  `mobile_application_functionalities` (пары `functionality` + `use` сохраняются объектом),
+  `allowed_incoming_share_request_types` (пары `mime`/`uti`/`ext`/`processingVariant`/`isCustom`),
+  `mobile_application_urls`, `required_mobile_application_permissions`,
+  `standalone_configuration_restriction_roles`, `additional_full_text_search_dictionaries`,
+  `content` (общий разбор-конвертер перечней `json_records` без предзнания состава детей).
+  Мотив jsonb — **форма значения**, а не число значений: в `TEXT[]` пары разъехались бы, а
+  строка `use=true` и строка `use=false` стали бы неразличимы (замер BGU2: пять объектов,
+  два из них `use=false`). Скалярные токены перечислений и qualified-имена
+  (`MainClientApplicationWindowMode`, `ObjectAutonumerationMode`, `CommonSettingsStorage`,
+  `DefaultReportForm`, `DefaultStyle`, `URLExternalDataStorage`, `NamePrefix`) остались TEXT:
+  префикс вида (`CommonForm.`, `SettingsStorage.`, `Style.`, `Interface.`) не снимается —
+  это значение целиком, а не ссылка на объект метаданных. Та же граница, что у V39:
+  `update_url` остаётся текстом;
+- **вид значения задаёт разбор, а не словарь**: `read_configuration_properties` возвращает
+  тройку `(значение, тип значения, ошибка разбора)`, а `ConfigurationRowWriter` принимает
+  колонки видами `text`, `bool`, `jsonb_nullable`. Словарь `CONFIGURATION_FIELDS` задаёт
+  **вид** поля (`text`, `bool`, `ref`, `ref_list`, `value_list`, `multilang`, `json_records`),
+  но конкретный вид значения определяет разбор элемента XML. Неожиданная форма значения —
+  предупреждение в карточке загрузки и `NULL` в колонке, а не отказ; литерал без `xr:` — тоже
+  предупреждение (в MinCfg таких 11: `DefaultRunMode`, `PasswordMode`,
+  `PasswordApplicationRunMode`), потому что молча вернуть `NULL` при тексте в XML — значит
+  повторить дефект V39;
+- **миграция аддитивна и идемпотентна**: DO-блок с двумя массивами имён — `DROP COLUMN IF EXISTS`
+  по списку из пяти колонок (`app_module_id`, `session_module_id`, `data_proc_module_id`,
+  `ext_conn_module_id`, `mobile_functionality`) и `ADD COLUMN IF NOT EXISTS` по массиву пар
+  «имя, тип» (33 колонки). `FOREACH ... SLICE 1` по этому массиву обязателен: без среза цикл
+  перебирает скаляры и падает на `cannot subscript type text` — на этом и упал первый прогон
+  миграции. Для чистой БД те же колонки создаёт шаг 2 `create_1c_configurations_db.sql` — пара
+  обязательна, иначе `_cmp_ddl.py` зафиксирует расхождение. Снятые колонки данных не переносят:
+  `mobile_functionality` была пуста, а её значение читается из XML заново;
+- **`DEFAULT` и `CHECK` новых колонок узел не заводил — это замер, а не умолчание**: в
+  `pg_constraint` по `configurations` только `configurations_pkey` и `configurations_name_key`,
+  `column_default` — у четырёх колонок, появившихся до V42 (`id`, `help_included`, `created_at`,
+  `updated_at`). Значения по умолчанию новой конфигурации 8.3.27 остаются знанием слоя
+  `property-configuration-compatibility`, а не состоянием схемы: положить в колонку `DEFAULT`,
+  измеренный одной фикстурой, — значит превратить наблюдение в ограничение и потом читать его
+  как факт о любой загрузке. Пустая колонка читается как «в выгрузке этого нет» — ровно то
+  состояние, ради которого узел и снимал четыре колонки предопределённых модулей;
+- **карта слепых зон закрывается, механизм остаётся**: `read_configuration_properties` по-прежнему
+  называет имя свойства, которого нет в словаре (`UNKNOWN_PROPERTY`), — проверка обязана видеть, что
+  механизм живёт (в прогоне есть зонд с таким свойством), и одновременно утверждать, что для
+  реальной выгрузки таких свойств ноль.
+**Проверка:** `python tools/check_v42_configuration_header.py` — **43 проверки, провалено 0**
+(итог печатает сам скрипт; фикстура — `MinCfg`, число проверок зависит от фикстуры, поэтому в
+текстах называть нужно число конкретного прогона). Разделы прогона: **1 — схема V42** (пять снятых
+колонок отсутствуют, все 33 добавлены, типы и длины совпадают с миграцией, арифметика «было 31,
+снято 5, добавлено 33 → 59» сходится с живой схемой, `NOT_FILLED_COLUMNS` пуст — «колонка есть,
+но не заполняется» теперь не отдаётся); **2 — разбор фикстуры** (55 свойств из 55, у каждого есть
+колонка, `properties_unstored = 0`, предупреждений о свойствах без колонки ноль, 38 пар
+`functionality`/`use` подтверждены и `use=true` назван поимённо — `Biometrics`/`OSBackup`,
+многоязычное `BriefInformation` → словарь `{язык: текст}`, флаг `UseManagedFormInOrdinaryApplication`
+→ `True`, ref-значение `DefaultLanguage` → `Русский`, qualified-имена сохранены целиком — префикс
+вида не снимается); **3 — живая схема ↔ разбор** (значения 56 описываемых колонок строки MinCfg
+совпадают с разбором того же XML, непустых ровно столько, сколько заполнил разбор — 50, пустые
+свойства сохранены `NULL`, а не пустой строкой или списком); **4 — содержимое jsonb** (38 пар в
+`mobile_application_functionalities` сохранены поштучно и в порядке вывода, признак `use` есть у
+каждой записи и читается строкой `'true'`/`'false'` — в `TEXT[]` он терялся; поля
+`allowed_incoming_share_request_types`, `mobile_application_urls`, скалярные детали
+`additional_full_text_search_dictionaries` и `standalone_configuration_restriction_roles`);
+**5 — состояние прочих заголовков** (INFO, см. «Живое состояние» ниже); **6 — уборка**: состав БД
+не изменился (`configurations` 4, `configuration_objects` 274 141, `external_report` 2), эталонная
+пара внешних объектов не тронута). Отдельно `python tools/check_v32_zero_configuration.py` —
+**231 проверка, провалено 0** (переведён с перечней колонок на динамический разбор: неизвестные
+свойства ищутся по разбору реальной выгрузки, колонки «никогда не заполняются» выводятся из разницы
+живой схемы и контракта парсера, `ddl_declared_columns` сверяет бутстрап с живой схемой);
+`python _cmp_ddl.py` — rc=0, **509 колонок, 72 индекса/уникальных ограничения, 55 ограничений,
+12 витрин**, расхождений нет; `python tools/check_xml_format_layer.py` — **256 проверок, провалено
+0** (девятнадцать якорей); `python validate_project.py` — все проверки пройдены.
+
+**Живое состояние после узла (замер 21.10.2026):** `configurations` — 4 строки; `id` меняются при
+`force=True`, актуальные берутся запросом. Заполнение 33 новых колонок по строкам (раздел 5
+проверки): MinCfg `id=176` — **29/33**, KomMag `id=177` — **15/33** (обе строки перезагружены
+`force=True` после узла; история состояний при этом снимается по M7, привязок внешних объектов
+к этим заголовкам не было — битых ссылок 0), а BGU2 `id=151` и BP3 `id=173` — **0/33**: их строки
+загружены до V42 и остаются снимком «до узла». Это открытая позиция, а не дефект схемы:
+перезагрузка `force=True` допустима только по подтверждению оператора (правило R5), поэтому
+состояние называется прямо, а не правится молча. До перезагрузки тексты об этих двух заголовках
+обязаны говорить «загружено до V42, новые колонки не заполнены» — по нулям в новых колонках
+нельзя утверждать, что свойств нет в выгрузке.
+
+**Что осталось вне объёма:** содержимое видов метаданных (группы A–H — узел V38, п. 27); ссылки на
+предопределённые модули корня (группа C даёт собственный ключ «конфигурация × вид модуля», а не
+возврат четырёх снятых колонок); `config_extensions` (заглушка); свойства, не имеющие
+XML-представления (пункт Г.2 «Справочная информация», п. 28) — их в выгрузке нет ни в одной форме,
+поэтому узел V42 их и не сохранял: полнота считается по свойствам, которые выгрузка отдаёт.
+
+
+
 

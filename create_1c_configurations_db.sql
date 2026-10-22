@@ -78,13 +78,20 @@ CREATE TABLE IF NOT EXISTS configurations (
     usage_purpose VARCHAR(100),
     embedded_language VARCHAR(50),
     main_roles TEXT[],
-    -- Ссылки на модули без FK — см. шапку файла (взаимные ссылки, в живой БД FK нет).
-    app_module_id INT,
-    session_module_id INT,
-    data_proc_module_id INT,
-    ext_conn_module_id INT,
-    mobile_functionality TEXT[],
+    -- Узел V42 (21.10.2026): колонок app_module_id, session_module_id,
+    -- data_proc_module_id, ext_conn_module_id, mobile_functionality больше нет.
+    -- Первые четыре держали id строк bsl_modules, но предопределённые модули
+    -- программ в <Properties> корневого Configuration.xml не описаны вовсе: модуль
+    -- существует только файлом Ext/<Имя>.bsl и записью индекса состава
+    -- Configuration.<Имя>.SessionModule (узел V40). Разрешать такую ссылку было не
+    -- из чего, поэтому колонки были вечно NULL. Обратная связь уже есть и она
+    -- правильная по направлению: bsl_modules.configuration_id -> configurations.id.
+    -- mobile_functionality TEXT[] снят: значение UsedMobileApplicationFunctionalities
+    -- — пары (functionality, use), в массиве строк признак use терялся; ниже то же
+    -- значение лежит в mobile_application_functionalities jsonb.
+    -- Для живой БД — migrate_v42_configuration_header_fields.sql.
     default_language VARCHAR(50),
+
     -- Узел V39: многоязычные свойства корня (BriefInformation, DetailedInformation,
     -- Copyright, VendorInformationAddress, ConfigurationInformationAddress) — JSONB по
     -- языкам. Прежние VARCHAR(500) к тому же резали бы значение по лимиту (отказ до
@@ -103,7 +110,57 @@ CREATE TABLE IF NOT EXISTS configurations (
     ext_comp_sync_mode VARCHAR(100),
     interface_compat_mode VARCHAR(100),
     compatibility_mode VARCHAR(50),
+    -- Узел V42 (21.10.2026): остальные свойства <Properties> корневого
+    -- Configuration.xml. Замер 8 выгрузок: свойств 55, из них 22 имели колонку,
+    -- 19 непусты и колонки не имели, 14 пусты везде — покрытие стало 55/55.
+    -- Тип выбран по ФОРМЕ значения из выгрузки, а не по имени свойства:
+    --   * скалярный токен перечисления -> VARCHAR;
+    --   * qualified-имя объекта метаданных (CommonForm./SettingsStorage./Style./
+    --     Interface.) -> VARCHAR ЗНАЧЕНИЕМ ЦЕЛИКОМ: префикс вида несёт смысл и не
+    --     снимается (в отличие от default_language/main_roles узла V32);
+    --   * логический флаг -> BOOLEAN;
+    --   * перечень записей (пары functionality+use; mime/uti/ext/processingVariant/
+    --     isCustom) -> JSONB-массив: в скаляре или TEXT[] пары разъехались бы.
+    -- Колонки, помеченные "форма НЕ подтверждена", пусты во всех восьми выгрузках:
+    -- их тип — предположение по форме имени и по измеренному однотипному соседу, а не
+    -- замер. Разбор обязан назвать форму детей, если в выгрузке они появятся.
+    configuration_extension_compatibility_mode VARCHAR(50),
+    database_tablespaces_use_mode VARCHAR(50),
+    main_client_application_window_mode VARCHAR(50),
+    object_autonumeration_mode VARCHAR(50),
+    use_managed_form_in_ordinary_application BOOLEAN,
+    use_ordinary_form_in_managed_application BOOLEAN,
+    mobile_application_functionalities JSONB,
+    allowed_incoming_share_request_types JSONB,
+    common_settings_storage VARCHAR(255),
+    reports_variants_storage VARCHAR(255),
+    reports_user_settings_storage VARCHAR(255),
+    form_data_settings_storage VARCHAR(255),
+    dynamic_lists_user_settings_storage VARCHAR(255),
+    default_report_form VARCHAR(255),
+    default_report_variant_form VARCHAR(255),
+    default_report_settings_form VARCHAR(255),
+    default_style VARCHAR(255),
+    default_interface VARCHAR(255),
+    default_constants_form VARCHAR(255),
+    -- форма НЕ подтверждена ни одной выгрузкой (свойства пусты везде):
+    default_search_form VARCHAR(255),
+    default_dynamic_list_settings_form VARCHAR(255),
+    default_collaboration_system_users_choice_form VARCHAR(255),
+    default_data_history_change_history_form VARCHAR(255),
+    default_data_history_version_data_form VARCHAR(255),
+    default_data_history_version_differences_form VARCHAR(255),
+    default_report_appearance_template VARCHAR(255),
+    url_external_data_storage VARCHAR(255),
+    name_prefix VARCHAR(255),
+    -- перечни неизвестной формы — общий конвертер в JSONB (состав детей знать не нужно):
+    mobile_application_urls JSONB,
+    required_mobile_application_permissions JSONB,
+    standalone_configuration_restriction_roles JSONB,
+    additional_full_text_search_dictionaries JSONB,
+    content JSONB,
     created_at TIMESTAMP DEFAULT NOW(),
+
     updated_at TIMESTAMP DEFAULT NOW()
 );
 

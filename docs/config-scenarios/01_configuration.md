@@ -28,6 +28,15 @@
 > основа узла V38)» в конце файла. Профиль свойств корневого `Configuration.xml` (55 свойств)
 > заведён слоем знаний `xml-format` с якорем `property-profile-configuration` (MCP
 > `1c-knowledge-base`), его доступность сторожит `tools/check_xml_format_layer.py`.
+> **Дополнение 21.10.2026:** фикстура `MinCfg` расширена оператором до 46 каталогов видов +
+> `Ext/` (4 предопределённых модуля), индекс — 243 записи; новые замеры и перезаписанное
+> состояние — подраздел «↗ Расширение эталона (21.10.2026)» в разделе эталона. Тем же днём в 18:41
+> фикстура изменена повторно: 47 каталогов (46 видов + `Ext/`, в котором появились файлы
+> представления корня), индекс — 264 записей; снимок — подраздел «↗↗ Второй срез эталона
+> (21.10.2026, 18:41)». Первые загрузки
+> XML-выгрузок `BP3` и `KomMag` в БД; трёхконтурная сверка парсер↔БД↔документация —
+> `_v41_three_configs_check.py`. Позиция журнала — п. 30
+> `.clinerules/1c-configurations-core_Rule.md`.
 
 # Сценарий 1: Загрузка полной конфигурации 1С (configuration)
 
@@ -244,7 +253,7 @@ XSD **нет** для 19 каталогов BGU2: `CommandGroups`, `CommonAttrib
 | FK дочерних таблиц | `attributes.parent_uuid`, `tabular_sections.parent_uuid`, `forms.parent_uuid`, `templates.parent_uuid` → `external_report(uuid) ON DELETE CASCADE` — других родителей принять не могут |
 | Уникальность `uuid` | `attributes_uuid_key`, `tabular_sections_uuid_key` — **глобальные**; у `forms`, `templates` с узла V13 уже `UNIQUE (parent_uuid, uuid)` + отдельный индекс по `uuid` (прецедент миграции есть) |
 | Таблица-заголовок внешних объектов | `external_report` — CHECK `object_kind` ровно два значения; узел V31 добавил provenance (`origin_kind` ∈ `catalog`/`binary_file`/`authored_layout`, `origin_path`, `origin_sha256`, `origin_manifest`) — таблица описывает **внешний** объект и его вход, объект конфигурации туда не принадлежит |
-| Модули | `bsl_modules` **уже полиморфна**: есть и `configuration_id` (FK на `configurations`), и `parent_uuid`/`parent_type`/`module_type` без FK, `uq_bsl_modules_parent_file (parent_uuid, file_path) WHERE parent_uuid IS NOT NULL` → модули конфигурации (`Ext/*.bsl`, `CommonModules/*/Ext/Module.bsl`, модули форм) пишутся **без изменения схемы** |
+| Модули | `bsl_modules` имеет и `configuration_id`, и `parent_uuid`/`parent_type`/`module_type` — но **для конфигурации она не использовалась ни разу**: замер живой БД — 2 строки, обе модули внешних объектов, `configuration_id` не заполнен ни в одной. Оставлять модули конфигурации в этой таблице **решением оператора 21.10.2026 отказано**: модули объектов, общие модули и предопределённые модули программ имеют разное назначение и разные правила вызова. Слоты задаёт выгрузка (замер BGU2, 14 808 `.bsl`): `CommonModules/<obj>/Ext/Module.bsl` 2374, `ObjectModule`/`ManagerModule` у справочников 410/438, документов 469/471, отчётов 575/619, у регистров сведений `ManagerModule` 648 + `RecordSetModule` 280 без `ObjectModule`, `ValueManagerModule` у констант 154, `CommandModule` у общих команд 226, `Form/Module.bsl` у форм |
 | Словарь целей обогащения | типы `Configuration`, `Catalog`, `Document`, … **уже зарезервированы** в `.clinerules/1c-configurations-enrichment_Rule.md` («варианты 1–2 не реализованы, типы зарезервированы») — модель целей под единую таблицу спроектирована заранее |
 
 ### Сравнение вариантов
@@ -296,9 +305,12 @@ XSD **нет** для 19 каталогов BGU2: `CommandGroups`, `CommonAttrib
 Зачем отдельный эталон. BGU2 отвечает на вопрос «как ведёт себя большой состав» (158 925 XML,
 14 812 `.bsl`), но он не отвечает на вопрос «покрыты ли виды»: в BGU2 нет каталогов `Bots`,
 `WebSocketClients`, `ChartsOfCalculationTypes`, `CalculationRegisters`, `ExternalDataSources`,
-и ни один прогон на нём не проверяет редкие виды. `MinCfg` — ровно наоборот: один объект каждого
-вида, минимальное время разбора, полный срез **широты**. Пара эталонов «широта + глубина» и есть
-измеримая база для узла V38.
+и ни один прогон на нём не проверяет редкие виды. `MinCfg` — ровно наоборот: на снимке 19.10.2026
+— один объект каждого вида, минимальное время разбора, полный срез **широты**. Пара эталонов
+«широта + глубина» и есть измеримая база для узла V38. Уточнение: после второго среза фикстуры
+(21.10.2026 18:41, подраздел «↗↗» ниже) широта видов сохранена, но внутри части видов состав стал
+множественным (`SettingsStorages` 41 запись индекса, `WebServices` 38, `HTTPServices` 28) —
+формулировку «один объект каждого вида» нельзя возвращать как описание текущего среза.
 
 Замеры каталога `C:\1C_LLM\LoadDoc\Configurations\XML_files\MinCfg`:
 
@@ -312,17 +324,83 @@ XSD **нет** для 19 каталогов BGU2: `CommandGroups`, `CommonAttrib
 | сверка «разобрано = записано» | карточка загрузчика: «разобрано записей 196, записано в configuration_objects 196»; живой SQL: `idx_rows=196 types=35 maxdepth=2 composite_ids=58 uuid_filled=138 configversion=114` — расхождений нет |
 | регресс узла V32/V33 | `python tools/check_v32_zero_configuration.py` — **проверок 156, провалено 0** |
 
+### ↗ Расширение эталона (21.10.2026)
+
+Таблица выше — датированный снимок фикстуры 19.10.2026, она сохранена как факт той даты.
+21.10.2026 в 15:04 оператор пересоздал оба корневых XML и добавил 12 каталогов видов — ровно
+те виды, об отсутствии которых говорилось выше: `AccountingRegisters`, `AccumulationRegisters`,
+`BusinessProcesses`, `CalculationRegisters`, `ChartsOfCalculationTypes`,
+`ChartOfCharacteristicTypes`, `ChartsOfAccounts`, `DocumentJournals`, `Documents`,
+`ExternalDataSources`, `Interfaces`, `Tasks`. В `Ext/` добавлен четвёртый предопределённый
+модуль `OrdinaryApplicationModule.bsl`.
+
+| Что измерено (замер 21.10.2026) | Значение |
+|---|---|
+| `Configuration.xml` | свойств `Properties` — **55** (без изменений, маркеры слоя `found=55 mapped=22` на этот момент не задеты — узел V42 тем же днём перевёл карточку профиля на `found=55 mapped=55`, п. 31); `ChildObjects` — **47** объектов (**46** вида, `Constant` — 2); `InternalInfo` — те же 7 пар `ClassId`/`ObjectId` (v1 — 2, v4 — 12); `UsedMobileApplicationFunctionalities` — 38 записей, `use=true` у 2 |
+| `ConfigDumpInfo.xml` | **243** записи состава, 47 видов индекса (46 видов + `Configuration`), максимальная вложенность 2; `configVersion` есть у **159** (у 84 вложенных отсутствует — правило D4); идентификаторы: канонических UUID v4 — **152**, составных `<uuid>.N` — **91**, с суффиксом — 0 |
+| каталоги выгрузки | **46 каталогов видов метаданных** + `Ext/` (4 модуля предопределённых программ: `ManagedApplicationModule.bsl`, `OrdinaryApplicationModule.bsl`, `SessionModule.bsl`, `ExternalConnectionModule.bsl`) + 2 корневых XML |
+| файлы всего | `.xml` 103, `.bsl` 61, `.html` 8, `.xsd` 4, `.bin` 2, `.png` 1, `.txt` 1 |
+| состояние БД после перезагрузки | `load_1c_catalog_tool(..., force=True)` → `♻️`: `configurations id=175` (прежняя строка `id=152` снята, привязок внешних объектов к ней не было); `configuration_objects` — **243 строки**, дублей 0, ссылок на отсутствующего родителя 0 |
+| сверка «разобрано = записано» | карточка загрузчика: «разобрано записей 243, записано 243»; живой SQL: `idx_rows=243 types=47 maxdepth=2 composite_ids=91 uuid_filled=152 configversion=159` — расхождений нет |
+| трёхконтурная сверка | `python _v41_three_configs_check.py` (парсер↔БД↔документация, включая заголовки BP3/KomMag) — **57 проверок, провалено 0** |
+
+Запись до изменения (`id=152`, 196 строк) точка входа удержала как `⚠️ name_conflict` (правило R5):
+источник новее записи — молча перезаписывать нельзя; `force=True` — только по подтверждению
+оператора. Тот же случай `_v41_three_configs_check.py` называет отдельным статусом «источник
+новее записи» (SKIP с причиной), отделяя его от истинного расхождения.
+
+### ↗↗ Второй срез эталона (21.10.2026, 18:41)
+
+Фикстура изменена оператором повторно в тот же день. Таблица выше (243/47/… при 46 каталогах) —
+снимок 15:04, он сохранён как факт этого времени; ниже — текущее состояние фикстуры, на котором
+работают проверки узла V42.
+
+Замеры каталога `C:\1C_LLM\LoadDoc\Configurations\XML_files\MinCfg` (21.10.2026 18:41,
+`python _v42_fixture_probe.py` — временный зонд, вывод `_v42_fixture_probe.txt`):
+
+| Что измерено | Значение |
+|---|---|
+| каталоги выгрузки | **47 каталогов = 46 каталогов видов + `Ext/`**; в `Ext/` кроме четырёх предопределённых модулей появились **файлы представления корня**: `Help.xml`, `HomePageWorkArea.xml`, `Logo.xml`, `MainSectionPicture.xml`, `Splash.xml` и каталоги `Help/`, `Logo/`, `MainSectionPicture/`, `Splash/` |
+| файлы всего | `.xml` 124, `.bsl` 65, `.html` 9, `.xsd` 4, `.bin` 2, `.png` 2, `.jpg` 2, `.zip` 1, `.txt` 1 |
+| `ConfigDumpInfo.xml` | **264** записи состава, **47** корневых видов (46 видов + `Configuration`); `configVersion` — атрибут `<Metadata …>`, заполнен у **180**; идентификаторы: канонических UUID v4 — **160**, составных `<uuid>.<N>` — **103**, **одна запись с буквенным суффиксом**: `Configuration.MinCfg.MainSectionPicture` = `ce6e6a0a-…-00fa490e64b5.c` |
+| что это значит для формата идентификатора | суффикс дочернего идентификатора — **шестнадцатеричный**, а не десятичный: у записей корня суффиксы идут `.0`…`.8` и `.c` (= 12). Прежняя формулировка «составной `<uuid>.1`» неполная: она описывает только числовой случай |
+| записи корня `Configuration` (10) | `Configuration.MinCfg` + `.0 OrdinaryApplicationModule`, `.1 Logo`, `.2 Splash`, `.3 Help`, `.5 ExternalConnectionModule`, `.6 ManagedApplicationModule`, `.7 SessionModule`, `.8 HomePageWorkArea`, `.c MainSectionPicture` — то есть **индекс состава моделирует и файлы представления корня**, а не только предопределённые модули |
+| эталон больше не «по одному объекту на вид» | распределение по корневым видам включает крупные группы: `SettingsStorage` 41, `WebService` 38, `HTTPService` 28, `ExchangePlan` 19, `CommonForm` 18, `DataProcessor` 12, `Report` 8, `InformationRegister` 5. Широта видов сохранена (46), но состав внутри видов перестал быть одиночным — называть эталон «ровно один объект каждого вида» про текущему срезу нельзя |
+| состояние БД после перезагрузки | `load_1c_catalog_tool(..., force=True)` → `♻️`: `configurations id=176` (прежняя строка `id=175` снята), `configuration_objects` — **264 строки**; KomMag — `id=177` (прежняя `id=174`), BP3 — `id=173` без изменений, BGU — `id=151`. Привязок внешних объектов к этим заголовкам нет, битых ссылок 0 |
+| сверка «разобрано = записано» | живой SQL и штатный парсер совпадают: `idx_rows=264 types=47 maxdepth=2 composite_ids=103 uuid_filled=160 configversion=180`, гистограмма глубины `{0: 56, 1: 130, 2: 78}`, с суффиксом 1, дублей 0, сирот 0 |
+| регресс | `python _v41_three_configs_check.py` — ожидания скрипта соответствуют этому срезу, **57 проверок, провалено 0** |
+
+### Состояние БД по остальным выгрузкам (первые загрузки 21.10.2026, замеры индексов — первые):
+BP3 — `id=173`, индекс **147 294** строки (43 вида, глубина 4, канонических uuid 104 335,
+составных 42 790, с суффиксом 169, `configVersion` 83 050, сирот 0); KomMag — `id=174` (первая
+загрузка; после `force=True` 21.10.2026 — `id=177`), индекс
+**4 419** строк (28 видов, глубина 2, uuid 3 325, составных 1 076, с суффиксом 18,
+`configVersion` 2 056, сирот 0). Многоязычные колонки обоих заголовков — jsonb-словари `ru`
+(V39); `main_mode` KomMag — `OrdinaryApplication`, BP3 — `ManagedApplication` (совпадает со
+слоем `property-configuration-defaultrunmode`).
+
+
 Что этот эталон закрывает из открытых вопросов:
 
-- **Q4 частично**: позиции `Bots` и `WebSocketClients`, которых в BGU2 не было, в `MinCfg` есть
-  (по одному объекту) — их реализацию становится на чём проверять. `ChartsOfCalculationTypes`,
-  `CalculationRegisters`, `ExternalDataSources` по-прежнему не представлены ни в одной выгрузке,
-  поэтому остаются вне модели (группа H);
-- **свойства корня**: 55 свойств разобраны и разложены по статусам — 22 маппятся в
-  `configurations` (словарь `CONFIGURATION_FIELDS`), 33 не имеют колонки (из них **6 непустых** —
-  слепые зоны), 5 колонок таблицы не заполняются осознанно (`NOT_FILLED_COLUMNS`). Профиль
-  зафиксирован слоем знаний `xml-format`, якорь `property-profile-configuration`, регресс
-  доступности — `tools/check_xml_format_layer.py` (проверок 85, провалено 0);
+- **Q4 закрыт эталоном (21.10.2026)**: позиции `Bots` и `WebSocketClients`, которых в BGU2 не
+  было, в `MinCfg` есть с 19.10.2026; после расширения эталона (подраздел выше) в нём есть и
+  `ChartsOfCalculationTypes`, `CalculationRegisters`, `ExternalDataSources`. Редкие виды получили,
+  на чём проверять реализацию; группа H из модельного перечня снимается
+  для этих видов (см. таблицу групп), вне модели остаются только каталоги BGU2 без XSD.
+  Уточнение по второму срезу (18:41): внутри видов состав перестал быть одиночным
+  (`SettingsStorage` 41, `WebService` 38, `HTTPService` 28 записей индекса) — «по одному объекту»
+  верно для снимка 15:04 и для каталогов, добавленных 19.10.2026;
+- **свойства корня**: 55 свойств разобраны и разложены по статусам. Снимок 19.10.2026 (MinCfg до
+  расширения): 22 маппинга в `configurations` (словарь `CONFIGURATION_FIELDS`), 33 свойства без
+  колонки (из них **6 непустых** — слепые зоны), 5 колонок не заполнялись осознанно
+  (`NOT_FILLED_COLUMNS`). **Слепая зона закрыта узлом V42 (21.10.2026)**: словарь разрешает все
+  **55** свойств, в `configurations` добавлено **33** колонки и снято **5** (четыре колонки
+  предопределённых модулей — неразрешимы из XML, пятая — `mobile_settings_storage`, её в словаре
+  нет); живая таблица — **59** колонок. Профиль зафиксирован слоем знаний `xml-format`
+  (якоря `property-profile-configuration`, `configuration-header-full-columns-v42`), регресс
+  доступности — `tools/check_xml_format_layer.py` (проверок 256, провалено 0); норматив узла —
+  п. 31 `.clinerules/1c-configurations-core_Rule.md`. Заполненность новых колонок по загруженным
+  заголовкам — открытая позиция п. 31 (BGU/BP3 загружены до узла);
 - **достижимость маппинга (узел V39, 21.10.2026)**: из 22 маппингов шесть — `Synonym`,
   `BriefInformation`, `DetailedInformation`, `Copyright`, `VendorInformationAddress`,
   `ConfigurationInformationAddress` — давали `NULL` в `configurations` при заполненных значениях в
@@ -338,9 +416,13 @@ XSD **нет** для 19 каталогов BGU2: `CommandGroups`, `CommonAttrib
 
 - **модули предопределённых программ**: свойства `AppModule`/`SessionModule`/`DataProcessorsModule`/
   `ExternalConnectionModule` в `Configuration.xml` **отсутствуют** — модуль задаётся только файлом
-  в `Ext/`. Поэтому колонки `app_module_id`/`session_module_id`/`data_proc_module_id`/
-  `ext_conn_module_id` не могут быть заполнены из корневого XML: ссылка разрешается только по
-  `Ext/<Имя>.bsl` (группа C), и это надо реализовать, а не называть «свойства нет в выгрузке».
+  в `Ext/` (а индекс состава моделирует его записями `Configuration.<Имя>.<ВидМодуля>`, см. раздел
+  о словаре слотов). Поэтому из корневого XML ссылка не разрешается ни при каких условиях: колонки
+  `app_module_id`/`session_module_id`/`data_proc_module_id`/`ext_conn_module_id`, которые V32 создавал
+  и оставлял `NULL`, **сняты узлом V42** — `NULL` при существующем файле модуля был бы ложью о
+  данных. Разрешимой ссылку делает таблица группы C (её собственный ключ «конфигурация × вид
+  модуля»), а не возврат этих колонок; называть «свойства нет в выгрузке» — ошибочно: свойства нет
+  в XML, модуль есть файлом.
 
 ### Раскладка объекта конфигурации (замер, а не пересказ BGU2)
 
@@ -381,24 +463,105 @@ V19 — снятие FK с явным каскадом, V22 — «одна та�
 | Группа | Что в выгрузке (замер `MinCfg`) | Куда пишем | Смена схемы | Обоснование и риск |
 |---|---|---|---|---|
 | **A. Объекты с общей раскладкой** — реквизиты, формы, макеты | `Catalogs/МинСправочник.xml` (реквизиты внутри XML), `Reports/МинОтчёт/Forms/…` + `Templates/…`, `DataProcessors/`, `CommonForms/Форма/Ext/Form.xml`, `CommonTemplates/`, `HTTPServices/`, `ExchangePlans/`, `SettingsStorages/`, `IntegrationServices/`, `WebSocketClients/`, `Bots/` | общие `attributes`, `tabular_sections`, `forms`, `form_ext`, `templates`; родитель — `parent_uuid` = uuid объекта метаданных, `parent_type` = `configuration_object`, вид — колонка `child_kind` (`Catalog`/`Report`/…) | **да**: снять `attributes_uuid_key`/`tabular_sections_uuid_key` в пользу `UNIQUE (parent_uuid, uuid)`; снять FK `parent_uuid → external_report(uuid)`, каскад — явными `DELETE` | совпадает с V22 («один заголовок — колонка вида») и с уже зарезервированными типами целей обогащения (`Catalog`, `Document`, …). Риск — снятый FK, прецедент есть (`bsl_modules`, V19). Именно эта группа даёт алиасы по реквизитам и поиск по составу объекта конфигурации |
-| **B. Модули кода объектов** | `CommonModules/МинМодуль/Ext/Module.bsl`, `WebServices/…/Ext/Module.bsl`, модули форм и менеджеров объектов группы A | `bsl_modules` (`configuration_id`, `object_type`, `object_name`, `file_path`, `module_type`, `code`, `code_size`) | **нет** — таблица уже полиморфна (`configuration_id` + `parent_uuid`/`parent_type`) | самый дешёвый срез: в `MinCfg` 28 файлов `.bsl`; даёт поиск по коду конфигурации и авто-сниппеты без изменения модели целей |
-| **C. Модули предопределённых программ корня** | `Ext/ManagedApplicationModule.bsl`, `Ext/SessionModule.bsl`, `Ext/ExternalConnectionModule.bsl` (в BGU2 — ещё `OrdinaryApplicationModule.bsl`) | `bsl_modules` с `object_type='Configuration'`, `object_name` = имя конфигурации, `module_type` — имя файла | **нет** | снимает ложную формулировку «свойств предопределённых модулей в выгрузке нет»: свойств в XML действительно нет, но модуль **есть файлом**. Колонки `app_module_id`/`session_module_id`/`data_proc_module_id`/`ext_conn_module_id` остаются `NULL` (ссылки из XML не существует), содержимое при этом доступно; разрешение ссылки — по `file_path` |
+| **B. Модули кода объектов** | **словарь слотов задаёт выгрузка, а не схема** (замер BGU2, 14 808 файлов `.bsl`): `CommonModules/<obj>/Ext/Module.bsl` — 2374, `Catalogs/<obj>/Ext/ObjectModule.bsl` 410 + `ManagerModule.bsl` 438, `Documents/…` 469 + 471, `Reports/…` 575 + 619, `DataProcessors/…` 180 + 166, `InformationRegisters/<obj>/Ext/ManagerModule.bsl` 648 + `RecordSetModule.bsl` 280 (**`ObjectModule` у регистра нет**), `AccumulationRegisters/…/ManagerModule.bsl` 54, `Constants/<obj>/Ext/ValueManagerModule.bsl` 154, `Enums/…/ManagerModule.bsl` 95, `CommonCommands/<obj>/Ext/CommandModule.bsl` 226. **Модули форм в этот перечень не входят** (`<вид>/<obj>/Forms/<Форма>/Ext/Form/Module.bsl`, у общей формы — `CommonForms/<obj>/Ext/Form/Module.bsl` 311): модуль формы — содержимое формы, а не слот вида (записей модуля формы в индексе состава — 0), хранение — группа A по правилу R9; полный словарь слотов по обоим источникам — раздел «Словарь „вид метаданных → слот модуля“» ниже | **по назначению модуля, не в одну таблицу** (решение оператора 21.10.2026): общие модули — таблица вида `CommonModule`; модули объекта/менеджера/набора записи/менеджера значения/команда — принадлежность объекту своего вида; модули форм — к строке формы | **да** | прежнее обоснование («`bsl_modules` уже полиморфна, схема не нужна») **замером не подтверждается**: в живой таблице 2 строки, обе — модули внешних объектов, `configuration_id` не заполнен ни в одной. Смешивать модули объектов с модулями конфигурации нельзя: у них разные правила вызова (модуль менеджера обращается по имени объекта из любого места, общий модуль — по своему имени, предопределённый модуль — вообще не вызывается по имени). Итоговый вид хранения (колонки в таблице вида vs дочерняя таблица модулей вида) — открытая точка V38 |
+| **C. Модули предопределённых программ корня** | `Ext/ManagedApplicationModule.bsl`, `Ext/SessionModule.bsl`, `Ext/ExternalConnectionModule.bsl` (в BGU2 — ещё `OrdinaryApplicationModule.bsl`) | **отдельная таблица на каждый вид такого модуля**, по одной строке на конфигурацию, ключ — конфигурация (её `id`/`uuid`) — решение оператора 21.10.2026: это объекты конфигурации в единственном экземпляре, а не модули объекта | **да** (новые таблицы) | снимает ложную формулировку «свойств предопределённых модулей в выгрузке нет»: свойств в XML действительно нет, но модуль **есть файлом**. После появления таблиц ссылка на предопределённый модуль корня выражается ключом этой таблицы («конфигурация × вид модуля»); четыре колонки `app_module_id`/`session_module_id`/`data_proc_module_id`/`ext_conn_module_id` узел V42 снял именно потому, что ссылки из XML не существует, а `NULL` при существующем файле модуля — ложь о данных |
 | **D. Значения перечислений** | `Enums/МинПеречисление.xml` (значения внутри XML: `Name`, `Code`, `Description`) | новая таблица `enum_values` (`object_uuid`, `name`, `code`, `synonym jsonb`, `order_index`) | **да** (новая таблица) | `enum_values` в живой схеме нет (подтверждено аудитом и `_cmp_ddl.py`); значения перечисления — типичный объект поиска («что означает это состояние»), а в `properties jsonb` они стали бы неиндексируемыми |
 | **E. Объекты без дочерней структуры — только свойства** | `Constants/`, `SessionParameters/`, `FunctionalOptions/`, `FunctionalOptionsParameters/`, `FilterCriteria/`, `Subsystems/`, `Styles/`, `StyleItems/`, `CommandGroups/`, `CommonCommands/`, `CommonAttributes/`, `EventSubscriptions/`, `Languages/` | колонка `configuration_objects.properties jsonb` + `source_path`/`source_format`: скалярные значения — текстом, перечни — массивом | **да** (колонка) | отдельная таблица на каждый вид противоречит V22; общей раскладки у этих видов нет, и jsonb — единственная форма без 41 таблицы. Ограничение называется прямо: строгой типизации по jsonb нет, `pg_trgm` в кластере не установлен |
 | **F. Специфичная структура вида** | `InformationRegisters/МинРегистр.xml` (измерения/ресурсы/периодичность), `DefinedTypes/ОпределяемыйТип1.xml` (тип значения), `Roles/Роль1/Ext/Rights.xml` (права), `ScheduledJobs/…/Ext/Schedule.xml` (расписание); в BGU2 — `ChartOfAccounts`, `DocumentNumerators`, `Sequences`, маршруты бизнес-процессов | сначала `properties jsonb` (как E) плюс таблица `configuration_object_content` (`object_uuid`, `content_name`, `ext`, `ext_bin`, `ext_root_tag`, `truncated`); строгие колонки (`register_dimensions`, `register_resources`) — только когда появится требование запроса | **да** (одна таблица содержимого) | правила проекта запрещают заводить 41 таблицу «на всякий случай»; при этом права роли и расписание задания — файлы содержимого со своей схемой, и прятать их в `properties` нельзя: их нужно уметь собрать обратно |
 | **G. Двоичное и не-XML содержимое** | `XDTOPackages/AgentScripts/Ext/Package.bin`, `CommonPictures/ОбщаяКартинка1/Ext/Picture.xml` + `Ext/Picture/Picture.png`, `Ext/CommandInterface.xml`, `ClientApplicationInterface.xml`, `HomePageWorkArea.xml`, `MainSectionPicture/`, `Splash/`, `Ext/ParentConfigurations.bin` | `configuration_object_content`: `ext_bin bytea` + путь; разбор содержимого **не** выполняется | **да** (та же таблица, что F) | побайтовое воспроизведение возможно только при хранении бинаря как есть — тот же контракт, что `form_ext.ext_bin` и `templates.ext_bin`. Попытка разобрать интерфейс = обещание, которое нечем проверить |
-| **H. Вне модели — сознательно** | `ChartsOfCalculationTypes`, `CalculationRegisters`, `ExternalDataSources` — нет ни в BGU2, ни в `MinCfg`; плюс 19 каталогов BGU2 без XSD | не пишем | — | без эталона нечего проверять, без XSD нельзя назвать обязательные свойства — разбор остался бы непроверяемым. Держать в плане как незакрытые (Q4), реализацию не начинать |
+| **H. Вне модели — сознательно** | по замеру 19.10.2026: `ChartsOfCalculationTypes`, `CalculationRegisters`, `ExternalDataSources` — нет ни в BGU2, ни в `MinCfg`. **Снимается расширением эталона 21.10.2026** (подраздел «↗ Расширение эталона»): эти виды есть в `MinCfg` по одному объекту и переходят в группы A–G по своему содержимому; в H остаются 19 каталогов BGU2 без XSD | не пишем для каталогов без XSD | — | без XSD нельзя назвать обязательные свойства — разбор остался бы непроверяемым. Держать в плане как незакрытые для каталогов без XSD, реализацию по ним не начинать |
+
+### 🧾 Словарь «вид метаданных → слот модуля» (замер 21.10.2026)
+
+Два независимых источника сверены в одном замере: файлы `Ext/*.bsl` подтверждают слот только там,
+где текст модуля непустой (платформа пишет файл при непустом содержимом), а индекс состава
+`ConfigDumpInfo.xml` перечисляет модуль дочерним объектом метаданных — то есть видит и пустые
+модули. Сборка и девять инвариантов — `_v40_slots_table.py` (прогон 21.10.2026: **провалено 0**,
+rc=0), машинная таблица — `_v40_slots_table.json`, текстовая — `_v40_slots_table.txt`.
+
+> ⚠️ Замер — снимок фикстуры **до** расширения `MinCfg` 21.10.2026 15:04: итоговые счётчики
+> (41 582 индекса / 41 511 файл / 28 896 модулей форм) и счётчики по выгрузке `MinCfg`
+> (в том числе `.Form` = 1) не учитывают расширенный эталон (243 записи, 46 каталогов).
+> Ожиданий по словарю пар это не меняет — слоты добавленных видов подтверждены другими
+> выгрузками, — но перепрогон `_v40_slots_table.py` и обновление маркеров слоя
+> `configuration-module-slot-dictionary` — отдельный шаг (п. 30
+> `.clinerules/1c-configurations-core_Rule.md`).
+
+**Правило разделения (принято оператором 21.10.2026).** У модуля ровно два класса:
+
+| Класс | Что это | Где хранится |
+|---|---|---|
+| `object_module` | слот модуля **вида**: `ObjectModule`, `ManagerModule`, `RecordSetModule`, `ValueManagerModule`, `Module`, `CommandModule` (модуль команды объекта) — всегда перечислен индексом состава | группа B; предопределённые модули корня — группа C |
+| `form_module` | **модуль формы**: `Forms/<форма>/Ext/Form/Module.bsl`, у общей формы — `Ext/Form/Module.bsl` | группа A: `forms` + `form_ext.ext` (правило R9 `.clinerules/1c-configurations-core_Rule.md`) — по тем же правилам, что и любая другая форма |
+
+Модуль формы слотом вида не является: записей вида `…Form.Module` в индексе семи выгрузок — **0**
+при **28 896** файлах модулей форм. Общая формулировка «у `CommonForm` модуль есть, а в словаре его
+нет» расходится не с файлами, а с классом: индекс перечисляет общую форму её содержимым —
+`CommonForm.<Имя>.Form` и `CommonForm.<Имя>.Help` — ровно той же парой, что `Catalog.<Имя>.Form.<Имя>.Form`
+(замер `.Form`: BGU2 312, BP3 440, UNF3 379, UT11 295, ZUP31 239, KomMag 31, MinCfg 1). Значит
+`CommonForm` — форма, её модуль живёт по правилам форм, а модульных слотов вида у неё нет.
+
+**Словарь слотов: 57 пар, 28 видов (27 видов метаданных + `Configuration`); каждая пара
+подтверждена обоими источниками.** Формат `вид (записей индекса / файлов)`:
+
+| Слот | Видов | Состав |
+|---|---|---|
+| `Module` (единственный модуль объекта) | 6 | CommonModule (13688/13670), WebService (83/83), HTTPService (42/42), IntegrationService (5/5), Bot (1/1), WebSocketClient (1/1) |
+| `ManagerModule` | 19 | InformationRegister (3598/3597), Catalog (2646/2645), Report (2226/2226), Document (1774/1774), DataProcessor (971/970), Enum (684/680), AccumulationRegister (440/440), Constant (300/291), DocumentJournal (154/154), ExchangePlan (93/93), ChartOfCharacteristicTypes (41/39), BusinessProcess (39/39), SettingsStorage (17/17), FilterCriterion (11/11), ChartOfCalculationTypes (7/7), Task (6/6), AccountingRegister (4/4), ChartOfAccounts (4/4), CalculationRegister (3/3) |
+| `ObjectModule` | 10 | Catalog (2387/2387), Report (2202/2202), Document (1797/1797), DataProcessor (795/780), ExchangePlan (72/72), BusinessProcess (39/39), ChartOfCharacteristicTypes (38/37), ChartOfCalculationTypes (8/8), Task (6/6), ChartOfAccounts (4/4) |
+| `CommandModule` (модуль команды объекта) | 12 | CommonCommand (1610/1610), DataProcessor (974/974), Catalog (515/515), Document (495/495), InformationRegister (264/264), Report (112/112), DocumentJournal (82/82), Task (20/20), ExchangePlan (15/15), ChartOfAccounts (10/10), BusinessProcess (9/9), AccumulationRegister (3/3) |
+| `RecordSetModule` | 5 | InformationRegister (1956/1955), AccumulationRegister (289/289), Sequence (5/5), AccountingRegister (3/3), CalculationRegister (3/3) |
+| `ValueManagerModule` | 1 | Constant (1005/987) |
+| `SessionModule` / `ManagedApplicationModule` / `OrdinaryApplicationModule` / `ExternalConnectionModule` (предопределённые модули корня, группа C) | 1 (`Configuration`) | 7/7, 6/6, 7/7, 6/6 |
+
+Итог по классу `object_module`: **41 582** записи индекса против **41 511** файлов. **71** запись
+индекса не имеет файла `.bsl` — это пустые модули (больше всего у `CommonModule` — 18, у
+`Constant.ValueManagerModule` — 18, у `DataProcessor.ObjectModule` — 15), и именно поэтому словарь
+берётся из индекса, а не из наличия файлов. Числа «71 пара вид×слот» и «71 пустой модуль» —
+разные измерения; подменять одно другим нельзя.
+
+**Видов без слотов модулей — 21** (полный охват по обоим источникам): CommandGroup,
+CommonAttribute, CommonForm (содержимое — формы), CommonPicture, CommonTemplate, DefinedType,
+DocumentNumerator, EventSubscription, ExternalDataSource (только индекс, каталога нет),
+FunctionalOption, FunctionalOptionsParameter, Interface, Language, Role, ScheduledJob,
+SessionParameter, Style, StyleItem, Subsystem (содержимое — формы), WSReference, XDTOPackage.
+Инвариант полноты: каждый вид, известный хотя бы одному источнику (49), отнесён либо к видам со
+слотом, либо к видам без него — неотнесённых 0.
+
+**Группа C моделируется индексом.** Свойств предопределённых модулей в `Configuration.xml` нет,
+но индекс перечисляет их дочерними записями объекта конфигурации —
+`Configuration.<Имя>.SessionModule`, `…OrdinaryApplicationModule`, `…ExternalConnectionModule`,
+`…ManagedApplicationModule` — 1:1 с файлами `Ext/*.bsl` (6/6/7/7). Тем же механизмом индекс
+перечисляет содержимое представления (`HomePageWorkArea`, `MainSectionPicture`, `Splash`, `Logo`,
+`CommandInterface`, `ClientApplicationInterface`, `ParentConfigurations`, `Help`) — это группа G, к
+модулям отношения не имеет. Следствие для V38: таблицы группы C заполняются из индекса и файлов
+`Ext/`, а не из XML-свойств; четырёх колонок `app_module_id`/`session_module_id`/
+`data_proc_module_id`/`ext_conn_module_id` в схеме с узла V42 **нет** (снят V42, п. 31
+`.clinerules/1c-configurations-core_Rule.md`): ссылка на предопределённый модуль корня выражается
+ключом таблицы группы C, а не возвратом этих колонок.
+
+**Что это меняет в загрузчике.** `src/configuration_meta_parser.py` и
+`src/config_dump_info_parser.py` не должны ожидать индексных слотов `CommonForm.Module` или
+`Form.Module` — их нет ни в одной выгрузке. Разбор модулей форм остаётся за загрузчиком форм
+(узлы V14/V15: `0/module` → `form_ext.ext`), а словарь слотов видов читается из
+`_v40_slots_table.json` (ключ `slot_families`).
 
 ### Порядок реализации V38 (по возрастанию цены — те же фазы, что в разделе «Предлагаемое решение по Q1–Q3»)
 
-1. **C и B — без смены схемы** (`bsl_modules` уже подходит): код конфигурации становится доступен
-   поиском; срез измеряет реальную стоимость разбора файлов видов на `MinCfg` (28 `.bsl`);
-2. **E** — `properties jsonb` + `source_path`: свойства всех видов, кроме перечислений и
+1. **E** — `properties jsonb` + `source_path`: свойства всех видов, кроме перечислений и
    специфичных структур; даёт карточку объекта конфигурации;
-3. **D** — `enum_values`: первая собственная таблица, отрабатывает паттерн «объект → дочерние
+   > **Порядок изменён 21.10.2026.** Прежний пункт 1 «**C и B — без смены схемы** (`bsl_modules`
+   > уже подходит)» снят: замер живой БД показал, что в `bsl_modules` нет ни одной строки
+   > конфигурации (2 строки — только модули внешних объектов, `configuration_id` не заполнен),
+   > а замер выгрузки показал разные слоты модулей по видам (`ObjectModule`, `ManagerModule`,
+   > `RecordSetModule`, `ValueManagerModule`, `CommandModule`, `Module`, `Form/Module.bsl`).
+   > Фазы B и C перестали быть бесплатными: они требуют новых таблиц и решаются после A;
+2. **D** — `enum_values`: первая собственная таблица, отрабатывает паттерн «объект → дочерние
    строки» до массовой загрузки;
-4. **A** — снятие глобальной уникальности и FK в пользу `UNIQUE (parent_uuid, uuid)` с явным
-   каскадом: самая дорогая фаза, трогает схему, сторожимую `_cmp_ddl.py`, и витрины;
+3. **A** — снятие глобальной уникальности и FK в пользу `UNIQUE (parent_uuid, uuid)` с явным
+   каскадом: самая дорогая фаза прежнего порядка, трогает схему, сторожимую `_cmp_ddl.py`, и витрины;
+4. **B и C** — модули: отдельные таблицы по назначению модуля (общие модули — вид `CommonModule`,
+   предопределённые модули корня — по таблице на вид), словарь слотов берется из замера выгрузки;
 5. **F и G** — `configuration_object_content` по мере появления требования (права, расписания,
    бинари);
 6. **H** — не реализуется, пока нет эталона или XSD.
@@ -412,7 +575,10 @@ V19 — снятие FK с явным каскадом, V22 — «одна та�
   `tabular_sections_uuid_key`, снятие FK `parent_uuid → external_report(uuid)`,
   `UNIQUE (parent_uuid, uuid)` и индексы разрешения родителя;
 - `create_1c_configurations_db.sql`: колонки `configuration_objects.properties` / `source_path` /
-  `source_format`, таблицы `enum_values` и `configuration_object_content`;
+  `source_format`, таблицы `enum_values` и `configuration_object_content`, **таблицы модулей по
+  назначению** (группы B и C — решение оператора 21.10.2026: общие модули отдельной таблицей вида,
+  предопределённые модули корня — по таблице на вид, `bsl_modules` для модулей конфигурации не
+  используется);
 - аддитивная `migrate_v38_configuration_content.sql` для уже созданной БД (тот же SQL, что в
   источниках, — правило «миграция + бутстрап парой»);
 - витрины: `v_config_enrichment` и новые перечни состава — только вместе с вводом типов целей

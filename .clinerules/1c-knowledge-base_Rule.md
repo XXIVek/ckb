@@ -1,5 +1,52 @@
 # Правила работы с MCP сервером "1c-knowledge-base"
 
+> **Дополнение 21.10.2026 (узел V42 — свойства корня сохраняются полностью):** карточка профиля
+> `property-profile-configuration` переведена на полное покрытие: `found=55 mapped=55`, ни одного
+> `NONE`/`NOT-FILLED`, добавлен раздел `===V42_ALL_MAPPED` (`unmapped=0`, `not_filled_columns=0` —
+> пустой словарь не заполняемых колонок это состояние, ключ контракта сохранён). Узел описан
+> ОТДЕЛЬНОЙ строкой слоя (на момент замера id 5948) с разделами `===V42_HEADER_SCOPE` (замер слепого
+> пятна: 22 свойства имели колонку, 19 непусты и колонки не имели, 14 пусты везде), `===WHY_JSONB`
+> (тип по форме значения: 7 jsonb-колонок перечней, 13 jsonb всего), `===NAMES` (точные имена
+> свойств и опровержение ошибочных форм), `===PAIRS` (пары `functionality`+`use`), `===EMPTY`
+> (пустой и отсутствующий элемент → NULL), `===UNMEASURED` (шесть перечней пусты везде — вид выбран
+> по однотипному соседу, это предположение, а не замер), `===MIGRATION`, `===BOUNDARIES`,
+> `===CHECK`. Добавлен якорь `configuration-header-full-columns-v42` — отдельная строка слоя и
+> отдельная запись `LAYERS` с маркерами `===V42_HEADER_SCOPE`, `===WHY_JSONB`, `===PAIRS`,
+> `===CHECK`, `json_records`, `CONFIGURATION_FIELDS`,
+> `migrate_v42_configuration_header_fields.sql`, `check_v42_configuration_header.py`,
+> `found=55 mapped=55 unmapped=0`. Причина отдельного якоря та же, что у
+> `configuration-reachability-section`: маркеры применяются к **каждой** строке, которую разрешает
+> якорь, — а якорь профиля разрешает не только сам профиль, но и карточку V39 (`===REACHABILITY===`)
+> и карточки отдельных свойств. Маркеры V42, положенные в общую строку профиля, требовались бы от
+> строк, где их быть не может (тот же ложный механизм, что был измерен 21.10.2026 на V39:
+> 10 провалов, из них 4 ложные). Порядок прогона V42: **24 провала** до добавления отдельной записи
+> (новые маркеры требовались от прежнего текста карточки), **3 провала** после добавления записи
+> (маркеры новой записи требовались от карточки до её обновления), **0** после обновления карточки.
+> Один якорь — одно утверждение.
+> Слой после узла: регрессия **256 проверок, провалено 0**, **девятнадцать якорей** (восемнадцать
+> в `xml-format`, один в `platform`); счётчики категории — `xml-format` 30 сниппетов / 1061 алиас,
+> aliases всего 209 334, snippets 2 913 (замер `tools/count_snippet_breakdown.py`, тот же день;
+> снимок узла V40 — 29/929, 209 202, 2 912 — остаётся историей ниже). Норматив узла — п. 31
+> `.clinerules/1c-configurations-core_Rule.md`.
+>
+> **Дополнение 21.10.2026 (узел V40 — словарь «вид метаданных → слот модуля»):** в слой добавлен
+> якорь `configuration-module-slot-dictionary` (сниппет 5947, формат `===MODULE_SLOT_LAYER`):
+> двухклассная модель модулей конфигурации — `object_module` (слоты вида: `ObjectModule`,
+> `ManagerModule`, `RecordSetModule`, `ValueManagerModule`, `CommandModule` — 57 пар «вид → слот»,
+> 28 видов) и `form_module` (модуль формы — содержимое формы, а **не** слот вида: записей
+> `*.Form.Module` в индексе состава 0 при 28 896 файлах `Form/Module.bsl`; `CommonForm` — форма,
+> её содержимое в индексе — пары `.Form`/`.Help` как у форм объектов). Индекс авторитетен:
+> 41 582 записи против 41 511 файлов, 71 запись — пустые модули без файла. Группа C (модули корня)
+> моделируется индексом 1:1 с файлами `Ext/*.bsl` — это открывает заполнение
+> `app_module_id`/`session_module_id` в V38. Основание — замер `_v40_slots_table.py`
+> (8 выгрузок, JSON с ключом `slot_families`), норматив — раздел «Словарь „вид метаданных →
+> слот модуля“» в `docs/config-scenarios/01_configuration.md`, п. 29
+> `.clinerules/1c-configurations-core_Rule.md`. Слой после узла: регрессия **240 проверок,
+> провалено 0**, **восемнадцать якорей** (семнадцать в `xml-format`, один в `platform`);
+> счётчики категории — `xml-format` 29 сниппетов / 929 алиасов, aliases всего 209 202,
+> snippets 2 912 (замер `tools/count_snippet_breakdown.py`, тот же день; снимок узла V39 —
+> 28/885, 209 158, 2 911 — остаётся историей ниже).
+>
 > **Дополнение 21.10.2026 (узел V39 — многоязычные свойства заголовка конфигурации; слой
 > `xml-format` разделён на профиль и отдельную запись достижимости):** карточки слоя от 20.10.2026
 > называли **дефект загрузчика V32** — `BriefInformation` / `DetailedInformation` / `Copyright` /
@@ -297,14 +344,14 @@ add_aliases_tool(aliases="synonym,synonyms", groups_id=52977)
 | Якорь | Что даёт | Категория | Как проверено |
 |---|---|---|---|
 | `property-profile-externaldataprocessor` | профиль свойств внешней обработки: обязательное/по умолчанию/допустимое/происхождение | `xml-format` | зонды `ibcmd` (`tools/probe_external_processing_properties.py`), 16 вариантов |
-| `property-profile-configuration` | профиль свойств корневого `Configuration.xml` (55 свойств): 22 маппятся в `configurations`, 33 без колонки (6 непустых — слепые зоны), 5 колонок не заполняются осознанно; модули предопределённых программ существуют только файлами `Ext/*.bsl`; что покрывает локальный XSD, а что — только замер выгрузки | `xml-format` | замер `MinCfg` (19.10.2026): `Configuration.xml` 55 свойств, `ChildObjects` 35, индекс 196 записей; словарь `CONFIGURATION_FIELDS` и `NOT_FILLED_COLUMNS` из `src/configuration_meta_parser.py`; разбор `xsd-schemas/2.20/objects/configuration.xsd` (1751 байт, покрыто 5 свойств, `default=` отсутствует) |
+| `property-profile-configuration` | профиль свойств корневого `Configuration.xml` (55 свойств): **все 55 маппятся в `configurations` — узел V42, 21.10.2026** (снимок 19.10.2026: 22 маппинга, 33 без колонки, 5 незаполняемых); раздел `===V42_ALL_MAPPED` (`unmapped=0`, `not_filled_columns=0` — пустой словарь не заполняемых колонок это состояние, а не отсутствие ключа); текстовые литералы предопределённых значений без `xr:`-компонента в MinCfg разбор называет, а не выдаёт `NULL` молча; само описание узла V42 — ОТДЕЛЬНОЙ строкой слоя, якорь `configuration-header-full-columns-v42` (см. строку ниже); модули предопределённых программ существуют только файлами `Ext/*.bsl`; что покрывает локальный XSD, а что — только замер выгрузки | `xml-format` | замер `MinCfg` (19.10.2026): `Configuration.xml` 55 свойств, `ChildObjects` 35, индекс 196 записей; расширение фикстуры 21.10.2026 15:04 — 46 каталогов видов, индекс 243, и 18:41 — 47 каталогов, индекс 264 (снимки различаются датой, текущим состоянием является последний); словарь `CONFIGURATION_FIELDS` и `NOT_FILLED_COLUMNS` из `src/configuration_meta_parser.py` (после V42 — `not_filled_columns = 0`); разбор `xsd-schemas/2.20/objects/configuration.xsd` (1751 байт, покрыто 5 свойств, `default=` отсутствует) |
 | `property-configuration-defaultrunmode` | **карточка одного свойства** (формат `===PROPERTY_CARD`, образец для остальных свойств и дочерних объектов): `DefaultRunMode` («Основной режим») → `configurations.main_mode`; ровно два значения — `ManagedApplication` (конфигурация на управляемых формах) и `OrdinaryApplication` (на простых формах); где лежит маппинг в коде, почему значения по умолчанию нет (XSD свойства не описывает), что не путать с `forms.form_type` | `xml-format` | замер 8 XML-выгрузок конфигураций (7 × `ManagedApplication`, KomMag — `OrdinaryApplication`), живой SQL по `configurations`, словарь `CONFIGURATION_FIELDS` и писатель `external_table_writer.py`; регрессия — запись в `LAYERS` (маркеры: заголовок карточки, `column=configurations.main_mode`, оба значения — подмена значения роняет проверку) |
 | `identifier-profile-classid-objectid-typeid-valueid` | что означают `ClassId`/`ObjectId`/`TypeId`/`ValueId` в XML, чем они заполнены у нас, версии UUID, правила для нашего контракта, **граница присутствия `ClassId`** (у объектов конфигурации этого элемента нет) и правило создания внешнего объекта (`ContainedObject` не пишут) | `xml-format` | замер 915 XML (`tools/measure_metadata_uuid_versions.py`) + сквозной проход 158 925 XML по `C:\1C_LLM\LoadDoc` + зонды импорта `ibcmd` (`_ibcmd_work/v29_probe/report.json`) |
 | `uuid-versions-metadata-vs-data` | версии UUID: метаданные против данных; чем можно и чем нельзя получить эти идентификаторы; состав служебного справочника ИОМ | `platform` + `xml-format` | тот же замер + `tools/_v30_uuid5_probe.py` + разбор выгрузки BGU2 |
 | `configuration-dump-layout-catalogs` | состав каталога XML-выгрузки **конфигурации**: 42 каталога видов метаданных со счётчиками, полный состав `Ext/` конфигурации, единая раскладка объекта (`<Имя>.xml` + `Ext/*.bsl` + `Forms/` + `Templates/`), какие виды в эталонной выгрузке отсутствуют | `xml-format` | замер 17.10.2026 по выгрузке BGU2 (158 925 XML, 14 812 `.bsl`; на момент замера — `C:\1C_LLM\LoadDoc\BGU2`, с 18.10.2026 — `C:\1C_LLM\LoadDoc\Configurations\XML_files\BGU2`) |
 | `configdumpinfo-index-structure` | структура `ConfigDumpInfo.xml`: `ConfigVersions`/`Metadata name|id|configVersion`, иерархия дочерних элементов именем через точку, два стиля идентификаторов дочерних (v4 и составной `<uuid>.1`), готовый перечень объектов и признак изменения | `xml-format` | тот же замер: 86 379 пар `name`/`id`, 45 видов, 67 887 `configVersion` |
 | `configuration-object-uuid-location` | где брать uuid объекта конфигурации (`<Catalog uuid=…>`, `<CommonModule uuid=…>` — тег вида, второй уровень), чем это отличается от внешнего объекта (`<ExternalReport uuid>` + `ContainedObject`/`ClassId`), правило сверки с `ConfigDumpInfo.xml`, словарь «каталог множественный ↔ вид сингулярный» | `xml-format` | замеры по `Catalogs\АналитическиеКодыКПС.xml`, `CommonModules\АвтоматическоеПолучениеЭДО.xml` + `ConfigDumpInfo.xml` (совпадение uuid подтверждено) |
-| `property-common-name-synonym-comment` | **общие свойства** `Name` / `Synonym` / `Comment` — есть у всех объектов метаданных и у корня: обязателен только `Name` (в `Configuration.xml` свойства `Name` нет вовсе — значение берётся из имени каталога выгрузки), у форм и элементов формы `Synonym`/`Comment` не выгружаются; граница `Name` — 80 символов (замер 171 280 пар `Metadata id`/`name` по `ConfigDumpInfo.xml` BGU2: максимум 79), у внешнего объекта имя дотягивает до 129 — граница относится к объектам конфигурации; правило ИТС «если синоним не задан, используется имя» (замер: синоним пуст у 122 797 объектов из 171 280); пустой `<Comment/>` читается как `NULL`, а не как пустая строка; маршрут в БД (`external_report.name/synonym/comment`, `attributes`, `tabular_sections`, `forms`, `configurations.name/synonym/comment`) | `xml-format` | замер 8 XML-выгрузок + живой SQL по `external_report`/`attributes`/`configurations`; словарь `SYNONYM_FIELDS`/`COMMENT_FIELDS` и разбор `_prop_text`/`_read_multilang` в `src/external_meta_parser.py` |
+| `property-common-name-synonym-comment` | **общие свойства** `Name` / `Synonym` / `Comment` — есть у всех объектов метаданных и у корня: обязателен только `Name` (в `Configuration.xml` свойства `Name` нет вовсе — значение берётся из имени каталога выгрузки), у форм и элементов формы `Synonym`/`Comment` не выгружаются; граница `Name` — 80 символов (замер 21.10.2026 по значениям `<ChildObjects>` BGU2: ровно 80 — `CommonModule` `СообщенияАдминистрированиеСводныеПриложенияУправлениеОбработчикСообщения_1_0_0_1`; прежняя запись «максимум 79» была ошибочна, карточка слоя 5923 даёт верное 80), у внешнего объекта имя дотягивает до 129 — граница относится к объектам конфигурации; правило ИТС «если синоним не задан, используется имя» (замер: синоним пуст у 122 797 объектов из 171 280); пустой `<Comment/>` читается как `NULL`, а не как пустая строка; маршрут в БД (`external_report.name/synonym/comment`, `attributes`, `tabular_sections`, `forms`, `configurations.name/synonym/comment`) | `xml-format` | замер 8 XML-выгрузок + живой SQL по `external_report`/`attributes`/`configurations`; словарь `SYNONYM_FIELDS`/`COMMENT_FIELDS` и разбор `_prop_text`/`_read_multilang` в `src/external_meta_parser.py` |
 | `configuration-ext-presentation-files` | что из группы «Представление» задаётся **файлами `Ext/`**, а не свойствами: `HomePageWorkArea.xml` (рабочая область), `MainSectionCommandInterface.xml` + `CommandInterface.xml` (командный интерфейс), `MainSectionPicture.xml` (картинки разделов), `ClientApplicationInterface.xml`, `Logo.xml` (логотип), `Splash.xml` (заставка); в `<Properties>` корня этих свойств нет; где они лежат в выгрузке конфигурации и чем отличаются от `Templates/` объекта метаданных; что для них нет колонок в `configurations` | `xml-format` | замер `MinCfg` (19.10.2026) и `Config_NULL` (пустой состав); живой SQL: колонок под файлы представления в `configurations` нет |
 | `property-configuration-presentation-root` | свойства представления корня: `MainClientApplicationWindowMode` (`Normal`/`Workplace`/`EmbeddedWorkplace`/`FullscreenWorkplace`/`Kiosk`, по умолчанию `Normal`; значения `Maximized` ни в одной из 8 выгрузок нет), `DefaultStyle` (`Style.<имя>`), `DefaultLanguage` (`Language.<имя>`), `BriefInformation`→`short_info`, `DetailedInformation`→`detailed_info`, `Copyright`→`copyright`, `VendorInformationAddress`→`vendor_url`, `ConfigurationInformationAddress`→`config_url`, `UpdateCatalogAddress`→`update_url`; что из них не имеет колонки | `xml-format` | профиль свойств корня `property-profile-configuration` (строки свойств), замер 8 выгрузок; словарь `CONFIGURATION_FIELDS` в `src/configuration_meta_parser.py` |
 | `property-configuration-default-forms` | свойства основных форм и макета оформления **отчётов** в корне конфигурации: `DefaultReportForm`/`DefaultVariantForm`/`DefaultSettingsForm` (`CommonForm.<имя>`), `DefaultReportAppearanceTemplate` (`CommonTemplate.<имя>`); по умолчанию пусто = «не задано»; отличие от свойства `DefaultForm` самого отчёта (там значение — имя формы этого отчёта); колонок в `configurations` нет. Полный измеренный перечень свойств `Default*` — ровно 16 имён (идентичен в MinCfg, BP3, KomMag), поэтому пункты 18–22 названы отдельными свойствами, а русские имена и назначение 19–22 взяты из руководства разработчика (гл. 5.1.4) вместе с точечным переопределением `ОбработкаПолученияФормы` / `ОбработкаПолученияФормыВыбораПользователейСистемыВзаимодействия` | `xml-format` | профиль `property-profile-configuration`, замер `MinCfg`/`Config_NULL` + полный список свойств корня (MinCfg, BP3, KomMag) |
@@ -314,6 +361,8 @@ add_aliases_tool(aliases="synonym,synonyms", groups_id=52977)
 | `property-configuration-compatibility` | **карточка категории «Совместимость» (Д.1–Д.6)**: измеренные XML-токены и значения по умолчанию новой конфигурации 8.3.27 — `DataLockControlMode` (`Managed`/`Automatic`; ⚠️ прежняя пара `Managed|Unmanaged` ошибочна; «Автоматический и управляемый» как режим системы существует (гл. 9, сниппет 5786), но токеном не подтверждён) → `lock_mode_default`; `ObjectAutonumerationMode` (`NotAutoFree`/`AutoFree`, смысл по гл. 5.1.6) → **колонки нет**; `ModalityUseMode` (`DontUse`/`UseWithWarnings`/`Use`, все три измерены; с 8.3.5 диагностика модальных вызовов только при `/EnableCheckModal` ⇒ по колонке нельзя утверждать, что модальные вызовы запрещены) → `modality_mode`; `SynchronousPlatformExtensionAndAddInCallUseMode` (`Use`/`DontUse`, третье не подтверждено; толстый клиент игнорирует) → `ext_comp_sync_mode`; `InterfaceCompatibilityMode` (`Taxi`/`TaxiEnableVersion8_2`/`Version8_2EnableTaxi`, `Version8_2` не подтверждён) → `interface_compat_mode`; `CompatibilityMode` (`Version8_3_NN`, по замеру NN = 19, 24, 27; `Version8_2_16`/`Version8_1` — вывод по формату, не замер) → `compatibility_mode`. Плюс смежные: `ConfigurationExtensionCompatibilityMode`, `DatabaseTablespacesUseMode` (есть во всех 8, колонок нет) | `xml-format` | замер 8 XML-выгрузок по всем шести свойствам + живой SQL `configurations` (id=28: `Managed`/`DontUse`/`Use`/`TaxiEnableVersion8_2`/`Version8_3_27`; id=80 — значения по умолчанию) + замер колонок свойств совместимости по `information_schema`; руководство разработчика 5.1.6 (сниппет 5456) и гл. 9 (сниппет 5786) |
 
 | `configuration-reachability-section` | **раздел `===REACHABILITY===` профиля свойств корня** — что из маппинга `CONFIGURATION_FIELDS` реально доходит до колонок: шесть свойств узла V39 (`Synonym`, `BriefInformation`, `DetailedInformation`, `Copyright`, `VendorInformationAddress`, `ConfigurationInformationAddress`) читаются разбором `_multilang_value` и пишутся в колонки `jsonb`; границы — `UpdateCatalogAddress` остаётся текстом (в выгрузке нет `v8:item`), `config_extensions.synonym` остаётся `TEXT` (загрузчика расширения нет); разделённые даты `measured:20.10.2026` / `defect_found:20.10.2026` / `V39 (21.10.2026)` | `xml-format` | та же строка базы, что и профиль `property-profile-configuration` (сниппет 5917), но отдельным алиасом — иначе маркеры достижимости требовались бы от всех карточек, которые находит якорь профиля; замер `tools/measure_multilang_properties.py` (8 выгрузок: элемент 8/8, `v8:item` 6–7, **`языков>=2 = 0`**, языки только `ru`); `migrate_v39_multilang_configuration_text.sql`, `src/configuration_meta_parser.py`, `src/external_table_writer.py`; регрессия — запись `LAYERS` с маркерами `_multilang_value`, `migrate_v39_multilang_configuration_text.sql`, `jsonb` и с алиасами самой достижимости |
+| `configuration-header-full-columns-v42` | **полное сохранение свойств корня (узел V42)**: все 55 свойств разрешены словарём и ложатся в колонки; **33 добавленные, 5 снятых** (четыре колонки предопределённых модулей + `mobile_functionality` `TEXT[]`), чистый прирост **+28 → 59 колонок**. Разделы карточки: `===V42_HEADER_SCOPE` (объём узла и замер слепого пятна до узла: 22 свойства имели колонку, 19 непустых колонки не имели, 14 пусты во всех выгрузках), `===WHY_JSONB` (тип выбирается по **форме** значения: 7 jsonb-колонок перечней, скаляры и qualified-имена остаются TEXT, флаги — BOOLEAN; всего jsonb в таблице 13, из них 6 — узла V39), `===NAMES` (точные имена свойств выгрузки + опровержение ошибочных форм `ConfigurationAllowedIncomingShareRequestTypes`, `ConfigurationMobileApplicationUrls`, `UseMobileApplicationFunctionalities`), `===PAIRS` (пары `functionality`+`use`, 38 записей MinCfg, поля `ext`/`isCustom`/`mime`/`processingVariant`/`uti`, `baseUrl`/`useAndroid`/`useIOS`/`useWindows`), `===EMPTY` (пустой и отсутствующий элемент → `NULL`), `===UNMEASURED` (шесть перечней пусты во всех выгрузках — их вид выбран по однотипному соседу, это предположение, а не замер), `===MIGRATION` (пара «шаг 2 + аддитивная миграция», иначе `_cmp_ddl.py` фиксирует расхождение; `UPDATE ... USING` для `mobile_functionality` не выполняется, потому что колонка снята), `===BOUNDARIES` (даты замера и узла разделены; снимок фикстуры MinCfg 18:41 — 264 записи индекса; идентификатор `<uuid>.c` не является составным; V42 не закрывает V18/V38; заголовки, загруженные до узла, имеют 0/33), `===CHECK` | `xml-format` | **отдельная строка слоя** (на момент замера id 5948), а не та же строка, что профиль: якорь обязан разрешаться одной строкой, иначе маркеры полноты требовались бы от карточек, которые находит якорь профиля (замер 21.10.2026: 24 провала до отдельной записи, 3 — после, 0 — после обновления карточки). `migrate_v42_configuration_header_fields.sql`, `src/configuration_meta_parser.py` (`CONFIGURATION_FIELDS`, вид разбора `json_records`), `src/external_table_writer.py`; замеры `tools/check_v42_configuration_header.py` (**43 проверки, провалено 0, справок 8** — число зависит от фикстуры, указывать нужно число конкретного прогона), живой SQL по `configurations` (MinCfg `id=176`: 38 пар в `mobile_application_functionalities`, флаг `use` сохранён строкой, истинные `Biometrics`/`OSBackup`; BGU2 `id=151` и BP3 `id=173` — 0/33 новых колонок, загружены до узла); регрессия — маркеры `===V42_HEADER_SCOPE`, `===WHY_JSONB`, `===PAIRS`, `===CHECK`, `json_records`, `CONFIGURATION_FIELDS`, `migrate_v42_configuration_header_fields.sql`, `check_v42_configuration_header.py`, `found=55 mapped=55 unmapped=0` |
+| `configuration-module-slot-dictionary` | **словарь «вид метаданных → слот модуля» (узел V40)**: двухклассная модель — `object_module` (слоты вида: `ObjectModule`, `ManagerModule`, `RecordSetModule`, `ValueManagerModule`, `CommandModule`; 57 пар, 28 видов, 21 вид без слота) и `form_module` (модуль формы — содержимое формы, **не** слот вида: записей `*.Form.Module` в индексе 0 при 28 896 файлах; `CommonForm` — форма, содержимое в индексе — пары `.Form`/`.Help`); индекс авторитетен: 41 582 записи против 41 511 файлов, 71 — пустые модули; группа C (модули корня) моделируется индексом 1:1 с `Ext/*.bsl` → открывает `app_module_id`/`session_module_id` в V38 | `xml-format` | замер `_v40_slots_table.py` (8 выгрузок: BGU2, BP3, KomMag, UNF3, UT11, ZUP31, MinCfg, Config_NULL; JSON `slot_families`, 9 внутренних инвариантов, rc=0); норматив — раздел «Словарь „вид метаданных → слот модуля“» в `docs/config-scenarios/01_configuration.md`, п. 29 `.clinerules/1c-configurations-core_Rule.md`; регрессия — запись `LAYERS` с замерными маркерами (`28 896`, `41 582`, `_v40_slots_table.py`, `slot_families`) |
 
 Факты, которые слой фиксирует потому, что они противоречат расхождению «это просто UUID v4»
 (замер 15.10.2026, 915 XML конфигурации BGU2, расширения TSD_R, внешних отчётов/обработок):
@@ -349,9 +398,10 @@ add_aliases_tool(aliases="synonym,synonyms", groups_id=52977)
 - о ссылках данных (v1 time-based ради B-Tree) в слое прямо записано «нашим замером не
   подтверждено»: в XML-выгрузке метаданных ссылок записей нет.
 
-Регрессия доступности слоя — `python tools/check_xml_format_layer.py` (проверок 225, провалено 0;
-итог печатает сам скрипт; семнадцать якорей — шестнадцать в `xml-format`, один в `platform`;
-снимок 20.10.2026 — 211 проверка, шестнадцать якорей, а 19.10.2026 — 96):
+Регрессия доступности слоя — `python tools/check_xml_format_layer.py` (проверок 256, провалено 0;
+итог печатает сам скрипт; девятнадцать якорей — восемнадцать в `xml-format`, один в `platform`;
+снимок узла V40 того же дня — 240 проверок, восемнадцать якорей; снимок узла V39 — 225 проверок,
+семнадцать якорей; снимок 20.10.2026 — 211 проверка, шестнадцать якорей, а 19.10.2026 — 96):
 по каждому якорю проверяются разрешимость алиасами, принадлежность нужной категории,
 неотдача чужими категориями, маркеры текста профиля и находимость терминов по алиасам
 (имена вида `ClassId`, `DefaultForm` FTS не берёт). Маркеры применяются к **каждой** строке,
@@ -362,12 +412,18 @@ add_aliases_tool(aliases="synonym,synonyms", groups_id=52977)
 `defect_fixed:` подтверждал бы строку в тексте, а не реализацию. Для слоёв структуры выгрузки конфигурации
 маркеры — замерные значения (`158 925 XML`, `CommonModules 2380`, `86 379`, `<Catalog uuid=`):
 они и отличают профиль от произвольной строки той же категории. Для профиля свойств
-`Configuration.xml` маркеры — счётчики самого профиля (`found=55 mapped=22`) и раздел
-`===ROOT_EXT_MODULES`: они отличают профиль конфигурации от профиля внешнего объекта и не дают
-профилю «забыть», что модули предопределённых программ существуют только файлами `Ext/*.bsl`,
-а соответствующие колонки `configurations` из XML не разрешимы в принципе. Один алиас не может служить
-якорем двух слоёв: привязка якоря `configuration-dump-layout-catalogs` к сниппету про uuid
-дала провал проверки маркеров (один якорь — один слой).
+`Configuration.xml` маркеры — счётчики самого профиля (с 21.10.2026 — `found=55 mapped=55`,
+узел V42; снимок 19.10.2026 — `found=55 mapped=22`) и раздел `===ROOT_EXT_MODULES`: они отличают
+профиль конфигурации от профиля внешнего объекта и не дают профилю «забыть», что модули
+предопределённых программ существуют только файлами `Ext/*.bsl`, а соответствующие колонки
+`configurations` из XML не разрешимы в принципе (с узла V42 этих колонок в схеме нет — п. 31
+`.clinerules/1c-configurations-core_Rule.md`). Один алиас не может служить якорем двух слоёв:
+привязка якоря `configuration-dump-layout-catalogs` к сниппету про uuid дала провал проверки
+маркеров (один якорь — один слой). Обратная сторона того же правила: **один слой не может
+держаться одним якорем на несколько утверждений** — маркеры полноты V42, положенные в общую строку
+профиля, падали на карточках `===REACHABILITY===` и отдельных свойств, которые разрешает тот же
+якорь; полнота записана отдельной строкой `LAYERS` со своим якорем
+`configuration-header-full-columns-v42`.
 
 Карточки группы «Представление» заведены **тремя** якорями, а не одним, потому что у настроек
 разное хранение: `HomePageWorkArea.xml`, `MainSectionCommandInterface.xml`, `CommandInterface.xml`,
@@ -517,13 +573,16 @@ XML-имя, имя колонки БД, русская формулировка,
 1. **groups_id = NULL для HTML/FAQ/Markdown:** При добавлении сниппетов из не-BSL источников НЕ передавайте groups_id
 2. **Алиасы на snippets vs groups:** Алиасы, привязанные напрямую к snippets_id, имеют приоритет rank=3.0 над групповыми (rank=2.0)
 3. **description содержит ВЕСЬ body HTML** — это может быть большой объём данных
-4. **Статус БД (замер 21.10.2026, после узла V39 и алиасов записи достижимости; снимок
-   20.10.2026 после карточек категорий В/Г/Д приводится там, где он отличается):**
-   groups: 25 495, snippets: 2 911 — разбивка: 1 230 PDF
+4. **Статус БД (замер 21.10.2026, после узла V42; снимки V40 — 2 912 сниппетов / 209 202
+   алиасов / 29 сниппетов слоя, V39 — 2 911 / 209 158 / 28 — и 20.10.2026 после карточек категорий В/Г/Д приводятся там,
+   где они отличаются):**
+   groups: 25 495, snippets: 2 913 — разбивка: 1 230 PDF
    руководства разработчика (тег `pdf`/`its`, из них 19 режимом «файл целиком»), 1 496 BSL с
-   `groups_id`, 185 без группы (ручные, `cc-1c-skills`; из них 28 — слой `xml-format`); сумма
-   разбивки равна общему числу. aliases: 209 158 (снимок 20.10.2026 — 209 117; разница — алиасы
-   новой записи слоя `configuration-reachability-section`), из них 885 к `xml-format` (было 844)
+   `groups_id`, 187 без группы (ручные, `cc-1c-skills`; из них 30 — слой `xml-format`); сумма
+   разбивки равна общему числу. aliases: 209 334 (снимки: 20.10.2026 — 209 117, после V39 —
+   209 158, после V40 — 209 202; разница V42 — алиасы карточки профиля и записи полноты
+   `configuration-header-full-columns-v42`), из них 1061 к
+   `xml-format` (было 844, затем 885, затем 929)
    и 7 753 к PDF-сниппетам. `get_db_state_tool()` даёт только общие числа; **разбивку печатает
    `python tools/count_snippet_breakdown.py`** и там же проверяется равенство суммы частей
    общему числу. Число в правилах без этого замера писать нельзя: прежняя строка («154 без
@@ -546,9 +605,10 @@ XML-имя, имя колонки БД, русская формулировка,
      одинаковые числа у всех категорий, и по ним нельзя было судить о пустоте категории.
      Замер 20.10.2026 (после карточек категорий В/Г/Д): `language` — 25 495
      групп / 1 496 сниппетов / 198 632 алиаса, `its` — 1 233 / 7 812, `platform` — 17 / 425,
-     `methodology` — 4 / 82, `xml-format` — 28 сниппетов / 885 алиаса (замер 21.10.2026, после узла
-      V39; снимок 20.10.2026 — 844 алиаса; профиль свойств
-     `ExternalDataProcessor`; профиль свойств корневого `Configuration.xml` — узлы V32/V33;
+     `methodology` — 4 / 82, `xml-format` — 30 сниппетов / 1061 алиас (замер 21.10.2026, после узла
+      V42; снимки: после V40 — 29 / 929, после V39 — 28 / 885, 20.10.2026 — 844 алиаса; профиль свойств
+     `ExternalDataProcessor`; профиль свойств корневого `Configuration.xml` — узлы V32/V33,
+     полное сохранение его свойств — узел V42 (п. 31 `.clinerules/1c-configurations-core_Rule.md`);
      профиль идентификаторов `ClassId`/`ObjectId`/`TypeId`/`ValueId` — в алиасы профиля
      включены и опровергнутые Guid `d69d52f4…`, `c48e8ff8…`, чтобы поиск по ошибочному значению
      вёл в опровержение; три слоя структуры выгрузки конфигурации: состав
@@ -560,8 +620,8 @@ XML-имя, имя колонки БД, русская формулировка,
      метаданных и структуру конфигурации; свойства видов метаданных (каталог, документ, форма),
      содержимое форм и макетов — по-прежнему не покрыты);
    - проверка обоих фактов и доступности слоя — `python tools/check_category_filter.py`
-     (14 проверок, провалено 0) и `python tools/check_xml_format_layer.py` (проверок 225,
-     провалено 0 — по всем якорям слоя: шестнадцать в `xml-format`, один в `platform`; итоговое число
+     (14 проверок, провалено 0) и `python tools/check_xml_format_layer.py` (проверок 256,
+     провалено 0 — по всем якорям слоя: восемнадцать в `xml-format`, один в `platform`; итоговое число
      печатает сам скрипт, его и нужно указывать после изменения `LAYERS`). Второй скрипт заодно фиксирует, что живого резолвера
      алиасов в живой
      схеме нет: `src/aliases.py` (`resolve_aliases`, `search_aliases`, `upsert_aliases`)

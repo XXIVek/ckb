@@ -10,22 +10,35 @@ Test3_Otchet_Null; эталонная пара (Test1_Otchet, Test2_Otchet) не
   1. схема: `configurations` живая; колонок провенанса, версионирования и таблиц объектов
      метаданных узел V32 НЕ добавлял (решения D-C и D-D); UNIQUE по имени есть, уникальности
      по uuid нет; ссылки `config_extensions`/`bsl_modules` на заголовок сохранены, а
-     `external_report.configuration_id` по-прежнему БЕЗ внешнего ключа (узел V20.1);
+     `external_report.configuration_id` по-прежнему БЕЗ внешнего ключа (узел V20.1).
+     Узел V42 (21.10.2026) снял пять колонок заголовка — `app_module_id`, `session_module_id`,
+     `data_proc_module_id`, `ext_conn_module_id`, `mobile_functionality` (свойств
+     предопределённых модулей в `<Properties>` нет, а `TEXT[]` терял признак `use`), поэтому
+     раздел держит обе стороны: множество колонок V32 без снятых обязано быть на месте, а
+     снятые колонки обязаны ОТСУТСТВОВАТЬ — их возврат считается регрессией;
   2. детекция (R1): Configuration.xml даёт вариант `configuration`; тот же файл с
      `ConfigurationExtensionPurpose` — вариант `extension`, который остаётся заглушкой (R7);
      вложенный Configuration.xml не читается; внешний отчёт не уехал в конфигурацию;
   3. разбор: uuid из атрибута элемента (R3), свойства в колонки, ссылочные значения
      развёрнуты в ИМЯ (Language.Русский → Русский), пустой синоним — NULL (D-D), слепые зоны
-     названы прямо (Properties без колонки, ChildObjects/Language,
-     UsedMobileApplicationFunctionalities, InternalInfo корня с версиями UUID v1/v4);
+     названы прямо (ChildObjects/Language, InternalInfo корня с версиями UUID v1/v4).
+     По свойствам корня слепая зона закрыта узлом V42: словарь `CONFIGURATION_FIELDS`
+     покрывает все 55 свойств измеренных выгрузок, поэтому раздел требует противоположного
+     прежнему — перечень свойств без колонки обязан быть ПУСТЫМ, а четыре свойства, которые
+     до V42 назывались слепыми зонами, обязаны читаться в свои колонки. Механизм называния
+     слепых зон при этом остаётся живым и проверяется разделом 3c на свойстве, которого в
+     словаре нет. `UsedMobileApplicationFunctionalities` с V42 кладётся в jsonb парами
+     `functionality`/`use` (прежняя `mobile_functionality TEXT[]` признак `use` теряла);
      пустой или некорректный uuid — отказ с причиной;
   3c. перечень ссылок (дефект разбора `DefaultRoles`, 20.10.2026): детьми перечисных свойств
       бывают и `<v8:Value>` (UsePurposes), и `<xr:Item xsi:type="xr:MDObjectRef">`
       (DefaultRoles) — измеряется по восьми выгрузкам. Разбор обязан читать обе формы,
       снимать префикс вида (`Role.Х` → `Х`), сохранять порядок и не молчать о детях
       неизвестной формы (пустая колонка называется предупреждением); `_has_value` по детям
-      `Item` не считает заполненное свойство пустой слепой зоной; роль доходит до колонки
-      `main_roles` (TEXT[]) и убирается за собой;
+      `Item` не считает заполненное свойство пустой слепой зоной — после V42 каждое
+      измеренное свойство имеет колонку, поэтому механизм проверяется на синтетическом
+      свойстве, которого в словаре нет; роль доходит до колонки `main_roles` (TEXT[]) и
+      убирается за собой;
   3d. многоязычные свойства заголовка (узел V39, 21.10.2026): шесть свойств — Synonym,
       BriefInformation, DetailedInformation, Copyright, VendorInformationAddress,
       ConfigurationInformationAddress — читаются словарём `{язык: текст}` и пишутся в колонки
@@ -123,6 +136,7 @@ from configuration_loader import (TABLE, bound_external_objects,  # noqa: E402
                                   find_configuration_by_name, find_configuration_xml,
                                   register_configuration)
 from configuration_meta_parser import (CONFIGURATION_FIELDS, LIST_CHILD_TAGS,  # noqa: E402
+                                      NOT_FILLED_COLUMNS,
                                       _has_value, _list_children, _ref_list,
                                       parse_configuration_meta)
 from enrichment_generator import (describe_object, generate_enrichment,  # noqa: E402
@@ -190,6 +204,80 @@ TEXT_TYPES = {"text", "character varying", "varchar"}
 LONG_TEXT_LEN = 1200
 DDL_BOOTSTRAP = ROOT / "create_1c_configurations_db.sql"
 V39_MIGRATION = ROOT / "migrate_v39_multilang_configuration_text.sql"
+
+# ─── узел V42 (21.10.2026): словарь свойств корня замкнут ───
+#
+# Основание — слой знаний `property-profile-configuration` (замер 55 свойств по восьми
+# выгрузкам). До V42 `CONFIGURATION_FIELDS` знал 22 свойства из 55: 33 свойства назывались
+# слепой зоной, а пять колонок (`app_module_id`, `session_module_id`, `data_proc_module_id`,
+# `ext_conn_module_id`, `mobile_functionality`) не имели источника — свойств предопределённых
+# модулей в `Configuration.xml` нет вовсе (замер: `ChildObjects` даёт только `Language`), и
+# `UsedMobileApplicationFunctionalities` писался в `TEXT[]` с потерей признака `use`.
+# С узла V42: словарь покрывает все 55 свойств (проверка «словарь = число свойств фикстуры»
+# ниже), пять колонок сняты `migrate_v42_configuration_header.sql`, признаки мобильного
+# интерфейса лежат в jsonb парами `{"functionality": …, "use": "true"|"false"}`.
+V42_MIGRATION = ROOT / "migrate_v42_configuration_header.sql"
+V42_REMOVED_COLUMNS = (
+    "app_module_id", "session_module_id", "data_proc_module_id",
+    "ext_conn_module_id", "mobile_functionality",
+)
+# Состав таблицы заголовка по живой схеме — замер 21.10.2026 (`information_schema.columns`,
+# только схема public): 59 колонок, из них 13 jsonb (шесть языковых V39 + семь списочных V42),
+# 3 boolean, остальные — текст/uuid/число/метки времени. Список назван здесь, потому что
+# раздел 1 обязан ловить и снятие колонок: живая схема без `app_module_id` — это другой
+# контракт, а не «то же самое». Полноту схемы целиком сторожит `python _cmp_ddl.py`.
+CONFIGURATION_COLUMNS_V42 = {
+    # ключ и идентификация
+    "id", "name", "synonym", "comment", "version", "vendor_name", "uuid",
+    # свойства, существовавшие до V42 (имена не менялись)
+    "main_mode", "usage_purpose", "embedded_language", "main_roles",
+    "default_language", "short_info", "detailed_info", "copyright", "vendor_url",
+    "config_url", "update_url", "help_included", "lock_mode_default", "modality_mode",
+    "ext_comp_sync_mode", "interface_compat_mode", "compatibility_mode",
+    "created_at", "updated_at",
+    # слоты V42: свойства, которые раньше назывались слепой зоной
+    "configuration_extension_compatibility_mode", "database_tablespaces_use_mode",
+    "main_client_application_window_mode", "object_autonumeration_mode",
+    "use_managed_form_in_ordinary_application", "use_ordinary_form_in_managed_application",
+    "mobile_application_functionalities", "allowed_incoming_share_request_types",
+    "common_settings_storage", "reports_variants_storage",
+    "reports_user_settings_storage", "form_data_settings_storage",
+    "dynamic_lists_user_settings_storage", "default_report_form",
+    "default_report_variant_form", "default_report_settings_form", "default_style",
+    "default_interface", "default_constants_form", "default_search_form",
+    "default_dynamic_list_settings_form",
+    "default_collaboration_system_users_choice_form",
+    "default_data_history_change_history_form",
+    "default_data_history_version_data_form",
+    "default_data_history_version_differences_form",
+    "default_report_appearance_template", "url_external_data_storage", "name_prefix",
+    "mobile_application_urls", "required_mobile_application_permissions",
+    "standalone_configuration_restriction_roles",
+    "additional_full_text_search_dictionaries", "content",
+}
+# Число свойств корня по замеру восьми выгрузок (слой `property-profile-configuration`):
+# словарь обязан покрывать ровно столько же, иначе закрытая слепая зона — иллюзия.
+ROOT_PROPERTIES_MEASURED = 55
+# Списочные jsonb-колонки узла V42 (значение — массив записей или qualified-имя): тип
+# проверяется по живой схеме, а не по памяти: смена типа без миграции — тот дефект,
+# который V39 лечил.
+V42_JSONB_COLUMNS = (
+    "mobile_application_functionalities", "allowed_incoming_share_request_types",
+    "mobile_application_urls", "required_mobile_application_permissions",
+    "standalone_configuration_restriction_roles",
+    "additional_full_text_search_dictionaries", "content",
+)
+# jsonb-колонки V39 (многоязычные) — их тип проверяет раздел 3d; здесь они нужны, чтобы
+# посчитать jsonb-состав таблицы целиком и не спорить с самим собой.
+V39_JSONB_COLUMNS = tuple(MULTILANG_COLUMNS)
+# Логические свойства корня (замер: `true`/`false` токеном) — колонка boolean, а не текст:
+# «истина» и «ложь» в текстовой колонке различимы только по строке, а пустое значение
+# сливается с `false`.
+V42_BOOLEAN_COLUMNS = (
+    "use_managed_form_in_ordinary_application",
+    "use_ordinary_form_in_managed_application",
+)
+
 
 failures = []
 counters = {"checks": 0}
@@ -376,17 +464,49 @@ def check_schema():
         "WHERE table_schema='public' AND table_name=%s", (TABLE,))}
     if not check("таблица configurations существует в public", bool(cols), f"колонок: {len(cols)}"):
         return
-    expected = {"id", "name", "synonym", "comment", "version", "vendor_name", "uuid",
-                "main_mode", "usage_purpose", "embedded_language", "main_roles",
-                "app_module_id", "session_module_id", "data_proc_module_id",
-                "ext_conn_module_id", "mobile_functionality", "default_language",
-                "short_info", "detailed_info", "copyright", "vendor_url", "config_url",
-                "update_url", "help_included", "lock_mode_default", "modality_mode",
-                "ext_comp_sync_mode", "interface_compat_mode", "compatibility_mode",
-                "created_at", "updated_at"}
-    missing = sorted(expected - set(cols))
-    check(f"колонок заголовка конфигурации на месте ({len(expected)}) — узел V32 схему не менял",
-          not missing, f"нет колонок: {missing}")
+    # Состав таблицы называется списком, а не «несколькими колонками»: узел V42 не только
+    # добавил слоты, но и снял пять колонок без источника. Проверка «все прежние на месте»
+    # такое изменение не ловила бы вовсе — она бы прошла, потому что удалённое не спрашивали.
+    if not check(f"состав таблицы заголовка равен измеренному (V42, {len(CONFIGURATION_COLUMNS_V42)} колонок)",
+                 set(cols) == CONFIGURATION_COLUMNS_V42,
+                 f"нет: {sorted(CONFIGURATION_COLUMNS_V42 - set(cols))} "
+                 f"лишние: {sorted(set(cols) - CONFIGURATION_COLUMNS_V42)}"):
+        note("расхождение состава — предмет раздела 1: живая схема, бутстрап шага 2 и "
+             "миграция V42 обязаны совпадать (полноту схемы целиком сверяет _cmp_ddl.py)")
+
+    gone = sorted(column for column in V42_REMOVED_COLUMNS if column in cols)
+    check("пять колонок без источника сняты (V42): app_module_id, session_module_id, "
+          "data_proc_module_id, ext_conn_module_id, mobile_functionality",
+          not gone, f"колонки ещё в схеме: {gone}")
+
+    check("списочные значения V42 лежат в jsonb, а не в TEXT[]: признак use у признака "
+          "мобильного интерфейса сохраняется",
+          all(cols.get(column) == "jsonb" for column in V42_JSONB_COLUMNS),
+          repr({column: cols.get(column) for column in V42_JSONB_COLUMNS}))
+    check("логические свойства корня — колонки boolean (замер восьми выгрузок: true/false токеном)",
+          all(cols.get(column) == "boolean" for column in V42_BOOLEAN_COLUMNS),
+          repr({column: cols.get(column) for column in V42_BOOLEAN_COLUMNS}))
+
+    # Ключевая проверка узла V42: у каждой колонки значения есть источник в словаре разбора.
+    # До V42 четыре колонки заголовка (модули предопределённых программ) и mobile_functionality
+    # не имели XML-источника, а 33 свойства не имели колонки — теперь ни того, ни другого нет.
+    technical = {"id", "uuid", "created_at", "updated_at"}
+    mapped = {field[0] for field in CONFIGURATION_FIELDS.values() if field[0]}
+    check("словарь разбора покрывает все колонки значений: колонок без источника не осталось",
+          mapped == set(cols) - technical,
+          repr(sorted((set(cols) - technical) ^ mapped)))
+    check("число свойств словаря равно измеренному числу свойств корня (замер восьми выгрузок)",
+          len(CONFIGURATION_FIELDS) == ROOT_PROPERTIES_MEASURED,
+          repr([len(CONFIGURATION_FIELDS), ROOT_PROPERTIES_MEASURED]))
+    check("список «не заполняется осознанно» пуст: V42 снял основание для него",
+          not NOT_FILLED_COLUMNS, repr(sorted(NOT_FILLED_COLUMNS)))
+    declared = ddl_declared_columns(TABLE)
+    check("бутстрап шага 2 не объявляет снятых колонок и объявляет новые (правка идёт парой, п. 17)",
+          bool(declared)
+          and not any(column in declared for column in V42_REMOVED_COLUMNS)
+          and all(declared.get(column) == "jsonb" for column in V42_JSONB_COLUMNS),
+          repr({column: declared.get(column) for column in
+                (*V42_REMOVED_COLUMNS, *V42_JSONB_COLUMNS)}))
 
     absent = sorted(c for c in cols
                     if c.startswith("origin_") or c.endswith("_source")
@@ -509,7 +629,8 @@ def check_detection():
 # ───────────────── 3. разбор Configuration.xml ─────────────────
 
 def check_parser():
-    section("3. РАЗБОР: uuid из атрибута, ref -> имя, пустой синоним = NULL, слепые зоны названы")
+    section("3. РАЗБОР: uuid из атрибута, ref -> имя, пустой синоним = NULL; "
+            "слепых зон по свойствам нет (V42), остальное названо")
     before = db_counts()
     parsed = parse_configuration_meta(str(CONFIG_XML))
     if not check("Configuration.xml разобран", parsed.get("success"), str(parsed)[:300]):
@@ -554,43 +675,55 @@ def check_parser():
     check("разбор ничего не записывает в БД: чтение отделено от записи",
           db_counts() == before, f"{before} -> {db_counts()}")
 
-    # ── счётчики и слепые зоны ──
+    # ── счётчики и слепые зоны (узел V42 закрыл словарь свойств) ──
+    # До V42 `CONFIGURATION_FIELDS` знал 22 свойства из 55, и предупреждения называли 33 имени
+    # поимённо, а пустые значения — числом. С узла V42 словарь покрывает все 55 свойств, поэтому
+    # у фикстуры слепых зон не остаётся: пустой перечень — это результат проверки, а не молчание.
+    # Механизм называния слепых зон обязан оставаться живым (раздел 3c: свойство, которого нет в
+    # словаре, называется по имени), иначе «закрытая зона» означала бы, что любое новое свойство
+    # будет промолчано.
     check("счётчик свойств: разобранное и не имеющее колонки не путаются",
-          counts["properties_total"] >= counts["properties_mapped"]
-          and counts["properties_mapped"] == len(CONFIGURATION_FIELDS)
+          counts["properties_total"] == ROOT_PROPERTIES_MEASURED
+          and counts["properties_mapped"] == len(CONFIGURATION_FIELDS) == ROOT_PROPERTIES_MEASURED
           and counts["properties_filled"] >= 8
           and counts["properties_unstored"]
           == (len(counts["properties_unstored_nonempty"])
               + counts["properties_unstored_empty"]),
-          repr(counts))
-    nonempty = set(counts["properties_unstored_nonempty"])
-    check("свойства без колонки с НЕПУСТЫМ значением названы поимённо",
-          {"ConfigurationExtensionCompatibilityMode", "MainClientApplicationWindowMode",
-           "ObjectAutonumerationMode", "DatabaseTablespacesUseMode"} <= nonempty,
-          repr(sorted(nonempty)))
-    check("пустые свойства без колонки не попадают в перечень непустых",
-          counts["properties_unstored_empty"] > 0
-          and not (nonempty & {"NamePrefix", "CommonSettingsStorage", "Content"}),
-          f"empty={counts['properties_unstored_empty']} nonempty={sorted(nonempty)[:8]}")
-    check("непустые слепые зоны названы в предупреждениях поимённо",
-          all(any(f"Properties/{name}" in w and "слепая зона V32" in w for w in warnings)
-              for name in ("ConfigurationExtensionCompatibilityMode",
-                           "MainClientApplicationWindowMode")),
+          repr({key: counts[key] for key in
+                ("properties_total", "properties_mapped", "properties_filled",
+                 "properties_unstored")}))
+    check("свойств без колонки у фикстуры не осталось: словарь V42 покрывает все 55",
+          counts["properties_unstored"] == 0
+          and not counts["properties_unstored_nonempty"]
+          and counts["properties_unstored_empty"] == 0,
+          repr({key: counts[key] for key in
+                ("properties_unstored", "properties_unstored_nonempty",
+                 "properties_unstored_empty")}))
+    check("предупреждений о слепых зонах свойств нет: основание снято, а не подавлен вывод",
+          not [w for w in warnings if w.startswith("Properties/")],
+          repr([w[:90] for w in warnings if w.startswith("Properties/")][:6]))
+    check("состав ChildObjects назван как есть: одна языковая конфигурация",
+          counts["child_objects"] == {"Language": 1}, repr(counts["child_objects"]))
+    check("ChildObjects/Language остаётся слепой зоной: свойства языка в словаре корня нет",
+          any("ChildObjects/Language" in w and "Русский" in w for w in warnings),
           repr([w[:90] for w in warnings][:6]))
-    check("пустые слепые зоны названы числом и не притворяются потерянными",
-          any("имеют пустые значения" in w for w in warnings),
+    # Узел V42 сохранил признак `use`: прежняя колонка TEXT[] его теряла, и «признак
+    # используется» было нечем отличить от «признак перечислен со use=false». Числа берутся
+    # из разбора, а не из литерала: фикстуру оператор менял (MinCfg расширён 21.10.2026),
+    # литерал бы отстал и начал врать.
+    records = row["mobile_application_functionalities"] or []
+    check("UsedMobileApplicationFunctionalities разобран парами functionality/use (V42)",
+          len(records) == counts["mobile_functionalities_total"]
+          == counts["mobile_functionalities_stored"] > 0
+          and all(set(item) == {"functionality", "use"} for item in records)
+          and {"OSBackup"} <= set(counts["mobile_functionalities_use_true"])
+          and any(item["use"] == "false" for item in records),
+          repr([len(records), counts["mobile_functionalities_use_true"],
+                counts["mobile_functionalities_stored"]]))
+    check("предупреждение D-D («признаки не сохраняются») снято: значение ложится в jsonb",
+          not any("UsedMobileApplicationFunctionalities" in w for w in warnings),
           repr([w[:90] for w in warnings][:6]))
-    check("ChildObjects/Language: одна языковая конфигурация названа слепой зоной",
-          counts["child_objects"] == {"Language": 1}
-          and any("ChildObjects/Language" in w and "Русский" in w for w in warnings),
-          repr(counts["child_objects"]))
-    check("UsedMobileApplicationFunctionalities: решение D-D названо, use=true перечислен",
-          counts["mobile_functionality_total"] > 0
-          and "OSBackup" in counts["mobile_functionality_use_true"]
-          and any("UsedMobileApplicationFunctionalities" in w and "D-D" in w
-                  for w in warnings),
-          repr([counts["mobile_functionality_total"],
-                counts["mobile_functionality_use_true"]]))
+
     versions = counts["root_identifier_versions"]
     check("InternalInfo корня: пары ClassId/ObjectId посчитаны и названы (колонок нет)",
           counts["root_identifier_pairs"] == 7
@@ -685,6 +818,15 @@ def check_parser_negatives():
 ROLES_ITEM = '<xr:Item xsi:type="xr:MDObjectRef">Role.{}</xr:Item>'
 ROLES_VALUE = "<v8:Value>Role.{}</v8:Value>"
 
+# Свойство, которого нет в словаре `CONFIGURATION_FIELDS`: слепую зону задаёт тест, а не
+# выгрузка (с узла V42 словарь покрывает все 55 измеренных свойств корня). Имя намеренно
+# не похоже ни на одно измеренное — иначе проверка проверяла бы словарь, а не механизм.
+# Дети — подразделы с признаком `use`: узкий признак значения (только Value/Item) отнёс бы
+# такое свойство к пустым, и счётчик пустых начал бы врать.
+UNKNOWN_PROPERTY = "V42ProbeUnknownRootProperty"
+UNKNOWN_PROPERTY_XML = (f'<{UNKNOWN_PROPERTY}><SubSection use="true">Значение</SubSection>'
+                        f"</{UNKNOWN_PROPERTY}>")
+
 
 def roles_property_xml(names, tag="DefaultRoles", child="item"):
     """Перечень свойства по измеренной форме детей: `item` — как в выгрузке, `value` — иная."""
@@ -719,10 +861,16 @@ def check_roles():
     check("порядок выгрузки сохранён", row["main_roles"] == roles,
           repr(row.get("main_roles")))
     empty_counts = parse_configuration_meta(str(CONFIG_XML))["counts"]
+    # С узла V42 пустых свойств без колонки у фикстуры нет. Проверка держит ровно то, что
+    # держала и раньше — непустый перечень не должен попадать в список пустых, — но обязана
+    # показать и нулевой базис: сравнить два нуля, ничего не утверждая, было бы той же
+    # слепой зоной, что молчаливый нулевой счётчик в карточке.
     check("непустый перечень не прибавляется к списку пустых свойств без колонки",
-          counts["properties_unstored_empty"] == empty_counts["properties_unstored_empty"],
+          counts["properties_unstored_empty"] == empty_counts["properties_unstored_empty"] == 0
+          and "DefaultRoles" not in (counts.get("properties_unstored_nonempty") or []),
           repr([counts["properties_unstored_empty"],
-                empty_counts["properties_unstored_empty"]]))
+                empty_counts["properties_unstored_empty"],
+                counts.get("properties_unstored_nonempty")]))
 
     # ── вторая измеренная форма детей того же свойства (v8:Value) ──
     edit_xml(xml, [(roles_property_xml(roles), roles_property_xml(roles, child="value"))])
@@ -741,36 +889,57 @@ def check_roles():
                   for w in unknown["warnings"]),
           repr([w[:160] for w in unknown.get("warnings", []) if "DefaultRoles" in w]))
 
-    # ── `_has_value` по детям Item: свойство без колонки с значениями ──
-    edit_xml(xml, [("<StandaloneConfigurationRestrictionRoles/>",
-                    roles_property_xml(["ОграничениеАвтономнойРоль"],
-                                       tag="StandaloneConfigurationRestrictionRoles"))])
-    blind = parse_configuration_meta(str(xml))
-    blind_names = set((blind.get("counts") or {}).get("properties_unstored_nonempty") or [])
-    check("свойство без колонки с детьми Item названо непустой слепой зоной (правка _has_value)",
-          "StandaloneConfigurationRestrictionRoles" in blind_names,
-          repr(sorted(blind_names)[:12]))
-
     # ── `_has_value` шире списка известных детей: дети-подразделы тоже значение ──
-    # Замер 20.10.2026 по восьми выгрузкам: единственным свойством, которое узкий признак
-    # (только `Value`/`Item`) относил к пустым, а широкий — к непустым, оказался
-    # `UsedMobileApplicationFunctionalities`: у него свои дети-подразделы с `use=`.
-    # Оставить его в счётчике пустых — значит соврать в слепой зоне, поэтому фикстура
-    # проверяется целиком: имя обязано называться поимённо.
+    # С узла V42 словарь `CONFIGURATION_FIELDS` покрывает все 55 измеренных свойств корня,
+    # поэтому слепую зону в прогоне задаёт сам тест: в Properties кладётся свойство, которого
+    # в словаре нет. Платформа добавит новое свойство — и оно обязано быть названным по имени,
+    # а не промолчанным; закрытая зона фикстуры не означает, что механизм называния не нужен.
+    # Дети — подразделы с признаком `use`, а не Value/Item: узкий признак значения относил бы
+    # такое свойство к пустым (замер 20.10.2026 по восьми выгрузкам: единственной такой формой
+    # детей был UsedMobileApplicationFunctionalities).
+    edit_xml(xml, [("<StandaloneConfigurationRestrictionRoles/>",
+                    "<StandaloneConfigurationRestrictionRoles/>" + UNKNOWN_PROPERTY_XML)])
+    blind = parse_configuration_meta(str(xml))
+    blind_counts = blind.get("counts") or {}
+    blind_names = set(blind_counts.get("properties_unstored_nonempty") or [])
+    check("свойство без колонки с детьми-подразделами названо непустой слепой зоной",
+          blind.get("success") and UNKNOWN_PROPERTY in blind_names,
+          repr(sorted(blind_names)[:12]))
+    check("непустая слепая зона названа в предупреждении по имени",
+          any(f"Properties/{UNKNOWN_PROPERTY}" in w and "слепая зона V32" in w
+              for w in blind.get("warnings") or []),
+          repr([w[:160] for w in blind.get("warnings") or []
+                if UNKNOWN_PROPERTY in w]))
+    check("оно же не попало в счётчик пустых: широкий признак значения держится",
+          blind_counts.get("properties_unstored") == len(blind_names) == 1
+          and blind_counts.get("properties_unstored_empty") == 0,
+          repr({key: blind_counts.get(key) for key in
+                ("properties_unstored", "properties_unstored_nonempty",
+                 "properties_unstored_empty")}))
+
+    # ── V42: единственное измеренное свойство с детьми-подразделами получило колонку ──
+    # До V42 `UsedMobileApplicationFunctionalities` назывался непустой слепой зоной; с узла
+    # V42 у него есть колонка `mobile_application_functionalities` jsonb, поэтому слепой зоной
+    # он быть не может. Названная слепая зона = словарь отстал от выгрузки.
     fixture = parse_configuration_meta(str(CONFIG_XML))
     fixture_counts = fixture.get("counts") or {}
     fixture_nonempty = set(fixture_counts.get("properties_unstored_nonempty") or [])
-    check("свойство с детьми-подразделами названо непустой слепой зоной, а не пустым",
-          "UsedMobileApplicationFunctionalities" in fixture_nonempty
-          and any("UsedMobileApplicationFunctionalities" in w and "слепая зона V32" in w
-                  for w in fixture.get("warnings") or []),
-          repr(sorted(fixture_nonempty)[:14]))
-    check("пустые слепые зоны не считают за него: непустых больше, пустых меньше",
-          fixture_counts.get("properties_unstored", -1)
+    fixture_pairs = len((fixture.get("configuration") or {})
+                        .get("mobile_application_functionalities") or [])
+    check("свойство с детьми-подразделами больше не слепая зона: пары читаются в jsonb (V42)",
+          "UsedMobileApplicationFunctionalities" not in fixture_nonempty
+          and not any("UsedMobileApplicationFunctionalities" in w
+                      for w in fixture.get("warnings") or [])
+          and fixture_pairs == fixture_counts.get("mobile_functionalities_total") > 0,
+          repr([sorted(fixture_nonempty)[:14], fixture_pairs,
+                fixture_counts.get("mobile_functionalities_total")]))
+    check("слепых зон по свойствам у измеримой фикстуры нет и счётчик сходится",
+          fixture_counts.get("properties_unstored", -1) == 0
           == (len(fixture_counts.get("properties_unstored_nonempty") or [])
               + (fixture_counts.get("properties_unstored_empty") or 0)),
           repr({key: fixture_counts.get(key) for key in
-                ("properties_unstored", "properties_unstored_empty")}))
+                ("properties_unstored", "properties_unstored_nonempty",
+                 "properties_unstored_empty")}))
 
     # ── реестр имён детей один, а не разбросанный литерал в вызовах ──
     check("реестр имён детей перечисных свойств = value + item",
@@ -795,9 +964,11 @@ def check_roles():
           db_counts() == before, f"{before} -> {db_counts()}")
 
     # ── путь записи: роли доходят до TEXT[] в configurations ──
-    # XML к этому моменту испорчен намеренно (Bogus-форма, слепая зона с детьми Item),
-    # поэтому перед загрузком перечень возвращается к измеренной форме — иначе проверка
-    # записи сверялась бы с пустой колонкой и не проверяла бы ничего.
+    # XML к этому моменту испорчен намеренно (Bogus-форма перечня ролей и неизвестное
+    # свойство с детьми-подразделами), поэтому перед загрузком перечень возвращается к
+    # измеренной форме — иначе проверка записи сверялась бы с пустой колонкой и не
+    # проверяла бы ничего. Неизвестное свойство остаётся: загрузка обязана принять файл с
+    # незнакомым свойством и назвать его, а не отказать.
     edit_xml(xml, [("<DefaultRoles><Bogus>Role.НеизвестнаяФорма</Bogus></DefaultRoles>",
                     roles_property_xml(roles))])
     res = load_catalog(str(catalog))
@@ -1061,9 +1232,18 @@ def check_load_path():
     check("карточка различает источники: <ChildObjects> не раскладываются, индекс — да",
           "Состав из <ChildObjects> Configuration.xml" in text
           and "таблиц объектов метаданных по ним в схеме нет" in text, text[:400])
-    check("карточка печатает перечень незаполненных колонок, а не указатель вникуда",
-          "не заполняется: app_module_id" in text
+    # Узел V42: список «не заполняется» стал пустым (сознательных NULL-колонок нет),
+    # поэтому прежняя проверка («карточка печатает app_module_id») стала ложью: колонки
+    # в схеме больше нет. Проверка не снята, а переведена в актуальную форму: карточка
+    # не должна называть ни одной снятой колонки и не должна обещать SQL-файл, которого
+    # нет на диске (прежняя ссылка вела на check_configuration_inventory.sql).
+    check("карточка V42 не называет снятых колонок и не ссылается на несуществующий SQL",
+          all(f"не заполняется: {column}" not in text
+              for column in V42_REMOVED_COLUMNS)
+          and "не заполняется:" not in text
           and "check_configuration_inventory.sql" not in text, text[:400])
+    check("карточка называет свойства числом: без колонки не осталось ни одного (V42)",
+          "без колонки 0" in text, text[:400])
 
     row = sql_dict("SELECT * FROM configurations WHERE id = %s", (cfg_id,))
     if not check("строка заголовка создана и читается по id", bool(row), repr(cfg_id)):
@@ -1087,12 +1267,20 @@ def check_load_path():
           not (set(contract) - set(row)), repr(sorted(set(contract) - set(row))))
     check("имя в БД равно имени каталога: фолбэк дошёл и до записи",
           row["name"] == catalog.name, repr(row.get("name")))
-    check("колонки, не заполняемые осознанно, остались NULL, а не пустыми строками",
-          all(row.get(column) is None for column in
-              ("app_module_id", "session_module_id", "data_proc_module_id",
-               "ext_conn_module_id", "mobile_functionality")),
-          repr({column: row.get(column) for column in
-                ("app_module_id", "mobile_functionality")}))
+    # Узел V42: прежняя проверка перечисляла пять колонок, которых в схеме больше нет
+    # (модули предопределённых программ и mobile_functionality). Смысл её тот же: чего
+    # нет в разборе — того нет и в строке (NULL, а не пустая строка/пустой массив).
+    # Список колонок больше не пишется руками: он выводится из разницы живой схемы и
+    # ключей контракта, поэтому проверка не устареет при следующем изменении DDL.
+    check("V42: снятых колонок в строке нет",
+          not (set(row) & set(V42_REMOVED_COLUMNS)),
+          repr(sorted(set(row) & set(V42_REMOVED_COLUMNS))))
+    never_written = sorted((set(row) - set(contract))
+                           - {"id", "created_at", "updated_at", "name"})
+    note(f"колонок вне разбора в этой фикстуре: {len(never_written)} — они обязаны быть NULL")
+    check("V42: колонок, которых нет в разборе, остались NULL, а не пустыми значениями",
+          all(row.get(column) is None for column in never_written),
+          repr({column: row.get(column) for column in never_written[:8]}))
     check("с этим uuid ровно одна строка, с именем из каталога тоже одна (UNIQUE name)",
           sql_one("SELECT COUNT(*) FROM configurations WHERE uuid = %s::uuid",
                   (cfg_uuid,)) == 1
@@ -1189,6 +1377,24 @@ def column_types(table):
         "WHERE table_schema = 'public' AND table_name = %s", (table,))}
 
 
+def ddl_declared_columns(table):
+    """Колонки и типы, объявленные в бутстрапе шага 2 (`create_1c_configurations_db.sql`).
+
+    Правка схемы идёт парой «миграция + бутстрап» (п. 17): живая схема без бутстрапа даёт
+    половину правки, и чистая установка БД возвращается к прежнему контракту. Разбор один на
+    два раздела (1 и 3d), чтобы они не описывали один файл по-разному.
+    """
+    ddl = DDL_BOOTSTRAP.read_text(encoding="utf-8", errors="replace")
+    block = re.search(r"(?is)CREATE TABLE IF NOT EXISTS %s\s*\((.*?)\n\);" % table, ddl)
+    if not block:
+        check(f"бутстрап шага 2 содержит CREATE TABLE {table}", False, "блок не найден")
+        return {}
+    return {name.lower(): kind.lower() for name, kind in re.findall(
+        r"(?mi)^\s*(\w+)\s+(jsonb|text\[\]|text|varchar|boolean|uuid|integer|timestamp)"
+        r"\b", block.group(1))}
+
+
+
 def multilang_stored(cfg_id):
     """Значения шести колонок одной строки как есть: psycopg2 читает jsonb словарём."""
     return sql_dict(f"SELECT {', '.join(MULTILANG_COLUMNS)} FROM {TABLE} WHERE id = %s",
@@ -1248,13 +1454,9 @@ def check_multilang_properties():
           bad_multilang_values() == 0, repr(bad_multilang_values()))
     # Правка схемы идёт парой «миграция + бутстрап» (п. 17): иначе _cmp_ddl.py зафиксирует
     # расхождение, а чистая установка БД вернётся к текстовым колонкам.
-    ddl = DDL_BOOTSTRAP.read_text(encoding="utf-8", errors="replace")
-    block = re.search(r"(?is)CREATE TABLE IF NOT EXISTS configurations\s*\((.*?)\n\);", ddl)
-    declared = {name.lower(): kind.lower() for name, kind in re.findall(
-        r"(?mi)^\s*(\w+)\s+(jsonb|text\[\]|text|varchar)\b",
-        block.group(1) if block else "")}
+    declared = ddl_declared_columns(TABLE)
     check("бутстрап шага 2 объявляет те же jsonb-колонки, что живая схема (правка идёт парой)",
-          block is not None
+          bool(declared)
           and all(declared.get(column) == "jsonb" for column in MULTILANG_COLUMNS),
           repr({column: declared.get(column) for column in MULTILANG_COLUMNS}))
     text_limit = sql_one("SELECT character_maximum_length FROM information_schema.columns "
