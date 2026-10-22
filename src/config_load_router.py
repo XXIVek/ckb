@@ -507,6 +507,29 @@ def format_load_result(result):
                     f"Индекс состава (ConfigDumpInfo.xml) в каталоге не найден — "
                     f"{OBJECTS_TABLE} по этой конфигурации не заполнялась (узел V33)"
                 )
+            # Узел V43: состояние перечней имён объектов состава в строке заголовка. Строка
+            # обязана быть: по нулям в колонках нельзя отличить «видов таких в конфигурации
+            # нет» от «индекс не разобран» — это ровно граница K2. Число называется как N из 48,
+            # а не «все»: пустой вид остаётся NULL, и это ответ о конфигурации, а не пропуск.
+            if result.get("header_array_columns_total"):
+                anomalies = result.get("header_array_anomalies") or {}
+                unknown = anomalies.get("unknown_types") or {}
+                unknown_detail = ", ".join(
+                    f"{kind} {count}" for kind, count in sorted(unknown.items())
+                )
+                lines.append(
+                    f"Перечни имён объектов состава (узел V43): заполнено "
+                    f"{result.get('header_arrays_filled', 0)} колонок из "
+                    f"{result.get('header_array_columns_total')}, имён в них "
+                    f"{result.get('header_array_items', 0)}; записей верхнего уровня "
+                    f"{anomalies.get('top_level_entries', 0)}; видов без колонки "
+                    f"{len(unknown)}"
+                    + (f" ({unknown_detail})" if unknown_detail else "")
+                    + f", имён длиннее границы K3 {anomalies.get('overlong', 0)}, пустых имён "
+                    f"{anomalies.get('empty_object_name', 0)}. Пустые колонки остались NULL "
+                    "(«таких объектов в конфигурации нет»), а не пустым перечнем"
+                )
+
         if counts.get("properties_total"):
             # Что из Properties не имеет колонки в схеме, называется числом, а не молчанием:
             # «✅ Загружено» без этой строки читается как «свойства сохранены все».

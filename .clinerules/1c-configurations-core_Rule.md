@@ -1,5 +1,40 @@
 # Правила работы с MCP сервером "1c-configurations-core"
 
+> **Дополнение 22.10.2026 (п. 33):** закрыт узел **V43** — дочерние свойства конфигурации стали
+> данными: в `configurations` добавлено **48 колонок `TEXT[]`**, по одной на пункт перечня оператора
+> («Дочерние свойства конфигурации»), значение — **имена объектов метаданных верхнего уровня** своего
+> вида. Источник значений — индекс состава (`configuration_objects`, `depth = 0`; корневая запись
+> `Configuration` в перечень не кладётся), а не `<Properties>` корневого `Configuration.xml`: это
+> свойство в XML корня не выгружается вовсе. Имена колонок, границы и агрегация заданы одним
+> словарём `src/configuration_child_properties.py` (`CHILD_PROPERTIES`, `CHILD_COUNT = 48`,
+> `collect_header_arrays`), из него же сгенерирована пара «шаг 2 +
+> `migrate_v43_configuration_child_arrays.sql`» (`_v43_gen_sql.py` + `_v43_apply.py`) — три места,
+> где имена обычно разъезжаются, получают один источник. Порядок элементов — побайтовый
+> (`COLLATE "C"`), тот же, что у Python: в базе `datcollate` = `Russian_Russia.1251`, поэтому
+> `ORDER BY` без указания сортировки дал бы другой порядок (граница K6).
+> Живой замер (`python _v43_state_probe.py`, только чтение): ARRAY-колонок в таблице **49** — 48
+> узла V43 и `main_roles` (значение свойства корня `DefaultRoles`, узел V32): формулировка
+> «ARRAY-колонок 48» ошибочна, лишняя называется поимённо; порядок словаря совпадает с порядком
+> колонок живой схемы (`True`). Заполнение по строкам заголовков: KomMag `id=177` — **27/48**
+> (505 имён, 21 вид без объектов), BGU2 `id=242` — **42/48** (11 702 имени, 6 видов), BP3 `id=243` —
+> **42/48** (16 475 имён, 6 видов), MinCfg `id=244` — **46/48** (55 имён, 2 вида); инвариант K1
+> (сумма длин перечней = записей `depth = 0` минус корень) — **строк с расхождением 0**, пустых
+> (`NOT NULL`, длина 0) массивов — **0**: пустое состояние выражено `NULL`. Различие двух полных
+> выгрузок названо прямо: у BGU2 нет объектов `Interface`, у BP3 — `Style`. Заголовок `MinCfg` при
+> этом пересоздан загрузчиком: `id=176 → 244` (создан 22.10.2026 16:44, счётчики индекса прежние —
+> 264 записи), история состояний снята по M7; привязок внешних объектов к снятой строке не было.
+> Счётники схемы после узла: `python _cmp_ddl.py` — **557 колонок, 72 индекса/уникальных
+> ограничения, 55 внешних ключей и ограничений, 12 витрин**, расхождений нет (509 + 48 = 557);
+> в самой `configurations` — **107 колонок** (49 ARRAY, 37 character varying, 13 jsonb, 3 boolean,
+> 2 timestamp, 1 text, 1 uuid, 1 integer). Проверки: `tools/check_v42_configuration_header.py` —
+> **51 проверка, провалено 0, пропущено 0, справок 14** (прежний прогон п. 32 — 43/0/0/8; добавлены
+> разделы перечней: сверка каждой строки с её же индексом состава и требование `NULL` вместо пустого
+> массива); `tools/check_v32_zero_configuration.py` — **242 проверки, провалено 0**;
+> `_v43_loader_probe.py` — два контура заполнения (разбор выгрузки против бэкфилла) совпадают.
+> Норматив — п. 33 этих правил и раздел «🧾 Дочерние свойства конфигурации» в
+> `docs/config-scenarios/01_configuration.md`. Содержимое видов метаданных (V38) узел не закрывает:
+> перечень имён ≠ содержимое объекта.
+>
 > **Дополнение 22.10.2026 (п. 32):** закрыта открытая позиция узла V42 — заголовки `BGU2` и `BP3`,
 > строки которых были загружены до узла и потому держали 0/33 новых колонок, перезагружены по явной
 > команде оператора («перезагрузи» = подтверждение `force=True`, правило R5):
@@ -291,7 +326,7 @@ MCP сервер `1c-configurations-core` (server_configurations_core.py) — э
 |---|---|---|
 | 1 | `src/ddl_external_report.sql` (генерация: `src/generate_ddl.py`) | `external_report`, `attributes`, `tabular_sections`, `forms`, `form_ext`, `templates`, витрины `v_form_elements`, `v_form_events` |
 | 1b | `src/ddl_enrichment.sql` (узел V17) | `config_aliases`, `config_snippets`, `config_snippet_dependencies`, `config_cross_references`, витрины `v_enrichment_targets`, `v_enrichment_objects`; все FK — на шаг 1, поэтому шаг 1b идёт строго после него |
-| 2 | `create_1c_configurations_db.sql` | `configurations`, `config_extensions`, `bsl_modules`, `configuration_objects` (узел V33 — индекс состава конфигурации по `ConfigDumpInfo.xml`: `configuration_id`, `object_type`, `object_name`, `child_type`, `parent_name`, `depth`, `object_id`, `uuid`, `config_version`; уникальность по `name` и по `object_id` — одна строка на объект метаданных в базе); таблица `external_processing` из файла удалена узлом V22 (заголовок обработки — строка `external_report` с `object_kind='external_processing'`); шесть многоязычных колонок заголовка (`synonym`, `short_info`, `detailed_info`, `copyright`, `vendor_url`, `config_url`) с узла V39 имеют тип `jsonb` — словарь `{язык: текст}`; `update_url` остаётся `VARCHAR`: в выгрузке это простой текст без `v8:item` |
+| 2 | `create_1c_configurations_db.sql` | `configurations`, `config_extensions`, `bsl_modules`, `configuration_objects` (узел V33 — индекс состава конфигурации по `ConfigDumpInfo.xml`: `configuration_id`, `object_type`, `object_name`, `child_type`, `parent_name`, `depth`, `object_id`, `uuid`, `config_version`; уникальность по `name` и по `object_id` — одна строка на объект метаданных в базе); таблица `external_processing` из файла удалена узлом V22 (заголовок обработки — строка `external_report` с `object_kind='external_processing'`); шесть многоязычных колонок заголовка (`synonym`, `short_info`, `detailed_info`, `copyright`, `vendor_url`, `config_url`) с узла V39 имеют тип `jsonb` — словарь `{язык: текст}`; `update_url` остаётся `VARCHAR`: в выгрузке это простой текст без `v8:item`; **48 колонок-перечней `TEXT[]` добавляет узел V43** (п. 33) — по одной на дочернее свойство конфигурации, значение строится из `configuration_objects` (`depth = 0`), а не из XML корня |
 
 Для уже существующей БД вместо шага 1b — аддитивная `migrate_v17_enrichment.sql` (тот же SQL +
 заполнение `target_key`/`target_uuid` у заполненных ранее таблиц); вместо создания
@@ -299,7 +334,8 @@ MCP сервер `1c-configurations-core` (server_configurations_core.py) — э
 для живых БД вместо смены типов шести многоязычных колонок `configurations` — аддитивная
 `migrate_v39_multilang_configuration_text.sql` (узел V39: `text → jsonb`, уже записанный текст
 упаковывается под ключом `und`, а не `ru` — настоящий язык этих строк потерян до узла);
-вместо ревизионных колонок и витрин `v_current_*` шагов 1 и 1b — аддитивная
+для живых БД 48 колонок-перечней узла V43 создаёт и заполняет из уже загруженного индекса состава
+аддитивная `migrate_v43_configuration_child_arrays.sql` (п. 33); вместо ревизионных колонок и витрин `v_current_*` шагов 1 и 1b — аддитивная
 `migrate_v19_revisions.sql` (узел V19: колонки `revision_no`/`changed_at`/`changed_by`, снятие
 прежних уникальностей и FK `parent_uuid`, `UNIQUE (uuid, revision_no)`, индексы разрешения текущей
 ревизии, `children_manifest`, витрины `v_current_*` и перевод витрин анализа). **Отдельного шага
@@ -401,6 +437,17 @@ V19 снял 4 FK `parent_uuid` и 5 уникальностей по uuid (−9)
 таблице `configurations` — **59 колонок**: 37 character varying, 13 jsonb, 3 boolean,
 2 timestamp, 1 text, 1 uuid, 1 integer, 1 ARRAY (замер `information_schema.columns`, тот же день).
 Арифметика таблицы: было 31, снято 5, добавлено 33 → 59.
+Состояние 22.10.2026 после узла V43 (48 колонок-перечней `TEXT[]`, п. 33): **557 колонок,
+72 индекса/уникальных ограничения, 55 внешних ключей и ограничений, 12 витрин** — расхождений нет,
+код возврата 0 (лог `_v43_cmpddl_now.txt`). Арифметика колонок: 509 + 48 = 557; индексов и
+ограничений узел V43 не добавлял: миграция — только `ADD COLUMN IF NOT EXISTS … TEXT[]` и
+`UPDATE`-бэкфилл из `configuration_objects`, `DEFAULT` и `CHECK` узел не заводил (тот же замер,
+что у V42). В самой таблице `configurations` — **107 колонок**: 49 ARRAY, 37 character varying,
+13 jsonb, 3 boolean, 2 timestamp, 1 text, 1 uuid, 1 integer (замер `information_schema.columns`,
+22.10.2026). Арифметика таблицы: 59 + 48 = 107. Из 49 ARRAY-колонок 48 — узла V43, а 49-я —
+`main_roles` (значение свойства корня `DefaultRoles`, узел V32, вид писателя `text_array`):
+утверждение «ARRAY-колонок в таблице 48» неверно — лишняя колонка называется поимённо
+(замер `_v43_state_probe.py`, `_v43_loader_probe.py`).
 
 ### Обычные формы (`form_type='Ordinary'`, содержимое — `Form.bin`)
 
@@ -630,7 +677,7 @@ python tools/_v19_read_sites.py --guard
 
 | Таблица | Колонки (живая схема) | Состояние |
 |---|---|---|
-| `configurations` | **59 колонок** (замер 21.10.2026, `information_schema.columns`; типы: **37 character varying, 13 jsonb, 3 boolean, 2 timestamp, 1 text, 1 uuid, 1 integer, 1 ARRAY**). 26 колонок до V42: `id, name, synonym, comment, version, vendor_name, uuid, main_mode, usage_purpose, embedded_language, main_roles, default_language, short_info, detailed_info, copyright, vendor_url, config_url, update_url, help_included, lock_mode_default, modality_mode, ext_comp_sync_mode, interface_compat_mode, compatibility_mode, created_at, updated_at`; **плюс 33 колонки узла V42** (имена — по `migrate_v42_configuration_header_fields.sql` и живой схеме): `configuration_extension_compatibility_mode`, `database_tablespaces_use_mode`, `main_client_application_window_mode`, `object_autonumeration_mode`, `use_managed_form_in_ordinary_application`, `use_ordinary_form_in_managed_application`, `mobile_application_functionalities` (jsonb), `allowed_incoming_share_request_types` (jsonb), `common_settings_storage`, `reports_variants_storage`, `reports_user_settings_storage`, `form_data_settings_storage`, `dynamic_lists_user_settings_storage`, `default_report_form`, `default_report_variant_form`, `default_report_settings_form`, `default_style`, `default_interface`, `default_constants_form`, `default_search_form`, `default_dynamic_list_settings_form`, `default_collaboration_system_users_choice_form`, `default_data_history_change_history_form`, `default_data_history_version_data_form`, `default_data_history_version_differences_form`, `default_report_appearance_template`, `url_external_data_storage`, `name_prefix`, `mobile_application_urls` (jsonb), `required_mobile_application_permissions` (jsonb), `standalone_configuration_restriction_roles` (jsonb), `additional_full_text_search_dictionaries` (jsonb), `content` (jsonb). Колонок `app_module_id`, `session_module_id`, `data_proc_module_id`, `ext_conn_module_id`, `mobile_functionality` с узла V42 **нет** (п. 31); колонок `password_*`, `predefined_page_*`, `quick_start_page`, `used_mobile_application_functionalities_settings` в схеме **никогда не было** — те, кто их называет, описывает проектную задумку, а не живую схему | заголовок конфигурации пишет загрузчик варианта 1 (узел V32, `src/configuration_loader.py`): замер 21.10.2026 — 4 строки (BGU2, BP3, KomMag, MinCfg). Уникальность по `name` (`configurations_name_key`), повторная загрузка — `⚠️ name_conflict`, `force=True` пересоздаёт. **Свойства корня сохраняются полностью: 55 из 55 (узел V42, п. 31)**; составные значения — `jsonb`. **Содержимое видов метаданных не загружается** (п. 25); колонок `origin_*` нет (решение D-C, п. 24) |
+| `configurations` | **107 колонок** (замер 22.10.2026, `information_schema.columns`; типы: **49 ARRAY, 37 character varying, 13 jsonb, 3 boolean, 2 timestamp, 1 text, 1 uuid, 1 integer**). 26 колонок до V42: `id, name, synonym, comment, version, vendor_name, uuid, main_mode, usage_purpose, embedded_language, main_roles, default_language, short_info, detailed_info, copyright, vendor_url, config_url, update_url, help_included, lock_mode_default, modality_mode, ext_comp_sync_mode, interface_compat_mode, compatibility_mode, created_at, updated_at`; **плюс 33 колонки узла V42** (имена — по `migrate_v42_configuration_header_fields.sql` и живой схеме): `configuration_extension_compatibility_mode`, `database_tablespaces_use_mode`, `main_client_application_window_mode`, `object_autonumeration_mode`, `use_managed_form_in_ordinary_application`, `use_ordinary_form_in_managed_application`, `mobile_application_functionalities` (jsonb), `allowed_incoming_share_request_types` (jsonb), `common_settings_storage`, `reports_variants_storage`, `reports_user_settings_storage`, `form_data_settings_storage`, `dynamic_lists_user_settings_storage`, `default_report_form`, `default_report_variant_form`, `default_report_settings_form`, `default_style`, `default_interface`, `default_constants_form`, `default_search_form`, `default_dynamic_list_settings_form`, `default_collaboration_system_users_choice_form`, `default_data_history_change_history_form`, `default_data_history_version_data_form`, `default_data_history_version_differences_form`, `default_report_appearance_template`, `url_external_data_storage`, `name_prefix`, `mobile_application_urls` (jsonb), `required_mobile_application_permissions` (jsonb), `standalone_configuration_restriction_roles` (jsonb), `additional_full_text_search_dictionaries` (jsonb), `content` (jsonb). **плюс 48 колонок-перечней узла V43** (`TEXT[]`; имена — словарь `src/configuration_child_properties.py` и `migrate_v43_configuration_child_arrays.sql`, п. 33): по одной колонке на дочернее свойство конфигурации, значение — имена объектов метаданных верхнего уровня своего вида из индекса состава (`configuration_objects`, `depth = 0`, корневая запись не кладётся), пустое состояние — `NULL`, а не пустой массив. Колонок `app_module_id`, `session_module_id`, `data_proc_module_id`, `ext_conn_module_id`, `mobile_functionality` с узла V42 **нет** (п. 31); колонок `password_*`, `predefined_page_*`, `quick_start_page`, `used_mobile_application_functionalities_settings` в схеме **никогда не было** — те, кто их называет, описывает проектную задумку, а не живую схему | заголовок конфигурации пишет загрузчик варианта 1 (узел V32, `src/configuration_loader.py`): замер 21.10.2026 — 4 строки (BGU2, BP3, KomMag, MinCfg). Уникальность по `name` (`configurations_name_key`), повторная загрузка — `⚠️ name_conflict`, `force=True` пересоздаёт. **Свойства корня сохраняются полностью: 55 из 55 (узел V42, п. 31)**; составные значения — `jsonb`. **Содержимое видов метаданных не загружается** (п. 25); **перечни имён объектов верхнего уровня по 48 видам — узел V43 (п. 33)**, и это перечень, а не содержимое; колонок `origin_*` нет (решение D-C, п. 24) |
 | `configuration_objects` | `id, configuration_id, name, object_type, object_name, child_type, parent_name, depth, object_id, uuid, config_version, created_at` | индекс состава из `ConfigDumpInfo.xml` (узел V33): замер 17.10.2026 — 122 164 строки на 1 заголовок. XML самих объектов **не хранится** — перечень ≠ содержимое, узел V18 это не закрывает (п. 26) |
 | `config_extensions` | `id, configuration_id, name, synonym, comment, version, vendor_name, uuid, created_at, updated_at` | 0 строк; вариант «расширение» — заглушка (R7) |
 | `bsl_modules` | `id, configuration_id, module_name, file_path, code, object_type, object_name, report_id, created_at, parent_uuid, parent_type, module_type, code_size, truncated` | модули `Ext/` пишутся с `parent_uuid`/`parent_type`/`module_type` для отчётов **и** обработок (узел V22: `parent_type` = `external_processing`); FK на `report_id` нет — очистка явная (п. 10). Колонка `processing_id` удалена узлом V22 |
@@ -2533,6 +2580,102 @@ BP3: число строк, уникальность `object_id`/`name`, фор�
 **Что осталось вне объёма:** содержимое видов метаданных (V38); провенанс строк конфигурации
 (решение D-C не пересматривалось — сопоставление строки с каталогом возможно только по `uuid`);
 UNF3 / UT11 / ZUP31 / Config_NULL в БД не загружались (их строки отсутствуют, это не потеря).
+
+### 33. Дочерние свойства конфигурации не были данными: 48 перечней имён существовали только как план (узел V43)
+
+**Файлы:** `src/configuration_child_properties.py` (новый, единый словарь),
+`src/configuration_loader.py` (сбор перечней при загрузке), `src/config_load_router.py`
+(передача индекса состава в заголовок), `src/external_table_writer.py` (`ConfigurationRowWriter`:
+48 колонок вида `text_array_nullable`), `create_1c_configurations_db.sql` (шаг 2),
+`migrate_v43_configuration_child_arrays.sql` (новый), `_v43_gen_sql.py` / `_v43_apply.py`
+(генерация SQL-пары из словаря), `_v43_loader_probe.py` (сверка двух контуров),
+`_v43_state_probe.py` (состояние живой БД), `_v43_style_check.py` (стиль модуля),
+`tools/check_v42_configuration_header.py` (разделы перечней), `tools/check_v32_zero_configuration.py`.
+Зонды, названные выше (`_v43_gen_sql.py`, `_v43_apply.py`, `_v43_loader_probe.py`,
+`_v43_state_probe.py`, `_v43_style_check.py`), зафиксированы в репозитории: в отличие от
+`_v41_three_configs_check.py` и `_v42_reload_probe.py`, которые остаются незакоммиченными,
+эти пять файлов — проверки узла, и без них прогон нельзя повторить из чистой копии.
+Одноразовые `_v43_style_fix.py` и `_v43_cols.sql` не зафиксированы.
+
+**Проблема:** перечень «Дочерние свойства конфигурации» (48 пунктов, файл оператора) нигде не был
+представлен в базе: `configurations` держала свойства из `<Properties>` корня (V42), а объекты
+метаданных — только строками индекса состава (`configuration_objects`, V33). Ответ «какие
+справочники/регистры/общие модули есть в этой конфигурации» был возможен только SQL-группировкой по
+индексу, но не свойством заголовка. Дочитать это из XML было нельзя: в `<Properties>` корневого
+`Configuration.xml` такого свойства нет вовсе, поэтому полнота разбора V42 его закрыть не могла.
+
+**Статус:** ✅ **Реализовано 22.10.2026 (узел V43).** Модель:
+- **48 колонок `TEXT[]`** в `configurations`, по одной на пункт перечня; значение — **имена объектов
+  метаданных** вида (`object_name`, а не точечное `name`: вид уже задан колонкой — граница K5);
+- **один словарь имён** — `src/configuration_child_properties.py` (`CHILD_PROPERTIES` — пары
+  «колонка, `object_type` индекса», `CHILD_COUNT = 48`, `CHILD_ARRAY_COLUMNS`,
+  `header_array_columns()`, `collect_header_arrays()`); из него `_v43_gen_sql.py` + `_v43_apply.py`
+  генерируют шаг 2 и миграцию. Имена обычно разъезжаются в трёх местах (Python, бутстрап,
+  миграция) — здесь у них один источник, а порядок объявления колонок в SQL повторяет порядок
+  словаря и это проверяется (`_v43_state_probe.py`: «порядок совпадает с живой схемой: True»);
+- **границы K1–K6** (в комментарии миграции и в модуле): K1 — только верхний уровень (`depth = 0`),
+  корневая запись `Configuration.<Имя>` в перечень не кладётся; K2 — значение всегда список (один
+  объект → массив из одного элемента); K3 — длина элемента ≤ 80 (замер 274 141 строки индекса —
+  максимум ровно 80, слой `property-common-name-synonym-comment`); K4 — `DISTINCT` не нужен (индекс
+  не даёт двух строк на объект); K5 — значение `object_name`; K6 — порядок побайтовый
+  (`ORDER BY name COLLATE "C"`): в базе `datcollate` = `Russian_Russia.1251`, Python сортирует по
+  кодовым точкам, поэтому порядок обязан задавать один закон, иначе два контура дадут разные массивы;
+- **пустое состояние — `NULL`, а не `'{}'`**: индекс не различает «вида нет» и «вид есть, но объектов
+  ноль», пустая колонка читается как «в этой выгрузке таких объектов нет» — тот же контракт `===EMPTY`
+  (V39/V42), а пустой массив означал бы различение, которого источник не даёт;
+- **заполнение двумя контурами, которые обязаны совпадать**: загрузчик собирает перечни из разбора
+  `ConfigDumpInfo.xml`, миграция заполняет строки, загруженные до узла, из уже лежащих строк индекса.
+  Расхождение контуров — тот же класс дефекта, что собственный `max(revision_no)` до V19 или свой
+  разбор причины до `src/quarantine.py`, поэтому `_v43_loader_probe.py` сверяет именно их;
+- `DEFAULT` и `CHECK` узел не заводил (тот же замер, что у V42): значение по умолчанию, измеренное
+  одной фикстурой, в ограничении схемы потом читалось бы как факт о любой загрузке.
+
+**Проверка (замер 22.10.2026):**
+- `python _v43_state_probe.py` (только чтение) — ARRAY-колонок **49**: 48 узла V43 и `main_roles`
+  (значение свойства корня `DefaultRoles`, узел V32, вид писателя `text_array`); формулировка
+  «ARRAY-колонок 48» неверна, лишняя колонка называется поимённо. Порядок словаря = порядок живой
+  схемы. По каждой строке заголовка перечни сверяются с её же индексом состава по видам:
+
+| Строка | заполнено | имён | пустых массивов | записей `depth=0` | корней | K1 | видов без объектов |
+|---|---|---|---|---|---|---|---|
+| KomMag `id=177` | 27/48 | 505 | 0 | 506 | 1 | OK | 21 |
+| BGU2 `id=242` | 42/48 | 11 702 | 0 | 11 703 | 1 | OK | 6 |
+| BP3 `id=243` | 42/48 | 16 475 | 0 | 16 476 | 1 | OK | 6 |
+| MinCfg `id=244` | 46/48 | 55 | 0 | 56 | 1 | OK | 2 |
+
+  итог прогона — «строк с расхождением перечня с индексом состава: 0». Отсутствующие виды названы
+  поимённо: BGU2 — `Bot`, `Interface`, `WebSocketClient`, `ChartOfCalculationTypes`,
+  `CalculationRegister`, `ExternalDataSource`; BP3 — `Bot`, `Interface`, `WebSocketClient`, `Style`,
+  `CalculationRegister`, `ExternalDataSource`; MinCfg — `DocumentNumerator`, `Sequence`; KomMag —
+  21 вид (полный перечень печатает зонд). Различие двух полных выгрузок названо прямо: у BGU2 нет
+  `Interface` и `ChartOfCalculationTypes` (но есть `Style`), у BP3 — нет `Style` (но есть
+  `Interface` и `ChartOfCalculationTypes`); остальные четыре вида отсутствуют в обеих. Пустой
+  перечень — состояние выгрузки, а не потеря разбора (тот же вывод, что у п. 32);
+- `python tools/check_v42_configuration_header.py` — **51 проверка, провалено 0, пропущено 0,
+  справок 14** (прежний прогон п. 32 — 43/0/0/8; добавлены разделы перечней: согласование каждой
+  строки с её индексом, запрет пустого массива, справка о заполнении);
+  `python tools/check_v32_zero_configuration.py` — **242 проверки, провалено 0** (заголовок и индекс
+  состава не сломаны); `python _cmp_ddl.py` — rc=0, **557 колонок, 72 индекса/уникальных ограничения,
+  55 ограничений, 12 витрин**, расхождений нет (509 + 48 = 557; индексов и ограничений узел не
+  добавлял); `python _v43_loader_probe.py` — два контура совпадают; фикстура задаётся **именем
+  каталога**, а не именем строки: `configurations.name` — значение из выгрузки (у каталога `KomMag`
+  это `XXI_Коммерческий_магазин_8_редакция_1_0_3`), фильтр по имени строки фикстуру не нашёл бы;
+  `python _v43_style_check.py src/configuration_child_properties.py` — 0 нарушений (блок констант
+  после импортов, пустые строки между определениями, мёртвый импорт снят).
+
+**Живое состояние после узла:** строки `configurations` — `KomMag id=177`, `BGU2 id=242`,
+`BP3 id=243`, `MinCfg id=244` (прежняя `id=176` снята: заголовок пересоздан загрузчиком
+22.10.2026 16:44 при проверке контура загрузки, `force=True` снимает историю по M7; счётчики индекса
+прежние — 264 записи, 47 видов, глубина 2). Привязок внешних объектов к снятой строке не было,
+битых ссылок 0. `id` читаются запросом `SELECT id, name FROM configurations ORDER BY id`.
+
+**Что осталось вне объёма:** содержимое видов метаданных (группы A–H, узел V38) — перечень имён
+верхнего уровня не отвечает на вопрос «что это за объект»; свойств, реквизитов, форм, макетов и
+модулей объекта в БД по-прежнему нет, и ни одна группа A–H этим узлом не снимается; вложенные записи
+индекса (`depth > 0`) и `configuration_objects.child_type` в перечни не входят (K1); версионность
+V19 и провенанс на `configurations` не распространяются (решение D-C) — сопоставление строки с
+каталогом возможно только по `uuid`; узел V18 (экспорт) не закрыт: перечень ≠ содержимое, собирать
+XML не из чего.
 
 
 

@@ -15,7 +15,8 @@ r"""tools/check_v42_configuration_header.py — узел V42: заголовок
   1. СХЕМА: пять снятых колонок в живой схеме отсутствуют; 33 новых присутствуют, их типы
      совпадают с `migrate_v42_configuration_header_fields.sql` (тот же класс дефекта, что
      расхождение типов между шагами установки, которое ловит `_cmp_ddl.py`); число колонок
-     равно арифметике 31 - 5 + 33; `NOT_FILLED_COLUMNS` пуст - состояния «колонка есть, но
+     равно арифметике 31 - 5 + 33 + 48 (с узла V43 в таблице ещё 48 колонок-перечней,
+     их перечень берётся из `src/configuration_child_properties.py`, а не печатается числом); `NOT_FILLED_COLUMNS` пуст - состояния «колонка есть, но
      не заполняется осознанно» больше нет;
   2. РАЗБОР: каждое имя свойства из `<Properties>` (независимый обход XML, а не счётчик
      парсера) имеет колонку в `CONFIGURATION_FIELDS` - слепых зон по свойствам корня не
@@ -33,7 +34,16 @@ r"""tools/check_v42_configuration_header.py — узел V42: заголовок
   5. ГРАНИЦА: строка обязана быть свежее файлов фикстуры. Иначе сравнение было бы сравнением
      с прошлым состоянием - тот же отдельный статус «источник новее записи» и SKIP с причиной,
      что у `_v41_three_configs_check.py` (держит правило R5);
-  6. УБОРКА: скрипт читает всё - состав БД после прогона не меняется, эталонная пара
+  6. СОСТОЯНИЕ ПРОЧИХ СТРОК: у колонок V42 состоянием является дата загрузки относительно
+     файла миграции V42 - до узла этих колонок не было, и пустые колонки такой строки нельзя
+     читать как «свойств нет в выгрузке». У перечней V43 даты-основания нет: их заполняет не
+     `<Properties>`, а индекс состава, и бэкфилл миграции пишет те же значения в строки,
+     загруженные до узла (проверка по дате назвала бы «до V43» строки, у которых значения на
+     месте). Состоянием перечней назван проверяемый по БД факт: длина каждого перечня равна
+     числу записей этого вида верхнего уровня в `configuration_objects` той же строки, а
+     пустых массивов нет. NULL при виде, которого в индексе этой выгрузки нет, - корректное
+     состояние границы K1/K2 («объектов этого вида нет»), а не потеря разбора;
+  7. УБОРКА: скрипт читает всё - состав БД после прогона не меняется, эталонная пара
      внешних объектов не тронута.
 
 Запуск:
@@ -59,8 +69,10 @@ try:  # кириллица в консоли Windows (cp1251) - как в ост
 except Exception:
     pass
 
+from configuration_child_properties import (  # noqa: E402
+    CHILD_COUNT, OBJECT_TYPE_BY_COLUMN, header_array_columns)
 from configuration_meta_parser import (CONFIGURATION_FIELDS,  # noqa: E402
-                                       NOT_FILLED_COLUMNS, parse_configuration_meta)
+                                      NOT_FILLED_COLUMNS, parse_configuration_meta)
 from external_db import transaction  # noqa: E402
 
 XML_ROOT = r"C:\1C_LLM\LoadDoc\Configurations\XML_files"
@@ -221,8 +233,21 @@ def check_schema(new_pairs, dropped):
         elif length and got["character_maximum_length"] != int(length):
             bad.append(f"{col}: длина {got['character_maximum_length']} вместо {length}")
     check("типы и длины новых колонок совпадают с migrate_v42_*", not bad, bad[:6])
-    check(f"арифметика колонок: было 31, снято {len(dropped)}, добавлено {len(new_pairs)} -> {len(live)}",
-          len(live) == 31 - len(dropped) + len(new_pairs), f"в живой схеме {len(live)}")
+    # Арифметика называется полностью: V42 (снято 5, добавлено 33) плюс V43 — 48
+    # колонок-перечней, перечень которых взят из контракта
+    # src/configuration_child_properties.py, а не из числа, подогнанного под ответ.
+    v43_columns = sorted(header_array_columns())
+    check(f"арифметика колонок: было 31, снято {len(dropped)}, добавлено V42 {len(new_pairs)} "
+          f"+ V43 {len(v43_columns)} -> {len(live)}",
+          len(live) == 31 - len(dropped) + len(new_pairs) + len(v43_columns),
+          f"в живой схеме {len(live)}")
+    absent = [c for c in v43_columns if c not in live]
+    check(f"все {len(v43_columns)} колонок-перечней V43 (L4={CHILD_COUNT}) описаны в схеме",
+          not absent and len(v43_columns) == CHILD_COUNT,
+          absent[:5] or f"L4={len(v43_columns)}")
+    not_array = [f"{c}: {live[c]['data_type']}" for c in v43_columns
+                 if c in live and live[c]["data_type"] != "ARRAY"]
+    check("колонки-перечни V43 в живой схеме имеют тип массива", not not_array, not_array[:5])
     check("NOT_FILLED_COLUMNS пуст: «колонка есть, но не заполняется» больше нет",
           not NOT_FILLED_COLUMNS, NOT_FILLED_COLUMNS)
 
@@ -310,10 +335,18 @@ def check_row(case_dir, res):
 
     live_cols = set(row) - {"id", "created_at", "updated_at"}
     parser_cols = set(res["configuration"])
+    # Перечни V43 заполняет индекс состава, а не `<Properties>`, поэтому их отсутствие в
+    # контракте разбора корня — состояние модели, а не слепая зона. Разрыв «схема минус
+    # разбор» обязан быть ровно этим множеством: лишняя колонка иначе осталась бы невидимой.
+    v43_columns = set(header_array_columns())
     only_parser = sorted(parser_cols - live_cols)
-    only_db = sorted(live_cols - parser_cols)
+    only_db = sorted((live_cols - parser_cols) - v43_columns)
+    gap = sorted((live_cols - parser_cols) & v43_columns)
     check("поля разбора без колонки в схеме нет", not only_parser, only_parser)
-    check("колонки заголовка, которую загрузчик не описывает, нет", not only_db, only_db)
+    check("колонки заголовка, которую загрузчик корня не описывает, нет "
+          "(перечни V43 названы отдельно)", not only_db, only_db)
+    check(f"разрыв «схема минус разбор корня» равен ровно {len(v43_columns)} перечням V43",
+          gap == sorted(v43_columns), sorted(v43_columns - set(gap))[:5])
 
     common = sorted(live_cols & parser_cols)
     diffs = []
@@ -322,13 +355,23 @@ def check_row(case_dir, res):
             diffs.append(f"{col}: в БД={row[col]!r} разбор={res['configuration'][col]!r}")
     check(f"значения всех {len(common)} колонок совпадают с разбором", not diffs, diffs[:8])
 
-    stored_nonempty = sum(1 for col in live_cols if norm(row[col]) is not None)
+    # Счётчик непустых считается только по колонкам, источником которых является
+    # `<Properties>`: сверять с разбором корня колонки, заполненные индексом состава,
+    # значило бы сравнивать два разных источника и называть расхождение дефектом.
+    stored_nonempty = sum(1 for col in common if norm(row[col]) is not None)
     parsed_nonempty = sum(1 for col in parser_cols if norm(res["configuration"][col]) is not None)
-    check(f"непустых колонок {stored_nonempty} - ровно столько, сколько заполнено разбором",
+    check(f"непустых колонок корня {stored_nonempty} - ровно столько, сколько заполнено разбором",
           stored_nonempty == parsed_nonempty, f"разбор даёт {parsed_nonempty}")
-    empty_by_design = sorted(col for col in live_cols if norm(row[col]) is None)
+    empty_by_design = sorted(col for col in common if norm(row[col]) is None)
     info(f"пустые свойства фикстуры сохранены как NULL ({len(empty_by_design)}): "
          + ", ".join(empty_by_design))
+    v43_filled = [c for c in v43_columns if row.get(c)]
+    v43_empty = [OBJECT_TYPE_BY_COLUMN[c] for c in v43_columns if not row.get(c)]
+    info(f"перечней V43 заполнено индексом состава: {len(v43_filled)}/{len(v43_columns)}; "
+         f"пустых массивов загрузчик не пишет: вида нет в индексе этой выгрузки — "
+         f"колонка остаётся NULL (тот же контракт пустого состояния, что у V39/V42). "
+         f"Пустых колонок {len(v43_empty)}: "
+         + (", ".join(v43_empty) if v43_empty else "нет"))
     for col in ("content", "name_prefix", "update_url", "default_search_form",
                 "required_mobile_application_permissions", "detailed_info"):
         if col in row:
@@ -378,16 +421,31 @@ def check_jsonb_content(row, facts):
         check(f"скалярные дети перечня {col} сохранены текстом (квалифицированное имя)",
               bool(value) and all(isinstance(v, str) and "." in v for v in value), value)
 def check_other_rows(new_pairs):
-    """Какие заголовки в БД загружены ДО V42 (состояние называется, а не молчит).
+    """Состояние каждой строки `configurations`: колонки V42 - по дате узла, перечни V43 - по индексу.
 
-    Строка, загруженная до узла, физически не может держать 33 новых значения: колонок тогда
-    не было. Это не провал и не данные - это состояние записи, и оно обязано быть названо,
-    иначе пустые колонки читаются как «в конфигурации этих свойств нет».
+    Колонки V42: строка, загруженная до узла, физически не может держать 33 новых значения -
+    колонок тогда не было. Это не провал и не данные о конфигурации, это состояние записи, и
+    оно обязано быть названо, иначе пустые колонки читаются как «в конфигурации этих свойств
+    нет». Граница здесь - mtime файла миграции V42: он и есть момент, когда колонки появились.
+
+    Перечни V43 так же по дате не проверяются, и это не небрежность, а другое состояние модели:
+    значения колонок берёт не `<Properties>`, а индекс состава, и бэкфилл миграции заполнил их
+    из уже загруженного `configuration_objects`. Значит дата загрузки о перечнях не говорит
+    ничего (первый вариант проверки по дате назвал бы «до V43» строки, у которых значения на
+    месте - BGU2, BP3, KomMag). Состоянием считается единственный проверяемый по БД факт:
+    длина каждого перечня равна числу записей этого вида верхнего уровня в индексе той же
+    строки - то же выражение, которым `_v43_live_check.py` подтвердил нулевые расхождения.
+    Расхождение и есть единственное основание сказать «требуется перезагрузка force=True» (по
+    R5 - только после подтверждения оператора). Пустой массив - нарушение контракта V43: пустое
+    состояние выражено NULL, поэтому отдельная проверка держит и это.
     """
-    section("5. СОСТОЯНИЕ ПРОЧИХ ЗАГОЛОВКОВ: что загружено до V42")
+    section("5. СОСТОЯНИЕ ПРОЧИХ ЗАГОЛОВКОВ: колонки V42 по дате узла, перечни V43 по индексу")
     boundary = datetime.fromtimestamp(MIGRATION.stat().st_mtime)
+    v43_columns = list(header_array_columns())
     rows = q("SELECT id, name, created_at FROM configurations ORDER BY id")
     stale = []
+    inconsistent = []
+    empty_arrays = []
     for row in rows:
         # Сумма идёт по булевым выражениям, а не SUM(arg, arg, ...): агрегат так не
         # вызывается (первый прогон упал UndefinedFunction: function sum(integer, ...)).
@@ -400,11 +458,51 @@ def check_other_rows(new_pairs):
              f"заполнено новых колонок: {filled}/{len(new_pairs)} - {state}")
         if state == "загружена до V42":
             stale.append(f"{row['name']} (id={row['id']})")
+        # Перечни: число элементов каждой колонки против числа записей того же вида верхнего
+        # уровня (depth = 0) в индексе этой же конфигурации. Пара «колонка - вид» берётся из
+        # CHILD_PROPERTIES - своего перечня видов здесь быть не должно.
+        idx = {rec["object_type"]: rec["n"] for rec in q(
+            "SELECT object_type, count(*) AS n FROM configuration_objects "
+            "WHERE configuration_id = %s AND depth = 0 GROUP BY object_type", [row["id"]])}
+        got = q(f"SELECT {', '.join(v43_columns)} FROM configurations WHERE id = %s",
+                [row["id"]])[0]
+        mismatch, filled43, objects43, kinds_absent = [], 0, 0, []
+        for column in v43_columns:
+            value = got[column]
+            want = idx.get(OBJECT_TYPE_BY_COLUMN[column], 0)
+            have = 0 if value is None else len(value)
+            if value is None:
+                if want:
+                    kinds_absent.append(f"{OBJECT_TYPE_BY_COLUMN[column]} (индекс ждёт {want})")
+            else:
+                filled43 += 1
+                objects43 += have
+                if have == 0:
+                    empty_arrays.append(f"id={row['id']}.{column}")
+            if have != want:
+                mismatch.append(f"{column}: в колонке {have}, в индексе {want}")
+        check(f"перечни V43 строки id={row['id']} согласованы с её индексом состава",
+              not mismatch, mismatch[:6])
+        info(f"    перечней V43: заполнено {filled43}/{len(v43_columns)}, "
+             f"объектов в перечнях {objects43}; видов этих в индексе выгрузки нет: "
+             + (", ".join(kinds_absent) if kinds_absent else "нет"))
+        if mismatch:
+            inconsistent.append(f"{row['name']} (id={row['id']})")
     if stale:
         info("требуют перезагрузки force=True (по R5 - только после подтверждения оператора): "
              + ", ".join(stale))
     else:
         info("заголовков, загруженных до V42, в БД нет")
+    check("пустых массивов в колонках-перечнях V43 нет: пустое состояние выражено NULL",
+          not empty_arrays, empty_arrays[:6])
+    if inconsistent:
+        info("перечни этих заголовков разошлись с их индексом состава - требуется "
+             "перезагрузка force=True (по R5 - только после подтверждения оператора): "
+             + ", ".join(inconsistent))
+    else:
+        info("строк, перечни которых разошлись с индексом состава, нет: бэкфилл миграции "
+             "заполняет перечни из уже загруженного индекса, поэтому дата загрузки строки о "
+             "перечнях V43 не говорит ничего")
 
 
 def counts():

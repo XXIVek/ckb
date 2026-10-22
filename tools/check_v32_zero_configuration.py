@@ -15,7 +15,13 @@ Test3_Otchet_Null; эталонная пара (Test1_Otchet, Test2_Otchet) не
      `data_proc_module_id`, `ext_conn_module_id`, `mobile_functionality` (свойств
      предопределённых модулей в `<Properties>` нет, а `TEXT[]` терял признак `use`), поэтому
      раздел держит обе стороны: множество колонок V32 без снятых обязано быть на месте, а
-     снятые колонки обязаны ОТСУТСТВОВАТЬ — их возврат считается регрессией;
+     снятые колонки обязаны ОТСУТСТВОВАТЬ — их возврат считается регрессией.
+     Узел V43 (22.10.2026) добавил 48 колонок-перечней `TEXT[]` — дочерние свойства
+     конфигурации, значение которых даёт индекс состава, а НЕ `<Properties>` корня. Имена и
+     порядок этих колонок задаёт единственный словарь `src/configuration_child_properties.py`,
+     поэтому раздел читает ожидаемый состав из него, а не из переписанного руками списка:
+     48 имён в трёх местах порознь обязательно разъехались бы. Колонок-перечней в таблице
+     при этом ровно 49 — 48 узла V43 плюс `main_roles` узла V32 (свойство DefaultRoles);
   2. детекция (R1): Configuration.xml даёт вариант `configuration`; тот же файл с
      `ConfigurationExtensionPurpose` — вариант `extension`, который остаётся заглушкой (R7);
      вложенный Configuration.xml не читается; внешний отчёт не уехал в конфигурацию;
@@ -131,6 +137,10 @@ from config_dump_info_parser import (find_config_dump_info,  # noqa: E402
                                     parse_config_dump_info)
 from config_load_router import (VARIANT_CONFIGURATION, VARIANT_EXTENSION,  # noqa: E402
                                 detect_load_variant, format_load_result, load_catalog)
+from configuration_child_properties import (CHILD_COUNT, CHILD_OBJECT_TYPES,  # noqa: E402
+                                           COLUMN_BY_OBJECT_TYPE,
+                                           collect_header_arrays,
+                                           header_array_columns)
 from configuration_loader import (TABLE, bound_external_objects,  # noqa: E402
                                   delete_configuration, find_configuration,
                                   find_configuration_by_name, find_configuration_xml,
@@ -214,9 +224,9 @@ V39_MIGRATION = ROOT / "migrate_v39_multilang_configuration_text.sql"
 # модулей в `Configuration.xml` нет вовсе (замер: `ChildObjects` даёт только `Language`), и
 # `UsedMobileApplicationFunctionalities` писался в `TEXT[]` с потерей признака `use`.
 # С узла V42: словарь покрывает все 55 свойств (проверка «словарь = число свойств фикстуры»
-# ниже), пять колонок сняты `migrate_v42_configuration_header.sql`, признаки мобильного
+# ниже), пять колонок сняты `migrate_v42_configuration_header_fields.sql`, признаки мобильного
 # интерфейса лежат в jsonb парами `{"functionality": …, "use": "true"|"false"}`.
-V42_MIGRATION = ROOT / "migrate_v42_configuration_header.sql"
+V42_MIGRATION = ROOT / "migrate_v42_configuration_header_fields.sql"
 V42_REMOVED_COLUMNS = (
     "app_module_id", "session_module_id", "data_proc_module_id",
     "ext_conn_module_id", "mobile_functionality",
@@ -277,6 +287,26 @@ V42_BOOLEAN_COLUMNS = (
     "use_managed_form_in_ordinary_application",
     "use_ordinary_form_in_managed_application",
 )
+
+# ─── узел V43 (22.10.2026): 48 дочерних свойств — массивы имён объектов ───
+#
+# Основание — файл оператора «Дочерние свойства для конфигурации.txt» (48 свойств, каждое —
+# «список значений, тип строка макс. 80») и замер живой БД (`_child_arrays_probe.sql`,
+# 274 141 строка индекса): K1 — на `depth = 0` индекс отдаёт ровно 48 видов файла плюс
+# `Configuration`; K3 — граница 80 достигнута, строк длиннее 0; K4 — дублей имени внутри
+# вида 0; K5 — `DocumentNumerator`/`Sequence` индекс моделирует ВЕРХНИМИ записями.
+# Имена и порядок колонок задаёт единственный словарь `src/configuration_child_properties.py`,
+# поэтому ожидаемый состав таблицы читается здесь из него, а не переписан руками: 48 имён,
+# разложенных по трём местам порознь, обязательно разъезжаются (тот же класс дефекта, что
+# собственный `max(revision_no)` в модуле-вызывателе до узла V19).
+V43_MIGRATION = ROOT / "migrate_v43_configuration_child_arrays.sql"
+V43_CHILD_COLUMNS = tuple(header_array_columns())
+# Состав таблицы после V43 = состав V42 + 48 перечней. Множество V42 сохранено как замер
+# своего дня: раздел обязан ловить и возврат снятых V42-колонок, и пропажу любого перечня V43.
+CONFIGURATION_COLUMNS_V43 = CONFIGURATION_COLUMNS_V42 | set(V43_CHILD_COLUMNS)
+# Единственный перечень, появившийся до V43: `main_roles` (свойство `DefaultRoles`, узел V32).
+# Число ARRAY-колонок в таблице потому 49, а не 48 — и это названо, а не округлено.
+PRE_V43_ARRAY_COLUMNS = ("main_roles",)
 
 
 failures = []
@@ -467,12 +497,35 @@ def check_schema():
     # Состав таблицы называется списком, а не «несколькими колонками»: узел V42 не только
     # добавил слоты, но и снял пять колонок без источника. Проверка «все прежние на месте»
     # такое изменение не ловила бы вовсе — она бы прошла, потому что удалённое не спрашивали.
-    if not check(f"состав таблицы заголовка равен измеренному (V42, {len(CONFIGURATION_COLUMNS_V42)} колонок)",
-                 set(cols) == CONFIGURATION_COLUMNS_V42,
-                 f"нет: {sorted(CONFIGURATION_COLUMNS_V42 - set(cols))} "
-                 f"лишние: {sorted(set(cols) - CONFIGURATION_COLUMNS_V42)}"):
+    expected = CONFIGURATION_COLUMNS_V43
+    if not check(f"состав таблицы заголовка равен измеренному "
+                 f"(V42 + V43, {len(expected)} колонок)",
+                 set(cols) == expected,
+                 f"нет: {sorted(expected - set(cols))} "
+                 f"лишние: {sorted(set(cols) - expected)}"):
         note("расхождение состава — предмет раздела 1: живая схема, бутстрап шага 2 и "
-             "миграция V42 обязаны совпадать (полноту схемы целиком сверяет _cmp_ddl.py)")
+             "миграции V42/V43 обязаны совпадать (полноту схемы целиком сверяет _cmp_ddl.py)")
+
+    # Узел V43: имена и порядок 48 перечней читаются из единственного словаря. Если живая
+    # схема, бутстрап и писатель разошлись бы по именам, загрузчик и слой обогащения
+    # описывали бы одну и ту же конфигурацию по-разному, а бэкфилл миграции писал бы
+    # колонки, которых писатель не касается.
+    check(f"словарь дочерних свойств называет ровно {CHILD_COUNT} колонок без дублей "
+          "(единственный источник имён)",
+          len(V43_CHILD_COLUMNS) == CHILD_COUNT == len(set(V43_CHILD_COLUMNS))
+          and len(CHILD_OBJECT_TYPES) == CHILD_COUNT,
+          repr([len(V43_CHILD_COLUMNS), CHILD_COUNT, len(set(V43_CHILD_COLUMNS))]))
+    array_columns = sorted(c for c, kind in cols.items() if kind == "ARRAY")
+    check(f"колонок-перечней в схеме ровно {CHILD_COUNT + len(PRE_V43_ARRAY_COLUMNS)}: "
+          f"{CHILD_COUNT} узла V43 плюс {', '.join(PRE_V43_ARRAY_COLUMNS)} узла V32",
+          array_columns == sorted(set(V43_CHILD_COLUMNS) | set(PRE_V43_ARRAY_COLUMNS)),
+          repr(sorted(set(array_columns)
+                      ^ (set(V43_CHILD_COLUMNS) | set(PRE_V43_ARRAY_COLUMNS)))))
+    check("тип каждого перечня — массив текста (TEXT[]), а не jsonb и не varchar: контракт "
+          "файла оператора «поле — всегда список значений, тип строка»",
+          all(cols.get(column) == "ARRAY" for column in V43_CHILD_COLUMNS),
+          repr({column: cols.get(column) for column in V43_CHILD_COLUMNS
+                if cols.get(column) != "ARRAY"}))
 
     gone = sorted(column for column in V42_REMOVED_COLUMNS if column in cols)
     check("пять колонок без источника сняты (V42): app_module_id, session_module_id, "
@@ -490,11 +543,19 @@ def check_schema():
     # Ключевая проверка узла V42: у каждой колонки значения есть источник в словаре разбора.
     # До V42 четыре колонки заголовка (модули предопределённых программ) и mobile_functionality
     # не имели XML-источника, а 33 свойства не имели колонки — теперь ни того, ни другого нет.
+    # С узла V43 у 48 перечней источника в словаре СВОЙСТВ корня нет и быть не может: их
+    # заполняет индекс состава (`configuration_objects`, узел V33), а не `<Properties>`.
+    # Поэтому покрытие проверяется двумя утверждениями: словарь свойств покрывает всё
+    # остальное, а разрыв «схема минус словарь» — ровно перечни V43 и ничего больше.
     technical = {"id", "uuid", "created_at", "updated_at"}
     mapped = {field[0] for field in CONFIGURATION_FIELDS.values() if field[0]}
-    check("словарь разбора покрывает все колонки значений: колонок без источника не осталось",
-          mapped == set(cols) - technical,
-          repr(sorted((set(cols) - technical) ^ mapped)))
+    value_columns = set(cols) - technical
+    check("словарь разбора свойств покрывает все колонки значений, кроме перечней V43",
+          mapped == value_columns - set(V43_CHILD_COLUMNS),
+          repr(sorted((value_columns - set(V43_CHILD_COLUMNS)) ^ mapped)))
+    check("разрыв «схема минус словарь» — ровно 48 перечней V43: их источник — индекс состава",
+          (value_columns - mapped) == set(V43_CHILD_COLUMNS),
+          repr(sorted((value_columns - mapped) - set(V43_CHILD_COLUMNS))))
     check("число свойств словаря равно измеренному числу свойств корня (замер восьми выгрузок)",
           len(CONFIGURATION_FIELDS) == ROOT_PROPERTIES_MEASURED,
           repr([len(CONFIGURATION_FIELDS), ROOT_PROPERTIES_MEASURED]))
@@ -507,6 +568,19 @@ def check_schema():
           and all(declared.get(column) == "jsonb" for column in V42_JSONB_COLUMNS),
           repr({column: declared.get(column) for column in
                 (*V42_REMOVED_COLUMNS, *V42_JSONB_COLUMNS)}))
+    # Узел V43: та же пара «миграция + бутстрап». Живая схема с 48 колонками и бутстрап без
+    # них означала бы, что чистая установка БД вернулась к состоянию до узла, а `_cmp_ddl.py`
+    # поймал бы это только как расхождение всей схемы, без указания на причину.
+    check("бутстрап шага 2 объявляет все 48 перечней типом text[] (V43: правка схемы идёт парой)",
+          bool(declared)
+          and all(declared.get(column) == "text[]" for column in V43_CHILD_COLUMNS),
+          repr({column: declared.get(column) for column in V43_CHILD_COLUMNS
+                if declared.get(column) != "text[]"}))
+    check("миграция V43 существует и заполняет колонки из configuration_objects (бэкфилл живых БД)",
+          V43_MIGRATION.exists()
+          and "configuration_objects" in (V43_MIGRATION.read_text(encoding="utf-8", errors="replace")
+                                         if V43_MIGRATION.exists() else ""),
+          repr(str(V43_MIGRATION)))
 
     absent = sorted(c for c in cols
                     if c.startswith("origin_") or c.endswith("_source")
@@ -1276,8 +1350,11 @@ def check_load_path():
           not (set(row) & set(V42_REMOVED_COLUMNS)),
           repr(sorted(set(row) & set(V42_REMOVED_COLUMNS))))
     never_written = sorted((set(row) - set(contract))
-                           - {"id", "created_at", "updated_at", "name"})
-    note(f"колонок вне разбора в этой фикстуре: {len(never_written)} — они обязаны быть NULL")
+                           - {"id", "created_at", "updated_at", "name"}
+                           - set(V43_CHILD_COLUMNS))
+    note(f"колонок вне разбора свойств в этой фикстуре: {len(never_written)} — они обязаны "
+         f"быть NULL; {len(V43_CHILD_COLUMNS)} колонок-перечней заполняет другой контур "
+         "(индекс состава), их значение сверяется отдельной проверкой ниже")
     check("V42: колонок, которых нет в разборе, остались NULL, а не пустыми значениями",
           all(row.get(column) is None for column in never_written),
           repr({column: row.get(column) for column in never_written[:8]}))
@@ -1314,6 +1391,53 @@ def check_load_path():
                   "AND config_version IS NOT NULL", (cfg_id,)) == 1,
           repr(sql_one("SELECT config_version FROM configuration_objects "
                        "WHERE configuration_id = %s ORDER BY depth", (cfg_id,))))
+
+    # ── узел V43: строка заголовка несёт перечни имён объектов состава ──────────────
+    # Значения 48 колонок даёт ТОТ ЖЕ разбор индекса, что и строки `configuration_objects`
+    # (второго чтения ConfigDumpInfo.xml у загрузчика нет). Проверяются три границы узла:
+    # имена колонок чтения берутся из канонического словаря (своего перечня у проверки нет),
+    # Python-агрегация совпадает с SQL-агрегацией, которую дословно повторяет бэкфилл
+    # `migrate_v43_configuration_child_arrays.sql`, и пустой перечень остаётся NULL, а не
+    # пустым массивом (K2: «вида в конфигурации нет» — это ответ о конфигурации).
+    child_rows = sql_rows(
+        f"SELECT {', '.join(V43_CHILD_COLUMNS)} FROM configurations WHERE id = %s",
+        (cfg_id,))
+    check(f"{CHILD_COUNT} перечней прочитаны из строки по именам канонического словаря",
+          len(child_rows) == 1 and len(child_rows[0]) == CHILD_COUNT,
+          repr([len(child_rows), len(child_rows[0]) if child_rows else None]))
+    header_db = ({column: child_rows[0][at] for at, column in enumerate(V43_CHILD_COLUMNS)}
+                 if child_rows else {})
+    filled_db = {column: names for column, names in header_db.items() if names is not None}
+
+    header_agg = collect_header_arrays(index["objects"])
+    check("значения перечней = значения того же разбора индекса (второго источника нет)",
+          filled_db == header_agg["values"],
+          repr([filled_db, header_agg["values"]]))
+
+    sql_arrays = sql_rows(
+        'SELECT object_type, array_agg(object_name ORDER BY name COLLATE "C") '
+        "FROM configuration_objects WHERE configuration_id = %s AND depth = 0 "
+        "AND object_type <> %s GROUP BY object_type", (cfg_id, "Configuration"))
+    sql_by_column = {COLUMN_BY_OBJECT_TYPE[type_name]: names for type_name, names in sql_arrays
+                     if type_name in COLUMN_BY_OBJECT_TYPE}
+    check("K1/K5/K6: Python-агрегация совпадает с SQL-агрегацией по той же таблице "
+          "(бэкфилл миграции повторяет то же правило)",
+          sql_by_column == filled_db, repr([sql_by_column, filled_db]))
+
+    check("K2: вида в индексе нет — колонка NULL, а не пустой перечень; заполнен только вид из индекса",
+          all(header_db.get(column) is None for column in V43_CHILD_COLUMNS
+              if column not in header_agg["values"])
+          and all(isinstance(header_db.get(column), list) and header_db.get(column)
+                  for column in header_agg["values"]),
+          repr({column: header_db.get(column) for column in header_agg["values"]}))
+    check("карточка называет заполнение перечней числом N из 48 — по нулям граница K2 читаема",
+          f"заполнено {header_agg['columns_filled']} колонок из {CHILD_COUNT}" in text
+          and res.get("header_arrays_filled") == header_agg["columns_filled"]
+          and res.get("header_array_columns_total") == CHILD_COUNT
+          and res.get("header_array_items") == header_agg["objects_total"],
+          repr([res.get("header_arrays_filled"), res.get("header_array_columns_total"),
+                res.get("header_array_items"), header_agg["columns_filled"],
+                header_agg["objects_total"]]))
 
     after = db_counts()
     untouched = ("config_extensions", "bsl_modules", "external_report", "bound")
@@ -1390,8 +1514,14 @@ def ddl_declared_columns(table):
         check(f"бутстрап шага 2 содержит CREATE TABLE {table}", False, "блок не найден")
         return {}
     return {name.lower(): kind.lower() for name, kind in re.findall(
+        # `\b` на конце здесь невозможен: после `text[]` следующий символ — `,` или перевод
+        # строки, то есть границы слова нет, и регулярка откатывалась к ветке `text`, отдавая
+        # ARRAY-колонку как текстовую (замер 22.10.2026: 48 колонок V43 прочитались типом
+        # `text`, и проверка пары «миграция + бутстрап» провалилась бы на верном DDL).
+        # Граница типа — «дальше не буква/цифра/подчёркивание»: она пропускает `[]`, `(`,
+        # пробел и конец строки и не даёт `text` совпасть с началом длинного имени типа.
         r"(?mi)^\s*(\w+)\s+(jsonb|text\[\]|text|varchar|boolean|uuid|integer|timestamp)"
-        r"\b", block.group(1))}
+        r"(?![\w])", block.group(1))}
 
 
 

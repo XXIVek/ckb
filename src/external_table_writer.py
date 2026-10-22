@@ -17,6 +17,13 @@ psycopg2 (параметры запроса), поэтому экраниров�
                    значение означает «провенанс не записан», и заменять его на '{}' — значит
                    соврать, в отличие от synonym, где '{}' — штатное значение;
   json_text    - JSON-строка в текстовой колонке (attributes.type); пусто -> NULL;
+  text_array   - TEXT[] (main_roles): пусто -> '{}', пустой массив;
+  text_array_nullable - TEXT[] либо NULL (перечни имён объектов состава, узел V43): пустое
+                 значение остаётся NULL. «Объектов этого вида в конфигурации нет» и «перечня
+                 нет вовсе (индекс не разобран)» — разные состояния, и '{}' читалось бы как
+                 первое; тот же контракт, что `jsonb_nullable` у манифеста V31.
+                 Список НЕ сортируется и не меняется писателем: порядок задаёт источник
+                 значений (src/configuration_child_properties.py, правило K6);
   int          - целое (размеры, счётчики, идентификаторы родителя); пусто -> NULL;
   timestamp    - метка времени строкой 'YYYY-MM-DD HH:MM:SS' (origin_recorded_at, узел V31);
                  пусто -> NULL; PostgreSQL приводит параметр без типа к колонке сам;
@@ -52,6 +59,12 @@ from current_revision import (
     REVISION_COLUMNS,
     revision_defaults,
 )
+# Узел V43: имена и порядок 48 колонок-перечней состава задаёт канонический контракт
+# `configuration_child_properties.CHILD_PROPERTIES` — из того же словаря `_v43_gen_sql.py`
+# генерирует блок шага 2 и бэкфилл миграции. Писатель не имеет права придумывать свой перечень
+# колонок (тот же принцип, что `REVISION_COLUMNS` у узла V19): иначе код и DDL разошлись бы при
+# первом же добавленном виде метаданных.
+from configuration_child_properties import header_array_columns
 
 # Ревизионные колонки в спецификациях версионированных писателей (M1). Порядок -
 # тот же, что в DDL (шаг 1 src/generate_ddl.py): integer / timestamp / text.
@@ -179,6 +192,20 @@ class TableRowWriter:
             if isinstance(value, str):
                 return [part.strip() for part in value.split(",") if part.strip()]
             return [str(item) for item in value if str(item).strip()]
+        if kind == "text_array_nullable":
+            # узел V43: перечни имён объектов состава. Пустой перечень остаётся NULL:
+            # «объектов этого вида в конфигурации нет» («») и «перечня нет вовсе» (индекс
+            # состава не разобран) — разные состояния, и `'{}'::text[]` стёр бы границу.
+            # Порядок значений писатель не трогает — его задаёт источник (K6: байтовый
+            # порядок UTF-8 по полному точечному имени), и та же сортировка стоит в
+            # бэкфилле миграции (`COLLATE "C"`).
+            if value is None or value == "" or value == []:
+                return None
+            if isinstance(value, str):
+                items = [part.strip() for part in value.split(",") if part.strip()]
+            else:
+                items = [str(item) for item in value if str(item).strip()]
+            return items or None
         if kind == "bytes":
             if value is None:
                 return None
@@ -721,6 +748,20 @@ class ConfigurationRowWriter(TableRowWriter):
     (`create_1c_configurations_db.sql`) + аддитивная
     `migrate_v39_multilang_configuration_text.sql`; иначе `python _cmp_ddl.py`
     зафиксировал бы расхождение.
+
+    Узел V43 (22.10.2026): в спецификацию добавлены 48 колонок-перечней имён объектов
+    состава (`*_names`, тип `TEXT[]`). Их имена и порядок приходят НЕ из текста писателя, а
+    из канонического контракта `src/configuration_child_properties.py` (`CHILD_PROPERTIES`):
+    тот же словарь генерирует блок шага 2 и бэкфилл `migrate_v43_configuration_child_arrays.sql`
+    — три места (DDL, миграция, код) разрешаются одним источником. Вид — `text_array_nullable`,
+    а не `text_array`: пустой перечень обязан оставаться NULL («объектов этого вида в
+    конфигурации нет»), тогда как `'{}'::text[]` означал бы «перечень есть, но пустой».
+    Границы: значения берутся только из разобранного `ConfigDumpInfo.xml` (индекс состава),
+    поэтому в выгрузке без индекса все 48 колонок читаются NULL — это состояние загрузки, а не
+    утверждение о конфигурации; содержимое форм, макетов и модулей эти колонки не описывают
+    (узел V38 не реализован). Если миграция V43 к базе не применена, вставка упадёт с
+    названным столбцом — это состояние схемы, а не данных (лечится `migrate_v43_...sql`,
+    не правкой писателя).
     """
 
     TABLE = "configurations"
@@ -804,6 +845,12 @@ class ConfigurationRowWriter(TableRowWriter):
         "standalone_configuration_restriction_roles": "jsonb_nullable",
         "additional_full_text_search_dictionaries": "jsonb_nullable",
         "content": "jsonb_nullable",
+        # ── узел V43: 48 колонок-перечней имён объектов состава (TEXT[]) ────────────────
+        # Имена и порядок — из `CHILD_PROPERTIES` (src/configuration_child_properties.py),
+        # из того же словаря генерируется SQL шага 2 и бэкфилл миграции. Перечислять их
+        # здесь вторым списком — значит завести второй источник истины, который расходится
+        # с первым при добавлении следующего вида метаданных.
+        **{column: "text_array_nullable" for column in header_array_columns()},
     }
 
 
@@ -813,6 +860,9 @@ class ConfigurationRowWriter(TableRowWriter):
     # vendor_url, config_url) из перечня убраны — у них тип jsonb, лимита длины в схеме
     # больше нет, и выдумывать его здесь означало бы вернуть прежнее молчаливое ограничение
     # (copyright/vendor_url/config_url были VARCHAR(500) и резали бы значение по лимиту).
+    # Узел V43: 48 колонок-перечней (`*_names`, TEXT[]) здесь не перечислены осознанно:
+    # у типа TEXT[] лимита в схеме нет, поэтому и лимита «из головы» здесь быть не должно —
+    # выдуманное число стало бы ограничением содержимого конфигурации.
     MAX_LENGTHS = {
         "name": 255,
         "version": 50,

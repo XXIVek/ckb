@@ -33,6 +33,22 @@
   * частично заполненный индекс — ложь: если таблица индексов в базе не создана, разбор не
     выполняется вовсе, а ответ требует применить `migrate_v33_configuration_objects.sql`.
 
+Узел V43 (22.10.2026): строка заголовка начинает держать перечни имён объектов состава —
+48 колонок `TEXT[]` (`catalogs_names` не входит: виды, чей состав уже описан нормализованно,
+из контракта исключены). Правила K1–K6 (глубина 0, NULL вместо пустого массива, короткие
+имена, порядок по полному точечному имени в байтовом порядке UTF-8) задаёт
+`src/configuration_child_properties.py`; имена колонок и SQL бэкфилла генерируются из того же
+словаря. Границы узла:
+
+  * источник — ТОЛЬКО разобранный `ConfigDumpInfo.xml` (тот же объект, из которого пишутся
+    строки `configuration_objects`): второго чтения файла нет, иначе заголовок описывал бы
+    состав, которого в таблице индекса может не оказаться;
+  * индекс не разобран (нет файла или нет таблицы индекса) → все 48 колонок читаются NULL, и
+    это состояние загрузки, а не ответ о конфигурации; предупреждение называет это прямо;
+  * содержимое объектов (реквизиты, формы, макеты, модули) узлом V43 не заполняется —
+    перечень ≠ содержимое, модель групп A–H (узел V38) не реализована.
+
+
 Чтения идут через psycopg2 (`src/external_db.py`), а не psql-подпроцессом: `_run_psql` /
 `_psql_fields` унаследованы от прежнего загрузчика, многоколоночные выборки разбирают
 текст по '|', а URL и комментарий конфигурации — как раз значения с '|'.
@@ -43,6 +59,12 @@ from pathlib import Path
 import psycopg2.extras
 
 from config_dump_info_parser import find_config_dump_info, parse_config_dump_info
+# Узел V43: правила перечней имён объектов состава (K1–K6) задаёт один модуль —
+# src/configuration_child_properties.py. Загрузчик не имеет права придумывать свой фильтр
+# глубины, своё имя колонки или свою сортировку: тот же контракт читает бэкфилл
+# `migrate_v43_configuration_child_arrays.sql`, и расхождение двух реализаций
+# выглядело бы как два разных ответа об одном и том же составе.
+from configuration_child_properties import collect_header_arrays, header_array_columns
 from configuration_meta_parser import parse_configuration_meta
 from external_db import connect, transaction
 # Узел V19, закрытие S2 (18.10.2026): счётчики и перечень внешних объектов читаются из
@@ -458,6 +480,47 @@ def register_configuration(source_path, force=False, xml_path=None):
         for index_warning in parsed_index.get("warnings") or []:
             warnings.append(f"ConfigDumpInfo: {index_warning}")
 
+    # ── узел V43: перечни имён объектов состава в строке заголовка ───────────────────────
+    # Источник — ТОТ ЖЕ разобранный индекс, что и строки `configuration_objects`: второго
+    # чтения ConfigDumpInfo.xml нет. Два независимых чтения одного файла разошлись бы при
+    # любом сбое между ними, и заголовок начал бы утверждать состав, которого в таблице
+    # индекса нет. Правила K1–K6 (глубина 0, NULL вместо пустого массива, короткие имена,
+    # порядок по полному точечному имени в байтовом порядке UTF-8) задаёт один модуль —
+    # `src/configuration_child_properties.py`, тот же контракт читает бэкфилл миграции.
+    header_arrays_filled = 0
+    header_array_items = 0
+    header_array_anomalies = {}
+    if index_info is not None:
+        # `collect_header_arrays` отвечает не только значениями: он же называет аномалии
+        # (вид без колонки, имя длиннее K3, пустое имя). Значения лежат в ключе `values` —
+        # брать весь ответ и класть в строку нельзя: `counts`/`warnings` не являются
+        # колонками, а писатель молчит про лишние ключи, и состав заголовка просто
+        # не лёг бы в БД (проверено чтением кода писателя: INSERT строится по COLUMNS).
+        header_agg = collect_header_arrays(index_info["objects"])
+        header_arrays = header_agg["values"]
+        # пустой перечень приходит отсутствием ключа, а не пустым списком, и ложится в
+        # колонку как NULL (K2): «объектов такого вида в конфигурации нет» — это ответ о
+        # конфигурации, а пустой массив `'{}'::text[]` читался бы как «перечень есть, но
+        # пустой».
+        row.update(header_arrays)
+        header_arrays_filled = header_agg["columns_filled"]
+        header_array_items = header_agg["objects_total"]
+        header_array_anomalies = {
+            "unknown_types": header_agg["unknown_types"],
+            "overlong": len(header_agg["overlong"]),
+            "empty_object_name": header_agg["empty_object_name"],
+            "top_level_entries": header_agg["top_level_entries"],
+        }
+        for header_warning in header_agg["warnings"]:
+            warnings.append(header_warning)
+    else:
+        warnings.append(
+            "Перечни имён объектов состава (48 колонок `*_names` строки заголовка) НЕ "
+            "заполняются — все они останутся NULL: источником служит индекс состава, а он не "
+            "разобран. Пустой массив вместо NULL означал бы «таких объектов в конфигурации "
+            "нет», то есть был бы ложью о конфигурации (узел V43, K2)."
+        )
+
     try:
         with transaction() as cur:
             if existing:
@@ -511,6 +574,14 @@ def register_configuration(source_path, force=False, xml_path=None):
         "configuration_objects_written": objects_written,
         "index_found": index_source is not None,
         "index_source": str(index_source) if index_source is not None else None,
+        # узел V43: карточка обязана назвать и состояние перечней вида — сколько колонок
+        # получило значения и сколько имён в них легло. Молчать про них нельзя: по нулям в
+        # колонках нельзя отличить «видов таких в конфигурации нет» от «индекс не разобран»,
+        # а именно это и есть граница K2.
+        "header_arrays_filled": header_arrays_filled,
+        "header_array_columns_total": len(header_array_columns()),
+        "header_array_items": header_array_items,
+        "header_array_anomalies": header_array_anomalies,
     }
     if index_info is not None:
         index_counts = index_info.get("counts") or {}

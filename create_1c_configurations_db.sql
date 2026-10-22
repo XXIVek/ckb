@@ -159,6 +159,67 @@ CREATE TABLE IF NOT EXISTS configurations (
     standalone_configuration_restriction_roles JSONB,
     additional_full_text_search_dictionaries JSONB,
     content JSONB,
+    -- Узел V43 (22.10.2026): 48 дочерних свойств конфигурации — массивы имён
+    -- объектов метаданных каждого вида. Источник — индекс состава
+    -- ``ConfigDumpInfo.xml`` (``configuration_objects``, узел V33), а НЕ свойства
+    -- ``<Properties>`` корня: дочернее свойство конфигурации — это перечень её
+    -- объектов, а не значение XML. Имена колонок задаёт единственный словарь
+    -- ``src/configuration_child_properties.py`` (CHILD_PROPERTIES), здесь тот же
+    -- порядок (пункты файла оператора 1..48).
+    -- Тип TEXT[] по контракту файла оператора («поле — всегда список значений,
+    -- тип строка макс. 80»): замер 274 141 строки индекса подтверждает границу 80
+    -- (K3) и отсутствие дублей имён внутри вида (K4).
+    -- Пустое состояние — NULL, а не '{}': «вида в конфигурации нет» и «вид есть,
+    -- но объектов ноль» индекс различить не может, поэтому выбран тот же контракт,
+    -- что у V39/V42 (пустая колонка читается как «в выгрузке этого нет»).
+    subsystems TEXT[],
+    common_modules TEXT[],
+    session_parameters TEXT[],
+    roles TEXT[],
+    common_attributes TEXT[],
+    exchange_plans TEXT[],
+    filter_criteria TEXT[],
+    event_subscriptions TEXT[],
+    scheduled_jobs TEXT[],
+    bots TEXT[],
+    functional_options TEXT[],
+    functional_options_parameters TEXT[],
+    defined_types TEXT[],
+    settings_storages TEXT[],
+    common_commands TEXT[],
+    command_groups TEXT[],
+    common_forms TEXT[],
+    interfaces TEXT[],
+    common_templates TEXT[],
+    common_pictures TEXT[],
+    xsdto_packages TEXT[],
+    web_services TEXT[],
+    http_services TEXT[],
+    ws_references TEXT[],
+    web_socket_clients TEXT[],
+    integration_services TEXT[],
+    style_items TEXT[],
+    styles TEXT[],
+    languages TEXT[],
+    constants TEXT[],
+    catalogs TEXT[],
+    documents TEXT[],
+    document_numerators TEXT[],
+    sequences TEXT[],
+    document_journals TEXT[],
+    enums TEXT[],
+    reports TEXT[],
+    data_processors TEXT[],
+    charts_of_characteristic_types TEXT[],
+    charts_of_accounts TEXT[],
+    charts_of_calculation_types TEXT[],
+    information_registers TEXT[],
+    accumulation_registers TEXT[],
+    accounting_registers TEXT[],
+    calculation_registers TEXT[],
+    business_processes TEXT[],
+    tasks TEXT[],
+    external_data_sources TEXT[],
     created_at TIMESTAMP DEFAULT NOW(),
 
     updated_at TIMESTAMP DEFAULT NOW()
