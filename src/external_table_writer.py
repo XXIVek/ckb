@@ -65,6 +65,11 @@ from current_revision import (
 # колонок (тот же принцип, что `REVISION_COLUMNS` у узла V19): иначе код и DDL разошлись бы при
 # первом же добавленном виде метаданных.
 from configuration_child_properties import header_array_columns
+# Узел V44: имена таблиц и модулей предопределённых программ корня задаёт один словарь
+# (src/configuration_root_modules.py) — тот же, из которого загрузчик собирает строки и из
+# которого проверка сверяет живую схему. Выписывать их здесь нельзя: четыре имени в двух
+# местах разъезжаются (тот же дефект, что 48 имён перечней до V43).
+from configuration_root_modules import MODULE_BY_KIND, TABLE_BY_KIND
 
 # Ревизионные колонки в спецификациях версионированных писателей (M1). Порядок -
 # тот же, что в DDL (шаг 1 src/generate_ddl.py): integer / timestamp / text.
@@ -963,6 +968,78 @@ class ConfigurationObjectRowWriter(TableRowWriter):
         "uuid": "text",
         "config_version": "text",
     }
+
+class ConfigurationRootModuleRowWriter(TableRowWriter):
+    """Модуль предопределённой программы КОРНЯ конфигурации (узел V44, 22.10.2026).
+
+    Четыре таблицы узла имеют ОДИНАковую спецификацию колонок, поэтому она объявлена один раз
+    здесь; различие подклассов — только в таблице и в имени модуля. Тот же приём, что у V22
+    (`object_kind` заявляет сам писатель): `module_name` не может разойтись с таблицей, в
+    которую реально пишут, а CHECK `<table>_module_name_check` в схеме это закрепляет.
+
+    Ключ строки — `configuration_uuid`, а не `configuration_id` (решение оператора
+    22.10.2026): `force=True` снимает заголовок и пишет новый, id меняется, uuid из
+    `Configuration.xml` остаётся тем же. Внешнего ключа в схеме нет осознанно (прецедент
+    V20.1), очистку выполняет `configuration_loader._remove_rows` явным `DELETE`.
+
+    Порога усечения кода нет (граница N4): колонка `TEXT`, текст сохраняется целиком, а объём
+    называется `code_chars`/`code_bytes`, посчитанными разбором по нормализованному значению.
+    Имена таблиц и модулей берутся из словаря `src/configuration_root_modules.py`.
+    """
+
+    COLUMNS = {
+        "configuration_uuid": "uuid",
+        "module_name": "text",
+        "source_path": "text",
+        "code": "text",
+        "code_chars": "int",
+        "code_bytes": "int",
+        "code_state": "text",
+        "index_object_id": "text",
+    }
+
+
+class BslModulesSessionRowWriter(ConfigurationRootModuleRowWriter):
+    """`Ext/SessionModule.bsl` → `bsl_modules_session` (модуль сеанса)."""
+
+    TABLE = TABLE_BY_KIND["session"]
+    CONSTANTS = {"module_name": MODULE_BY_KIND["session"]}
+
+
+class BslModulesManagedApplicationRowWriter(ConfigurationRootModuleRowWriter):
+    """`Ext/ManagedApplicationModule.bsl` → `bsl_modules_managed_application`.
+
+    Модуль приложения управляемого режима; он же служит модулем приложения в режиме простых
+    форм (п. 1.1 файла оператора). У конфигурации на обычных формах его нет — у KomMag
+    ManagedApplicationModule.bsl в выгрузке отсутствует (замер 22.10.2026), и строки нет.
+    """
+
+    TABLE = TABLE_BY_KIND["managed_application"]
+    CONSTANTS = {"module_name": MODULE_BY_KIND["managed_application"]}
+
+
+class BslModulesOrdinaryApplicationRowWriter(ConfigurationRootModuleRowWriter):
+    """`Ext/OrdinaryApplicationModule.bsl` → `bsl_modules_ordinary_application`."""
+
+    TABLE = TABLE_BY_KIND["ordinary_application"]
+    CONSTANTS = {"module_name": MODULE_BY_KIND["ordinary_application"]}
+
+
+class BslModulesExternalConnectionRowWriter(ConfigurationRootModuleRowWriter):
+    """`Ext/ExternalConnectionModule.bsl` → `bsl_modules_external_connection`."""
+
+    TABLE = TABLE_BY_KIND["external_connection"]
+    CONSTANTS = {"module_name": MODULE_BY_KIND["external_connection"]}
+
+
+# Вид → писатель: один словарь, чтобы загрузчик не выбирал класс по имени таблицы (выбор по
+# строке словаря — то место, где ошибка вида превращается в запись не в ту таблицу).
+ROOT_MODULE_WRITERS = {
+    "session": BslModulesSessionRowWriter,
+    "managed_application": BslModulesManagedApplicationRowWriter,
+    "ordinary_application": BslModulesOrdinaryApplicationRowWriter,
+    "external_connection": BslModulesExternalConnectionRowWriter,
+}
 
 
 class ConfigCrossReferenceRowWriter(TableRowWriter):

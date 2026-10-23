@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""MCP-сервер 1c-configurations-core — РОВНО четыре инструмента контракта загрузки.
+"""MCP-сервер 1c-configurations-core — РОВНО пять инструментов контракта загрузки.
 
 Норматив поведения: docs/config-scenarios/FLOWCHART_1c-configurations-core.md.
 
@@ -8,7 +8,20 @@
   2. load_1c_catalog_tool(source_path, force=False)  - единая точка входа загрузки каталога;
   3. load_external_object_file_tool(file_path, ...)  - загрузка бинарного .erf/.epf (узел V25):
      разбор в каталог выгрузки утилитой ibcmd и повтор той же точки входа (2);
-  4. delete_external_report_tool(...)                - удаление внешнего объекта.
+  4. delete_external_report_tool(...)                - удаление внешнего объекта;
+  5. load_configuration_root_modules_tool(source_path, configuration_uuid=None)
+                                       - загрузка четырёх модулей предопределённых программ
+                                         корня конфигурации (узел V44): SessionModule,
+                                         OrdinaryApplicationModule, ExternalConnectionModule,
+                                         ManagedApplicationModule — по файлам Ext/*.bsl с
+                                         подтверждением записью индекса состава (словарь V40).
+
+Почему пятый инструмент отделён от точки входа (2), а не шаг внутри неё — решение оператора:
+заголовок и индекс состава читают XML, а этот слой читает ФАЙЛЫ каталога; объединение шагов
+сделало бы отказ одного отказом другого. Ключ слоя — uuid конфигурации, а НЕ id заголовка:
+force=True меняет id, uuid тот же. Путь каталога обязан задать оператор: провенанс строк
+конфигурации в БД не ведётся (решение D-C, граница V31), поэтому по строке заголовка каталог
+не восстанавливается — граница называется в ответе, а не обходится догадкой.
 
 Иной логики здесь нет и быть не должно. Раньше в файле лежали ещё 18 инструментов «вне
 контракта» (list_configurations_tool, search_config_objects_tool, list_bsl_modules_tool,
@@ -46,6 +59,17 @@ from fastmcp import FastMCP
 from external_report_loader import delete_external_object, read_external_meta
 from config_load_router import load_catalog, format_load_result, format_binary_load_result
 from ibcmd_bridge import convert_and_load
+# узел V44/V45: модули предопределённых программ корня. Словарь состояний, порядок видов и
+# имена таблиц живут в модуле-источнике (configuration_root_modules), а ТЕКСТ ответа даёт
+# форматёр контракта (configuration_load_contract) — тот же, которым пользуется карточка
+# загрузки. Прежний форматёр держал свой список состояний (`ROOT_MODULE_STATE_ORDER`) и
+# обращался к ключам, которых у загрузчика нет (`counts`, `rows`, `forms`, `TABLE_MODULES`,
+# `TABLE_FORMS`, `FORM_TABLE_KINDS`), — живой вызов инструмента падал на NameError.
+from configuration_root_module_loader import load_root_modules
+from configuration_load_contract import (
+    ROOT_MODULES_SECTION_HEADER,
+    format_root_modules_lines,
+)
 
 mcp = FastMCP("1c-configurations-core")
 
@@ -205,6 +229,85 @@ def delete_external_report_tool(source_path: str = None, uuid: str = None, repor
         return '\n'.join(lines)
     except Exception as e:
         return f"Ошибка при удалении: {str(e)}"
+
+
+# =====================================================
+# 5. МОДУЛИ ПРЕДОПРЕДЕЛЁННЫХ ПРОГРАММ КОРНЯ КОНФИГУРАЦИИ (узел V44)
+# =====================================================
+
+# Текст ответа даёт общий форматёр контракта (configuration_load_contract.
+# format_root_modules_lines) — тот же, которым пользуется карточка `load_1c_catalog_tool`
+# для варианта `configuration`. Инструмент и карточка описывают один и тот же слой, и два
+# форматёра разъехались бы при первом же изменении контракта — ровно по той же причине,
+# по которой имена 48 перечней узла V43 или фильтр карантина узла Q1 лежат в одном месте.
+# Здесь остаются только строки исхода: четырёх исходов контракта загрузки к этому слою
+# нет, потому что дубликат в нём невозможен — повторный вызов есть штатная идемпотентность
+# (явный `DELETE` по `configuration_uuid` + вставка), а не вторая копия той же строки.
+# Поэтому правило R5 (вопрос оператору при уже загруженном объекте) здесь не срабатывает
+# никогда, а параметр `force` отсутствует по той же причине.
+def _format_root_modules_result(result: dict) -> str:
+    """Карточка загрузки модулей корня (узел V44; текст — общий форматёр V45).
+
+    Ключи ответа — плоский контракт `load_root_modules` / `collect_root_modules`
+    (решение C1); свой набор ключей здесь не заводится — прежний форматёр держал
+    `counts`, `rows`, `forms`, `TABLE_MODULES` и падал на NameError, потому что ни
+    одного из этих ключей у загрузчика нет.
+    """
+    if not result.get("success"):
+        lines = ["❌ Не могу загрузить модули предопределённых программ корня."]
+        # Строку причины печатает форматёр («Стадия не выполнена: …») — дублировать её
+        # здесь значило бы дать два текста об одном отказе.
+        lines.extend(format_root_modules_lines(result))
+        if result.get("configuration_id") is not None:
+            lines.append(
+                "Строка заголовка конфигурации при этом существует: причина названа самим "
+                "слоем загрузки модулей — нет Configuration.xml, индекс состава не читается, "
+                "файл не раскодирован, слот вне словаря."
+            )
+        lines.append(
+            "Подсказка: таблицы слоя создаёт шаг 2 установки "
+            "(create_1c_configurations_db.sql) либо migrate_v44_configuration_root_modules.sql."
+        )
+        return "\n".join(lines)
+    lines = ["✅ Модули предопределённых программ корня загружены (узел V44)."]
+    lines.append(f"{ROOT_MODULES_SECTION_HEADER}:")
+    lines.extend(format_root_modules_lines(result, indent="   "))
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def load_configuration_root_modules_tool(source_path: str,
+                                         configuration_uuid: str = None):
+    """Загрузить четыре модуля предопределённых программ корня конфигурации (узел V44).
+
+    SessionModule, OrdinaryApplicationModule, ExternalConnectionModule и
+    ManagedApplicationModule читаются из файлов Ext/<имя>.bsl каталога выгрузки; каждая
+    строка подтверждается записью индекса состава (ConfigDumpInfo.xml -> configuration_objects).
+    Состояния различают пустой модуль и отсутствующий: запись индекса без файла —
+    `indexed_no_file` (платформа модуль ожидает, текста нет), файл без записи индекса —
+    `file_not_in_index`, а вида, которого нет ни файлом, ни записью индекса, в таблице нет
+    вовсе — в карточке он назван `absent`. Содержимое форм этих четырёх модулей
+    (управляемой, обычной, внешнего соединения) грузится этим же инструментом. Модули
+    объектов и общие модули этим инструментом НЕ загружаются — это второй слой загрузки
+    конфигурации.
+
+    Конфигурация должна быть уже загружена точкой входа load_1c_catalog_tool: внешнего ключа
+    в схеме нет осознанно (прецедент V20.1), поэтому без строки заголовка модули остались бы
+    ни на что не указывающими.
+
+    Args:
+        source_path: Каталог XML-выгрузки конфигурации. Обязателен: провенанс строк
+            конфигурации в БД не ведётся (решение D-C), по строке заголовка каталог не
+            восстанавливается.
+        configuration_uuid: Необязательный uuid заголовка из БД. Если задан — сверяется с
+            uuid из Configuration.xml, и расхождение называется отказом, а не разрешается
+            молча (ошибка «записал код не той конфигурации» стоит потерянного кода).
+    """
+    try:
+        return _format_root_modules_result(
+            load_root_modules(source_path, configuration_uuid))
+    except Exception as e:
+        return f"❌ Не могу загрузить модули корня: внутренняя ошибка загрузчика: {str(e)}"
 
 
 def main():

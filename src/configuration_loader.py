@@ -48,6 +48,22 @@
   * содержимое объектов (реквизиты, формы, макеты, модули) узлом V43 не заполняется —
     перечень ≠ содержимое, модель групп A–H (узел V38) не реализована.
 
+Узел V44 (22.10.2026, группа C): модули предопределённых программ корня — отдельный слой
+и отдельная точка входа (`src/configuration_root_module_loader.py`,
+`load_configuration_root_modules_tool`). Здесь, в загрузчике заголовка, у этого слоя ровно
+две границы:
+
+  * строки четырёх таблиц снимаются вместе с заголовком (`_remove_rows`): внешнего ключа и
+    каскада в схеме нет осознанно, поэтому очистка обязана быть явной здесь же, где снимаются
+    `configuration_objects` и `bsl_modules` (прецедент — п. 10 правил core); без этого после
+    удаления заголовка строки модулей остались бы сиротами;
+  * узел V45 (стадия S3): после коммита транзакции заголовка конвейер сам вызывает
+    `configuration_root_module_loader.load_root_modules` — `force=True` больше не оставляет
+    конфигурацию без модулей корня. Стадия идёт в СВОЕЙ транзакции (новая `transaction()`
+    не увидела бы незакоммиченный заголовок в той же), ключ ответа — `root_modules`;
+    отказ стадии не отменяет уже записанный заголовок, но карточка и ответ называют
+    остановившую стадию прямо (аналог R13: отказ секции — не отказ загрузки).
+
 
 Чтения идут через psycopg2 (`src/external_db.py`), а не psql-подпроцессом: `_run_psql` /
 `_psql_fields` унаследованы от прежнего загрузчика, многоколоночные выборки разбирают
@@ -66,6 +82,17 @@ from config_dump_info_parser import find_config_dump_info, parse_config_dump_inf
 # выглядело бы как два разных ответа об одном и том же составе.
 from configuration_child_properties import collect_header_arrays, header_array_columns
 from configuration_meta_parser import parse_configuration_meta
+# Узел V44: строки модулей предопределённых программ корня снимаются вместе с заголовком.
+# Внешнего ключа и каскада в схеме нет осознанно (прецедент V20.1), поэтому очистка обязана
+# быть явной здесь же, где снимаются `configuration_objects` и `bsl_modules`. Список четырёх
+# таблиц задаёт один модуль-словарь (src/configuration_root_modules.py) — загрузчик не имеет
+# права держать свой перечень, иначе снятие и загрузка назвали бы разные таблицы.
+from configuration_root_modules import TABLES as ROOT_MODULE_TABLES
+from configuration_root_module_loader import load_root_modules, remove_root_modules
+from configuration_load_contract import (
+    ROOT_MODULES_SECTION_HEADER,
+    root_modules_defaults,
+)
 from external_db import connect, transaction
 # Узел V19, закрытие S2 (18.10.2026): счётчики и перечень внешних объектов читаются из
 # витрин текущего состояния. С историей `COUNT(*) FROM external_report WHERE
@@ -250,7 +277,7 @@ def bound_external_objects(cfg_id):
     return [] if isinstance(rows, dict) else rows
 
 
-def _remove_rows(cur, cfg_id):
+def _remove_rows(cur, cfg_id, configuration_uuid=None):
     """Снять строку заголовка и связанные строки ВНУТРИ текущей транзакции.
 
     Каскада нет: FK `bsl_modules.configuration_id` и `config_extensions.configuration_id`
@@ -264,6 +291,18 @@ def _remove_rows(cur, cfg_id):
     `configuration_objects_configuration_id_fkey` — при 122 000 строк это означало бы, что
     конфигурацию нельзя ни перезагрузить, ни снять.
 
+    Узел V44 (группа C): таблицы модулей предопределённых программ корня адресуются
+    **uuid заголовка**, а не его id, и внешнего ключа на `configurations` в схеме нет
+    осознанно (тот же контракт, что V20.1 у привязок, — ключ блокировал бы пересоздание
+    строки заголовка). Значит снятие обязан выполнить этот же явный DELETE: без него
+    строки пережили бы снятие заголовка и остались бы в базе сиротами без ссылки — ровно
+    тот дефект, который у `bsl_modules` лечится п. 10 правил core. Число снятых строк
+    возвращается в `children` под именами самих таблиц, потому что вызывающий обязан
+    назвать оператору полное состояние, снятое `force=True` (M7), а не только индекс.
+    `configuration_uuid` пуст только у строки заголовка без uuid: вызывающий, а не этот
+    код, обязан назвать такое состояние, потому что по отсутствующим ключам в `children`
+    нельзя решить, что ничего не снималось.
+
     Функция принимает курсор, а не открывает свою транзакцию, намеренно: `force=True`
     обязан выполняться одной транзакцией со вставкой новой строки, иначе неудачная вставка
     оставила бы конфигурацию снятой без замены.
@@ -276,6 +315,13 @@ def _remove_rows(cur, cfg_id):
     for table in tables:
         cur.execute(f"DELETE FROM {table} WHERE configuration_id = %s", [cfg_id])
         children[table] = cur.rowcount
+    # Узел V44: модули предопределённых программ корня снимются по uuid заголовка (снимок
+    # имени не заводится, ключа нет), поэтому вызов здесь, а не в `configurations`-ветке
+    # выше: этих таблиц в списке `tables` нет и по `configuration_id` они не снимаются.
+    # Функция возвращает сама счётчики по таблицам — их и кладём в `children`, второй
+    # обёртки-словаря у неё нет.
+    if configuration_uuid:
+        children.update(remove_root_modules(cur, configuration_uuid))
     cur.execute("DELETE FROM configurations WHERE id = %s", [cfg_id])
     children["configurations"] = cur.rowcount
     return children
@@ -305,7 +351,10 @@ def delete_configuration(cfg_id=None, uuid_val=None):
     bound = bound_external_objects(cfg_id)
     try:
         with transaction() as cur:
-            children = _remove_rows(cur, cfg_id)
+            # uuid обязателен: строки группы C (модули предопределённых программ корня,
+            # узел V44) адресуются uuid заголовка, а не его id; внешнего ключа со снятием
+            # по каскаду в схеме нет, поэтому снятие обязано быть явным здесь.
+            children = _remove_rows(cur, cfg_id, target["uuid"])
     except Exception as exc:
         return {"success": False, "error": f"Ошибка удаления: {exc}"}
 
@@ -325,6 +374,33 @@ def delete_configuration(cfg_id=None, uuid_val=None):
             f"Привязки внешних объектов к снятому заголовку остались числами configuration_id "
             f"без строки (внешнего ключа нет, узел V20.1) — состояние `dangling`, требуется "
             f"перепривязка или снятие: {names}"
+        )
+    removed_root = {t: children.get(t, 0) for t in ROOT_MODULE_TABLES if children.get(t)}
+    if removed_root:
+        # Снятие названо по таблицам и числам: строки группы C адресуются uuid снятого
+        # заголовка и снимались явно (внешнего ключа в схеме нет, узел V44) — молчать о
+        # них значило бы не ответить на вопрос «что ещё ушло вместе с заголовком».
+        result["warnings"].append(
+            "Сняты строки модулей предопределённых программ корня: "
+            + ", ".join(
+                f"{t}={removed_root[t]}"
+                for t in ROOT_MODULE_TABLES
+                if removed_root.get(t)
+            )
+            + ". Снимались явно по uuid снятого заголовка: внешнего ключа и каскада в схеме "
+            "нет (группа C, узел V44)."
+        )
+    if not target["uuid"]:
+        # Ключа нет — значит строки группы C по этой строке не снимались и могли остаться.
+        # Назвать это обязан этот вызов: в `children_deleted` соответствующих ключей нет,
+        # и по их отсутствию нельзя решить, что ничего не снималось.
+        result["warnings"].append(
+            "У снятой строки заголовка пуст uuid: строки модулей предопределённых программ "
+            "(четыре таблицы группы C, узел V44) адресуются именно uuid, поэтому по этой "
+            "строке они не снимались и могли остаться в базе. Их снимает только загрузка по "
+            "uuid (`load_configuration_root_modules_tool`) либо явный DELETE по "
+            "`configuration_uuid` — проверить их наличие иначе, чем запросом к этим таблицам, "
+            "нельзя."
         )
     return result
 
@@ -526,7 +602,12 @@ def register_configuration(source_path, force=False, xml_path=None):
             if existing:
                 # снятие прежней строки и вставка новой — ОДНА транзакция: при ошибке
                 # вставки откатывается всё, конфигурация не остаётся снятой без замены
-                replaced["children_deleted"] = _remove_rows(cur, existing["id"])
+                # uuid передаётся обязательно: по нему снимаются строки группы C (модулей
+                # предопределённых программ, узел V44); id — только индекс строки заголовка,
+                # каскада по нему нет.
+                replaced["children_deleted"] = _remove_rows(
+                    cur, existing["id"], existing["uuid"]
+                )
             new_id = ConfigurationRowWriter.insert(cur, row)
             objects_written = 0
             if index_info is not None and new_id is not None:
@@ -543,6 +624,28 @@ def register_configuration(source_path, force=False, xml_path=None):
         return {"success": False, "error": "Не получен ID записи из INSERT RETURNING id"}
 
     if replaced:
+        deleted = replaced["children_deleted"] or {}
+        removed_root = {t: deleted.get(t, 0) for t in ROOT_MODULE_TABLES if deleted.get(t)}
+        if removed_root:
+            # `force=True` снял строки группы C и не заполнил их заново: заголовок этого не
+            # делает — содержимое модулей существует файлами Ext/, а не свойствами XML.
+            # О пропавшем состоянии карточка обязана сказать прямо: иначе по ней нельзя
+            # ответить, были ли эти модули в базе до перезагрузки (граница описана в
+            # docstring модуля, п. V44).
+            warnings.append(
+                "Сняты строки модулей предопределённых программ корня: "
+                + ", ".join(
+                    f"{t}={removed_root[t]}"
+                    for t in ROOT_MODULE_TABLES
+                    if removed_root.get(t)
+                )
+                + ". Текущая загрузка заполняет их заново на стадии модулей "
+                "предопределённых программ (узел V45, S3) — результат в разделе "
+                "`root_modules` ответа; отдельная точка входа "
+                "`load_configuration_root_modules_tool` остаётся для случая «изменились "
+                "только файлы Ext/» (решение V45: заголовок не меняется, заново разбирать "
+                "индекс состава не нужно)."
+            )
         if replaced["bound_external_objects"]:
             warnings.append(
                 f"Прежняя строка заголовка id={replaced['old_id']} снята; привязки внешних "
@@ -555,6 +658,36 @@ def register_configuration(source_path, force=False, xml_path=None):
                 f"Прежняя строка заголовка id={replaced['old_id']} снята, привязок внешних "
                 f"объектов к ней не было."
             )
+
+    # Узел V45 (стадия S3): модули предопределённых программ корня. Вызов — ПОСЛЕ коммита
+    # транзакции заголовка: `transaction()` каждый раз открывает новое соединение, и в
+    # собственной транзакции заголовка слой модулей не увидел бы только что вставленную
+    # строку (`_require_header` → `find_configuration`). Ключ — uuid, а не id: `force=True`
+    # меняет id, uuid остаётся прежним (V44). Если XML передан явно (тестовые фикстуры),
+    # слой обязан искать `Ext/` рядом с этим XML, а не рядом с аргументом каталога.
+    root_source = Path(xml_path).parent if xml_path else source_path
+    try:
+        root_modules = load_root_modules(root_source, configuration_uuid=row["uuid"])
+    except Exception as exc:  # noqa: BLE001 — отказ стадии называется, а не бросается
+        root_modules = root_modules_defaults()
+        root_modules["configuration_id"] = new_id
+        root_modules["configuration_uuid"] = row["uuid"]
+        root_modules["configuration_name"] = row["name"]
+        root_modules["error"] = (
+            f"исключение слоя модулей предопределённых программ: {exc}"
+        )
+    if not root_modules.get("success"):
+        # Заголовок и индекс уже записаны, и отказ стадии их не отменяет — но молчать о
+        # пропавшем после force=True состоянии нельзя (дефект, описанный в docstring V44):
+        # стадия называется прямо, вместе со способом повторить её отдельно.
+        warnings.append(
+            "Модули предопределённых программ корня не загружены — причина названа "
+            "строкой «Стадия не выполнена» в разделе «"
+            + ROOT_MODULES_SECTION_HEADER
+            + "» карточки. Заголовок и индекс состава записаны; повторить стадию "
+            f"отдельно: load_configuration_root_modules_tool(source_path=..., "
+            f"configuration_uuid={row['uuid']})."
+        )
 
     result = {
         "success": True,
@@ -582,6 +715,10 @@ def register_configuration(source_path, force=False, xml_path=None):
         "header_array_columns_total": len(header_array_columns()),
         "header_array_items": header_array_items,
         "header_array_anomalies": header_array_anomalies,
+        # узел V45: машинная часть ответа стадии S3 — полная, её читают проверки;
+        # текст отдаёт общий форматёр контракта (configuration_load_contract),
+        # карточка и отдельный инструмент описывают один слой одинаково.
+        "root_modules": root_modules,
     }
     if index_info is not None:
         index_counts = index_info.get("counts") or {}

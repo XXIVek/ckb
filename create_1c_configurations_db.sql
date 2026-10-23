@@ -348,6 +348,136 @@ CREATE TABLE IF NOT EXISTS configuration_objects (
     CONSTRAINT configuration_objects_object_id_unique UNIQUE (configuration_id, object_id),
     CONSTRAINT configuration_objects_depth_non_negative CHECK (depth >= 0)
 );
+-- --------------------------------------------
+-- ТАБЛИЦЫ Е1…Е4. bsl_modules_session / _managed_application / _ordinary_application /
+-- _external_connection — модули предопределённых программ КОРНЯ конфигурации (узел V44,
+-- 22.10.2026). Первый слой загрузки конфигурации: свойства заголовка (V42) + перечни имён
+-- состава (V43) + эти четыре модуля. Общие модули и модули объектов (ObjectModule,
+-- ManagerModule, CommandModule, модули форм) сюда НЕ входят — это второй и третий слой.
+--
+-- Отдельная таблица на каждый вид модуля — решение оператора 21.10.2026 (норматив
+-- docs/config-scenarios/01_configuration.md, группа C, и файл оператора
+-- «Анализ модулей конфигурации.txt», п. 1): такие модули существуют на конфигурацию в
+-- единственном экземпляре и не вызываются по имени объекта, поэтому их нельзя ни класть в
+-- bsl_modules (зона модулей внешнего объекта), ни смешивать с модулями объектов — у них
+-- разные правила вызова.
+--
+-- Ключ — configuration_uuid, а НЕ configuration_id (решение оператора 22.10.2026): force=True
+-- и будущая версионность заголовка меняют id, а uuid из Configuration.xml остаётся тем же;
+-- ссылка на id теряла бы модули при каждой перезагрузке заголовка. Внешнего ключа нет
+-- осознанно — по той же причине, что у external_report.configuration_id (узел V20.1): ключ
+-- блокировал бы пересоздание и версионирование строки заголовка. Целостность ведёт загрузчик:
+-- configuration_loader._remove_rows снимает эти строки явным DELETE по uuid вместе с заголовком.
+--
+-- Состояния code_state (граница N2 модуля src/configuration_root_modules.py): `file` — файл
+-- есть и он непустой; `empty_file` — файл есть, но пустой; `indexed_no_file` — индекс состава
+-- модуль перечисляет, файла нет (пустой модуль: платформа пишет Ext/*.bsl только при непустом
+-- тексте, замер V40 — 71 такая запись); `undecoded` — файл не раскодирован. Модуля нет вовсе —
+-- строки в таблице нет: «нет модуля» и «модуль пустой» — разные факты (тот же контракт, что
+-- «манифеста нет» / «манифест пуст» у V19 и ===EMPTY у V39/V42).
+-- Порога усечения кода нет (решение оператора): текст сохраняется целиком, объём называется
+-- code_chars/code_bytes. Имена таблиц, модулей, файлов и слотов задаёт один словарь —
+-- src/configuration_root_modules.py; расхождение с этой схемой ловит
+-- tools/check_v44_configuration_root_modules.py. Для уже созданных БД —
+-- migrate_v44_configuration_root_modules.sql (те же таблицы и индексы; бэкфилла в SQL нет:
+-- код берётся из файла Ext/<Имя>.bsl каталога выгрузки, а путь источника в БД не записан —
+-- решение D-C, граница V31. Заполнение выполняет load_configuration_root_modules_tool,
+-- путь задаёт оператор).
+-- --------------------------------------------
+CREATE TABLE IF NOT EXISTS bsl_modules_session (
+    id BIGSERIAL PRIMARY KEY,
+    configuration_uuid UUID NOT NULL,
+    module_name TEXT NOT NULL,
+    source_path TEXT,
+    code TEXT,
+    code_chars INTEGER,
+    code_bytes INTEGER,
+    code_state TEXT NOT NULL,
+    -- ссылка на запись индекса состава (`Configuration.<Имя>.SessionModule`) — чтобы проверка
+    -- сверяла три контура: индекс ↔ файл ↔ строку БД (граница N6).
+    index_object_id TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    CONSTRAINT bsl_modules_session_module_name_check CHECK (module_name = 'SessionModule'),
+    CONSTRAINT bsl_modules_session_code_state_check
+        CHECK (code_state IN ('file', 'empty_file', 'indexed_no_file', 'undecoded')),
+    CONSTRAINT bsl_modules_session_code_pair_check
+        CHECK (code IS NOT NULL OR code_state IN ('empty_file', 'indexed_no_file', 'undecoded')),
+    CONSTRAINT bsl_modules_session_size_pair_check
+        CHECK ((code_chars IS NULL) = (code_bytes IS NULL)),
+    CONSTRAINT bsl_modules_session_nonempty_code_check
+        CHECK (code_state <> 'file' OR (code_chars IS NOT NULL AND code_chars > 0))
+);
+
+CREATE TABLE IF NOT EXISTS bsl_modules_managed_application (
+    id BIGSERIAL PRIMARY KEY,
+    configuration_uuid UUID NOT NULL,
+    module_name TEXT NOT NULL,
+    source_path TEXT,
+    code TEXT,
+    code_chars INTEGER,
+    code_bytes INTEGER,
+    code_state TEXT NOT NULL,
+    index_object_id TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    CONSTRAINT bsl_modules_managed_application_module_name_check
+        CHECK (module_name = 'ManagedApplicationModule'),
+    CONSTRAINT bsl_modules_managed_application_code_state_check
+        CHECK (code_state IN ('file', 'empty_file', 'indexed_no_file', 'undecoded')),
+    CONSTRAINT bsl_modules_managed_application_code_pair_check
+        CHECK (code IS NOT NULL OR code_state IN ('empty_file', 'indexed_no_file', 'undecoded')),
+    CONSTRAINT bsl_modules_managed_application_size_pair_check
+        CHECK ((code_chars IS NULL) = (code_bytes IS NULL)),
+    CONSTRAINT bsl_modules_managed_application_nonempty_code_check
+        CHECK (code_state <> 'file' OR (code_chars IS NOT NULL AND code_chars > 0))
+);
+
+CREATE TABLE IF NOT EXISTS bsl_modules_ordinary_application (
+    id BIGSERIAL PRIMARY KEY,
+    configuration_uuid UUID NOT NULL,
+    module_name TEXT NOT NULL,
+    source_path TEXT,
+    code TEXT,
+    code_chars INTEGER,
+    code_bytes INTEGER,
+    code_state TEXT NOT NULL,
+    index_object_id TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    CONSTRAINT bsl_modules_ordinary_application_module_name_check
+        CHECK (module_name = 'OrdinaryApplicationModule'),
+    CONSTRAINT bsl_modules_ordinary_application_code_state_check
+        CHECK (code_state IN ('file', 'empty_file', 'indexed_no_file', 'undecoded')),
+    CONSTRAINT bsl_modules_ordinary_application_code_pair_check
+        CHECK (code IS NOT NULL OR code_state IN ('empty_file', 'indexed_no_file', 'undecoded')),
+    CONSTRAINT bsl_modules_ordinary_application_size_pair_check
+        CHECK ((code_chars IS NULL) = (code_bytes IS NULL)),
+    CONSTRAINT bsl_modules_ordinary_application_nonempty_code_check
+        CHECK (code_state <> 'file' OR (code_chars IS NOT NULL AND code_chars > 0))
+);
+
+CREATE TABLE IF NOT EXISTS bsl_modules_external_connection (
+    id BIGSERIAL PRIMARY KEY,
+    configuration_uuid UUID NOT NULL,
+    module_name TEXT NOT NULL,
+    source_path TEXT,
+    code TEXT,
+    code_chars INTEGER,
+    code_bytes INTEGER,
+    code_state TEXT NOT NULL,
+    index_object_id TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    CONSTRAINT bsl_modules_external_connection_module_name_check
+        CHECK (module_name = 'ExternalConnectionModule'),
+    CONSTRAINT bsl_modules_external_connection_code_state_check
+        CHECK (code_state IN ('file', 'empty_file', 'indexed_no_file', 'undecoded')),
+    CONSTRAINT bsl_modules_external_connection_code_pair_check
+        CHECK (code IS NOT NULL OR code_state IN ('empty_file', 'indexed_no_file', 'undecoded')),
+    CONSTRAINT bsl_modules_external_connection_size_pair_check
+        CHECK ((code_chars IS NULL) = (code_bytes IS NULL)),
+    CONSTRAINT bsl_modules_external_connection_nonempty_code_check
+        CHECK (code_state <> 'file' OR (code_chars IS NOT NULL AND code_chars > 0))
+);
+
+
 
 -- --------------------------------------------
 -- ИНДЕКСЫ (только для таблиц этого файла; индексы внешнего отчёта — в src/ddl_external_report.sql)
@@ -405,6 +535,21 @@ CREATE INDEX IF NOT EXISTS idx_config_objects_object_id
 -- индекс по NULL-значениям смысла не имеет.
 CREATE INDEX IF NOT EXISTS idx_config_objects_uuid
     ON configuration_objects(uuid) WHERE uuid IS NOT NULL;
+
+-- Узел V44: ключ слоя — uuid конфигурации, одна строка на конфигурацию и вид модуля (N5).
+-- Отдельного индекса по configuration_uuid не заводим: уникальный индекс его обслуживает.
+-- Внешнего ключа на configurations нет осознанно (V20.1): он блокировал бы пересоздание и
+-- будущую версионность заголовка. Обратный запрос («модули какой конфигурации») идёт по
+-- этому же индексу.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_bsl_modules_session_configuration_uuid
+    ON bsl_modules_session(configuration_uuid);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_bsl_modules_managed_application_configuration_uuid
+    ON bsl_modules_managed_application(configuration_uuid);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_bsl_modules_ordinary_application_configuration_uuid
+    ON bsl_modules_ordinary_application(configuration_uuid);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_bsl_modules_external_connection_configuration_uuid
+    ON bsl_modules_external_connection(configuration_uuid);
+
 
 -- --------------------------------------------
 -- УЗЕЛ V20 (14.10.2026): привязка внешнего объекта к конфигурации, заявленная оператором.

@@ -57,10 +57,15 @@ DEFAULT_TARGETS = [
 # Точка входа загрузки каталога при этом не меняется: новый инструмент только готовит
 # каталог выгрузки и вызывает тот же load_catalog (docs/CONFIGURATIONS_ENRICHMENT_PLAN.md,
 # раздел 13.7).
+# Узел V44 (22.10.2026) добавил load_configuration_root_modules_tool: core 4 → 5. Отдельная
+# точка входа нужна потому, что модули предопределённых программ корня имеют ДВА источника
+# (файлы Ext/<вид>.bsl и запись индекса состава), и оба обязаны сходиться со строкой таблицы;
+# вызывать загрузчик приходится, не пересоздавая заголовок конфигурации force=True (M7 снимает
+# историю состояний, а id заголовка при этом меняется).
 EXPECTED_TOOLS = {
     "server_configurations_core.py": [
         "delete_external_report_tool", "get_load_config_rules_tool", "load_1c_catalog_tool",
-        "load_external_object_file_tool",
+        "load_configuration_root_modules_tool", "load_external_object_file_tool",
     ],
     "server_configurations_enrichment.py": [
         "add_config_aliases_tool", "add_config_cross_reference_tool", "add_config_snippet_tool",
