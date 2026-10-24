@@ -1,192 +1,337 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""Сверка текста правил поиска с кодом MCP-сервера `server.py` (только статика, БД не трогается).
-
-Зачем. 20.10.2026 `get_search_rules_tool()` отдал `SEARCH_RULES.md` с шапкой «актуально на
-07.10.2026»: счётчики ниже живых (snippets ~1 498 против 2 887, aliases 198 643 против 208 529),
-категорий 4 против пяти, в таблице инструментов нет карантина (узел Q1) и нет самих инструментов
-правил, а шаг интерпретации обещает «Извлекаем answer — пример кода», которого поиск не отдаёт
-(выдача урезана до 200 символов, `src/mcp_tools_api.py::search_docs`). Вызов Шага 0 поэтому не
-спасает: он даёт устаревший текст, который сам вводит в заблуждение. Причина не в тексте, а в
-отсутствии сверки: `tools/check_mcp_tool_wiring.py` накрывал только три сервера конфигураций,
-`server.py` не сверялся с документами ничем.
-
-Что проверяется:
-  1. `server.py` входит в DEFAULT_TARGETS и в EXPECTED_TOOLS `check_mcp_tool_wiring.py`
-     (иначе проверка контракта молча перестала бы считать инструменты knowledge-base);
-  2. каждое имя `*_tool`, упомянутое в правилах поиска, реально зарегистрировано в одном из
-     четырёх MCP-серверов (класс дефекта «правило обещает инструмент, которого нет»);
-  3. обязательные маркеры механики поиска присутствуют в обоих текстах: алиасный шаг — точное
-     совпадение; выдача — ID + превью; содержимое группы читается `get_doc_tool`, содержимого
-     сниппета — `get_snippet_tool`, правка — `update_snippet_tool` (узел P6, 20.10.2026: дефект
-     «содержимое сниппета не читается ничем» закрыт, поэтому маркер теперь требует читателя, а не
-     констатирует пробел); порог усечения назван константой; счётчики берутся из замера, а не из
-     текста;
-  4. запрещённые устаревшие утверждения не вернулись в текст (замерные числа 07.10.2026,
-     обещание «Извлекаем answer», «категорий 4», формулировка открытого дефекта чтения сниппета).
-
-Код возврата 0 — расхождений нет; 1 — есть (печатаются конкретные строки).
-
-Запуск:
-    python tools/check_search_rules_sync.py        # PYTHONIOENCODING задавать не нужно
-Включён в validate_project.py шагом 9.
-
-Кодировка вывода. Строка итога содержит «✅», а консоль Windows по умолчанию cp1251: без
-перекодирования stdout сторож падал UnicodeEncodeError на ПОСЛЕДНЕЙ строке, уже подтвердив, что
-расхождений нет (замер 20.10.2026: rc=1 при полностью совпадающих правилах и коде). Ложный провал
-хуже молчаливого пропуска: через несколько прогонов перестанешь верить ответу сторожа вообще.
-Поэтому вывод перекодируется здесь, а не перекладывается на оператора. Тот же приём, что в
-validate_project.py.
 """
-from __future__ import annotations
+Сверка текстов правил с кодом поиска и с контрактами инструментов MCP-серверов.
+
+Проверяет три вещи:
+  1. SEARCH_RULES.md содержит разделы/маркеры, описывающие текущий поиск:
+     алиас = точное совпадение, двухфазное чтение, категории, карантин,
+     служебный префикс слоя правил `core-rules:`, пороги и веса.
+  2. Тексты правил не называют инструменты, которых нет в регистрах MCP-серверов,
+     и называют все инструменты тех серверов, которые они документируют
+     (реальное разрешение имён берётся из tools/check_mcp_tool_wiring.py).
+  3. .clinerules/1c-knowledge-base_Rule.md не противоречит SEARCH_RULES.md
+     по числу инструментов и по описанию алиасного шага.
+
+Границы проверки — что она НЕ проверяет:
+  - совпадение ОПИСАНИЯ инструмента с его реализацией: сравниваются имена, число
+    инструментов и маркеры текста; формулировки остаются на ревью;
+  - правила загрузки конфигураций как сценарий (правила R1–R17, четыре исхода,
+    норматив docs/config-scenarios/FLOWCHART_1c-configurations-core.md) — их
+    сторожат validate_load_flow.py, validate_project.py и
+    tools/check_mcp_tool_wiring.py; LOAD_RULES_Config.md и правила серверов
+    участвуют здесь только как текст, который обязан называть инструменты
+    документируемого сервера и не называть снятые инструменты как живые;
+  - содержимое БД и приведённые в правилах замеры чисел — не проверяются.
+
+Почему это отдельный скрипт: 20.10.2026 текст правил разошёлся с кодом — в
+SEARCH_RULES.md и в .clinerules/1c-knowledge-base_Rule.md алиасный шаг
+описывался как «по началу слова», тогда как `mcp_search_docs` сопоставляет с
+alias_name только точное совпадение всего запроса (LIKE используется лишь для
+подсказки «см. также»). 23.10.2026 расхождение повторилось в обратную сторону и
+в другом месте: контракт `server_configurations_core.py` стал пятиинструментным
+(добавлен `load_configuration_root_modules_tool`, узел V44), а правила загрузки
+(`LOAD_RULES_Config.md`) и сводка `.clinerules/1C_Rule.md` остались
+четырёхинструментными — потому что ни одна проверка не сравнивала тексты правил с
+регистрами инструментов: `check_mcp_tool_wiring.py` сверяет серверы между собой и
+с `EXPECTED_TOOLS`, а `check_search_rules_sync.py` смотрел только два файла про
+поиск и потому проходил молча, когда контракт изменился в другом сервере. Скрипт
+сравнивает обе стороны: имена из правил → регистрация (не говорит ли правило об
+инструменте, который сняли) и регистрация → правила (назван ли инструмент,
+добавленный в контракт).
+"""
 
 import re
 import sys
 from pathlib import Path
 
-for _stream in (sys.stdout, sys.stderr):
-    if hasattr(_stream, "reconfigure"):
-        try:
-            _stream.reconfigure(encoding="utf-8", errors="replace")
-        except (ValueError, OSError):
-            pass  # вывод уже заменён на не-текстовый поток — на решение влиять нечем
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "tools"))
+SEARCH_RULES = PROJECT_ROOT / "SEARCH_RULES.md"
+KB_RULE = PROJECT_ROOT / ".clinerules" / "1c-knowledge-base_Rule.md"
+SERVER_PY = PROJECT_ROOT / "server.py"
 
-from check_mcp_tool_wiring import DEFAULT_TARGETS, EXPECTED_TOOLS, _tool_functions  # noqa: E402
-
-DOC_FILES = [
-    ROOT / "SEARCH_RULES.md",
-    ROOT / ".clinerules" / "1c-knowledge-base_Rule.md",
+# Обязательные маркеры SEARCH_RULES.md: каждый закрывает одно утверждение
+# контракта поиска; отсутствие маркера означает, что правила описывают другой
+# поиск. Префиксы и константа добавлены 23.10.2026: поиск по слою правил
+# (`core-rules:`) и порог усечения `answer` — то, что описание не имеет права
+# терять.
+REQUIRED_MARKERS = [
+    "Алиас = точное совпадение",
+    "Что отдаёт поиск",
+    "Двухфазное чтение",
+    "Ранжирование",
+    "Категории",
+    "Карантин",
+    "Пороги и веса",
+    "Порядок шагов",
+    "Пустая выдача",
+    "Противоречие двух строк",
+    "Правило вывода",
+    "core-rules:",
+    "TITLE_LAYER_MARKERS",
+    "MAX_ANSWER_CHARS",
 ]
 
-SERVER_FILES = [
-    ROOT / "server.py",
-    ROOT / "server_configurations_core.py",
-    ROOT / "server_configurations_enrichment.py",
-    ROOT / "server_configurations_export.py",
+# Утверждения, которых в правилах быть не должно: они описывают поведение,
+# которого код не выполняет.
+FORBIDDEN_PHRASES = [
+    ("алиасный шаг ищет по началу слова", "алиасный шаг берёт точное совпадение"),
+    ("полнотекстовый поиск по подстроке", "полнотекстовый поиск по лексемам"),
 ]
 
-TOOL_TOKEN = re.compile(r"\b[a-z][a-z0-9_]*_tool\b")
-
-# Обязательные маркеры: факт, который нельзя терять из текста правил. Проверка маркером,
-# а не числом — по той же причине, что в _cmp_ddl.py и check_xml_format_layer.py: число живёт
-# замер, а утверждение о механике обязано жить в тексте.
-REQUIRED_MARKERS = {
-    "alias_exact": ["точное совпадение"],
-    "preview_only": ["200 символов"],
-    "group_reader": ["get_doc_tool"],
-    # узел P6 (20.10.2026): маркер требует читателя и правку сниппета, а не констатирует пробел.
-    # Прежний маркер «snippet_reader_gap» («содержимое сниппета») пропускал текст, который
-    # по-прежнему говорит «прочитать нечем», — то есть регрессия закрытого дефекта не считалась бы
-    # расхождением. Теперь отсутствие инструмента в правилах = расхождение.
-    "snippet_reader": ["get_snippet_tool"],
-    "snippet_updater": ["update_snippet_tool"],
-    "truncation_named": ["MAX_ANSWER_CHARS"],
-    "counters_from_measurement": ["get_db_state_tool"],
-    "rules_tool": ["get_search_rules_tool"],
+# --- контракты инструментов ------------------------------------------------
+# Имена файлов серверов — те же, что в tools/check_mcp_tool_wiring.py.
+SERVER_FILES = {
+    "server.py": SERVER_PY,
+    "server_configurations_core.py": PROJECT_ROOT / "server_configurations_core.py",
+    "server_configurations_enrichment.py": PROJECT_ROOT / "server_configurations_enrichment.py",
+    "server_configurations_export.py": PROJECT_ROOT / "server_configurations_export.py",
 }
 
-# То, что вернулось бы как регрессия найденных 20.10.2026 дефектов.
-FORBIDDEN = [
-    "Извлекаем answer — пример кода",
-    "198 643",
-    "1 498",
-    "актуально на 07.10.2026",
-    "Категории документации | 4",
-    # закрытый узлом P6 открытый дефект чтения сниппета: вернуть эту формулировку — значит
-    # вернуть в правила утверждение, которого в коде больше нет.
-    "не читается ни одним инструментом контракта",
-    "содержимое сниппета по ID не читается ничем",
+# Какие серверы какой текст документирует полностью. Обратная проверка («каждый
+# инструмент контракта назван в правилах») ставится только паре «файл ↔ сервер,
+# который этот файл описывает»: сводка .clinerules/1C_Rule.md даёт таблицу
+# knowledge-base выборочно (полная таблица — в .clinerules/1c-knowledge-base_Rule.md),
+# поэтому для server.py она идёт только в сторону «нет ли снятых имён».
+DOCUMENTED_SERVERS = {
+    "SEARCH_RULES.md": ["server.py"],
+    ".clinerules/1c-knowledge-base_Rule.md": ["server.py"],
+    "LOAD_RULES_Config.md": ["server_configurations_core.py"],
+    ".clinerules/1c-configurations-core_Rule.md": ["server_configurations_core.py"],
+    ".clinerules/1c-configurations-enrichment_Rule.md": ["server_configurations_enrichment.py"],
+    ".clinerules/1c-configurations-export_Rule.md": ["server_configurations_export.py"],
+    ".clinerules/1C_Rule.md": [
+        "server_configurations_core.py",
+        "server_configurations_enrichment.py",
+        "server_configurations_export.py",
+    ],
+}
+
+# Файлы живого контракта поиска: исторические имена инструментов в них
+# запрещены — это правило «возвращать снятые инструменты нельзя» из
+# tools/check_mcp_tool_wiring.py. В файлах истории (.clinerules/*, правила
+# загрузки) эти имена обязаны стоять как удалённые: молчаливое исчезновение
+# строки об удалённом инструменте теряет историю так же, как и его возврат.
+SEARCH_CONTRACT_FILES = ["SEARCH_RULES.md", ".clinerules/1c-knowledge-base_Rule.md"]
+
+# Инструменты, снятые 14.10.2026 с core- и enrichment-серверов. Шесть имён
+# снятого export-сервера берутся из DELETED_TOOLS tools/check_mcp_tool_wiring.py,
+# чтобы два скрипта не держали по два списка одних и тех же имён.
+REMOVED_SERVER_TOOLS = [
+    "add_config_alias_tool",
+    "add_snippet_dependency_tool",
+    "analyze_config_load_tool",
+    "batch_index_from_dump_tool",
+    "count_objects_by_config_tool",
+    "delete_config_tool",
+    "delete_objects_by_config_tool",
+    "find_config_by_name_uuid_tool",
+    "generate_aliases_for_object_tool",
+    "get_alias_target_tool",
+    "get_bsl_module_code_tool",
+    "get_config_snippet_stats_tool",
+    "get_configuration_tool",
+    "get_enum_values_tool",
+    "get_object_structure_tool",
+    "get_snippets_for_object_tool",
+    "list_bsl_modules_tool",
+    "list_config_objects_tool",
+    "list_configurations_tool",
+    "read_config_file_tool",
+    "register_cross_reference_tool",
+    "register_external_report_tool",
+    "search_bsl_code_tool",
+    "search_config_by_alias_tool",
+    "search_config_objects_tool",
+    "update_configuration_status_tool",
+    "update_dependent_snippets_tool",
 ]
 
-def registered_tool_names():
-    """Имена инструментов, реально зарегистрированных во всех MCP-серверах (AST)."""
-    import ast
-    names = {}
-    for path in SERVER_FILES:
-        if not path.is_file():
-            continue
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        except SyntaxError:
-            continue
-        names[path.name] = sorted(node.name for node in _tool_functions(tree))
-    return names
+TOOL_TOKEN_RE = re.compile(r"\b[a-z][a-z0-9_]*_tool\b")
 
 
-def _rel(path):
-    """Путь для текста проблемы. Файл правил вне корня не должен ронять сам отчёт.
+def read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
 
-    `relative_to` бросает ValueError вне корня: сообщение «в правилах упомянут инструмент,
-    которого нет» превращалось бы в traceback без вердикта — тот же класс дефекта, что падение
-    на кодировке строки итога (см. шапку модуля). Отчёт обязан дожить до вывода.
+
+def registered_tool_names() -> dict[str, list[str]]:
+    """Имена инструментов из регистрации `@mcp.tool` в каждом сервере.
+
+    Источник — те же файлы, что читает tools/check_mcp_tool_wiring.py: список
+    задаёт не этот скрипт, иначе проверка подтверждала бы свой собственный список.
     """
-    try:
-        return str(Path(path).relative_to(ROOT))
-    except ValueError:
-        return str(path)
-
-
-def main():
-    problems = []
-
-    # 1. Собственная предпосылка: server.py в круге проверки контракта.
-    if not any(Path(p).name == "server.py" for p in DEFAULT_TARGETS):
-        problems.append("server.py не входит в DEFAULT_TARGETS tools/check_mcp_tool_wiring.py — "
-                        "контракт knowledge-base никем не сверяется")
-    if "server.py" not in EXPECTED_TOOLS:
-        problems.append("server.py нет в EXPECTED_TOOLS tools/check_mcp_tool_wiring.py — "
-                        "лишний или пропавший инструмент knowledge-base не считается регрессией")
-
-    servers = registered_tool_names()
-    known = set()
-    for names in servers.values():
-        known.update(names)
-    kb_count = len(servers.get("server.py", []))
-
-    # 2. Упомянутые в правилах инструменты обязаны существовать.
-    doc_texts = {}
-    for doc in DOC_FILES:
-        if not doc.is_file():
-            problems.append(f"файл правил не найден: {_rel(doc)}")
+    out: dict[str, list[str]] = {}
+    for name, path in SERVER_FILES.items():
+        if not path.exists():
+            out[name] = []
             continue
-        text = doc.read_text(encoding="utf-8")
-        doc_texts[doc] = text
-        for name in sorted(set(TOOL_TOKEN.findall(text))):
-            if name not in known:
-                problems.append(f"{_rel(doc)}: упомянут инструмент {name}(), "
-                                f"которого нет ни в одном MCP-сервере")
+        text = read_text(path)
+        out[name] = re.findall(r"@mcp\.tool\(\)\s*\ndef\s+([a-z_][a-z0-9_]*)", text)
+    return out
 
-    # 3. Обязательные маркеры механики поиска и 4. возврат устаревших утверждений.
-    for doc, text in doc_texts.items():
-        low = text.lower()
-        for key, markers in REQUIRED_MARKERS.items():
-            if not any(m.lower() in low for m in markers):
-                problems.append(f"{_rel(doc)}: нет маркера механики поиска «{key}» "
-                                f"(ожидается один из: {', '.join(markers)})")
-        for stale in FORBIDDEN:
-            if stale in text:
-                problems.append(f"{_rel(doc)}: вернулось устаревшее утверждение "
-                                f"«{stale}»")
 
-    print("Сверка текста правил поиска с кодом MCP-серверов (статика, БД не открывается)")
-    print("=" * 70)
-    for name, names in servers.items():
-        print(f"  {name}: инструментов {len(names)}")
-    print(f"  файлов правил: {len(doc_texts)}, известных инструментов: {len(known)}")
-    print("=" * 70)
-    if problems:
-        for problem in problems:
-            print(f"❌ {problem}")
-        print(f"\n❌ расхождений: {len(problems)}")
+def historical_tool_names() -> set[str]:
+    """Снятые имена: свой список + шесть имён export-сервера из соседнего скрипта."""
+    import check_mcp_tool_wiring
+
+    return set(REMOVED_SERVER_TOOLS) | set(check_mcp_tool_wiring.DELETED_TOOLS)
+
+
+def check_markers(text: str) -> list[str]:
+    problems = []
+    for marker in REQUIRED_MARKERS:
+        if marker not in text:
+            problems.append(f"в SEARCH_RULES.md нет маркера «{marker}»")
+    return problems
+
+
+def check_phrases(*texts: str) -> list[str]:
+    problems = []
+    for bad, good in FORBIDDEN_PHRASES:
+        for text in texts:
+            if bad in text:
+                problems.append(f"в тексте есть «{bad}» (код делает: {good})")
+                break
+    return problems
+
+
+def check_contracts(names: dict[str, list[str]]) -> list[str]:
+    """Две стороны: имена из правил → регистрация, регистрация → имена правил."""
+    problems = []
+    historical = historical_tool_names()
+    registered_all: set[str] = set()
+    for tools in names.values():
+        registered_all.update(tools)
+
+    texts = {}
+    for rel in DOCUMENTED_SERVERS:
+        path = PROJECT_ROOT / rel
+        if not path.exists():
+            problems.append(f"нет файла правил: {rel}")
+            continue
+        texts[rel] = read_text(path)
+
+    print("\n=== КОНТРАКТ ИНСТРУМЕНТОВ В ПРАВИЛАХ ===")
+    for rel in sorted(DOCUMENTED_SERVERS):
+        if rel not in texts:
+            continue
+        text = texts[rel]
+        tokens = set(TOOL_TOKEN_RE.findall(text))
+        unknown = sorted(tokens - registered_all - historical)
+        if unknown:
+            problems.append(
+                f"{rel}: названы инструменты вне контракта и не в списке снятых: "
+                + ", ".join(unknown)
+            )
+        stale = sorted(t for t in tokens if t in historical)
+
+        if rel in SEARCH_CONTRACT_FILES:
+            if stale:
+                problems.append(
+                    f"{rel}: в описании живого поиска названы снятые инструменты: "
+                    + ", ".join(stale)
+                )
+            print(f"  {rel}: снятых имён нет, неизвестных {len(unknown)}")
+            continue
+
+        print(
+            f"  {rel}: исторических имён {len(stale)} (разрешены как история), "
+            f"неизвестных {len(unknown)}"
+        )
+        for server in DOCUMENTED_SERVERS[rel]:
+            tools = names.get(server)
+            if not tools:
+                problems.append(f"{rel}: сервер {server} не найден или без инструментов")
+                continue
+            missing = [t for t in tools if t not in text]
+            if missing:
+                problems.append(
+                    f"{rel}: в правилах {server} не названо {len(missing)} из {len(tools)} "
+                    "инструментов контракта: " + ", ".join(missing)
+                )
+            print(
+                f"  {rel} ↔ {server}: названо {len(tools) - len(missing)}/{len(tools)}"
+            )
+    return problems
+
+
+def check_rule_numbers(text: str, tools: list[str]) -> list[str]:
+    """Число инструментов, названное в SEARCH_RULES.md, обязано равняться регистрации.
+
+    Только для SEARCH_RULES.md: в правилах серверов числа — часть истории
+    («прежний контракт — три инструмента», «контракт 17 → 18»), и равняться
+    текущему состоянию они не обязаны; там проверяются имена, а не числа.
+    """
+    problems = []
+    for match in re.finditer(r"(\d+)\s+инструмент", text):
+        named = int(match.group(1))
+        if named != len(tools):
+            problems.append(
+                f"в SEARCH_RULES.md названо {named} инструментов, "
+                f"в регистрации server.py их {len(tools)}"
+            )
+    return problems
+
+
+ALIAS_FORMULA = "Точное совпадение LOWER(alias_name) со **всем запросом целиком**"
+
+
+def check_kb_rule(kb_text: str) -> list[str]:
+    """Точная формулировка алиасного шага в правилах knowledge-base."""
+    if ALIAS_FORMULA not in kb_text:
+        return [
+            "в .clinerules/1c-knowledge-base_Rule.md нет точной формулировки "
+            "алиасного шага (она расходится с кодом)"
+        ]
+    return []
+
+
+def main() -> int:
+    if not SEARCH_RULES.exists():
+        print(f"❌ нет файла: {SEARCH_RULES}")
         return 1
-    print(f"✅ текст правил поиска совпадает с кодом: инструментов knowledge-base {kb_count}, "
-          f"маркеры механики поиска на месте, устаревших утверждений нет")
+    rules_text = read_text(SEARCH_RULES)
+    kb_text = read_text(KB_RULE) if KB_RULE.exists() else ""
+
+    problems = []
+    print("=== SEARCH_RULES.md ===")
+    marker_problems = check_markers(rules_text)
+    problems += marker_problems
+    print(f"маркеров проверено {len(REQUIRED_MARKERS)}, отсутствует {len(marker_problems)}")
+    phrase_problems = check_phrases(rules_text, kb_text)
+    problems += phrase_problems
+    print(f"утверждений вопреки коду: {len(phrase_problems)}")
+
+    names = registered_tool_names()
+    print("\n=== РЕГИСТРАЦИЯ ИНСТРУМЕНТОВ ===")
+    for server, tools in names.items():
+        print(f"  {server}: {len(tools)}")
+    core = names.get("server_configurations_core.py", [])
+    if "load_configuration_root_modules_tool" not in core:
+        problems.append(
+            "в server_configurations_core.py нет load_configuration_root_modules_tool "
+            "(узел V44) — контракт не соответствует правилам"
+        )
+    problems += check_rule_numbers(rules_text, names.get("server.py", []))
+    problems += check_contracts(names)
+
+    print("\n=== 1c-knowledge-base_Rule.md ===")
+    kb_problems = check_kb_rule(kb_text)
+    problems += kb_problems
+    print(f"расхождений с кодом поиска: {len(kb_problems)}")
+
+    print("\n=== ИТОГ ===")
+    if problems:
+        for p in problems:
+            print(f"❌ {p}")
+        print(f"расхождений: {len(problems)}")
+        return 1
+    print(
+        "расхождений нет: тексты правил соответствуют коду поиска "
+        "и контрактам инструментов"
+    )
     return 0
 
 
 if __name__ == "__main__":
     sys.exit(main())
-
