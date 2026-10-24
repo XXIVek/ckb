@@ -7,7 +7,7 @@
 
 ---
 
-## 1. Контракт сервера: ровно четыре инструмента
+## 1. Контракт сервера: ровно пять инструментов
 
 | Инструмент | Сигнатура | Назначение |
 |---|---|---|
@@ -15,6 +15,12 @@
 | `load_1c_catalog_tool` | `(source_path: str, force: bool = False)` | **Единая точка входа загрузки каталога.** Сама определяет тип каталога и сама грузит. Заменяет `register_external_report_tool`, внутрь себя забирает `analyze_config_load_tool` |
 | `load_external_object_file_tool` | `(file_path: str, config_file: str = "", db_path: str = "", work_dir: str = "", force: bool = False, keep_layout: bool = False)` | **Точка входа бинарного файла внешнего объекта** (`.erf`/`.epf`): через `ibcmd` разбирает его в layout и отдаёт тот же ствол `load_catalog` (узел V25, раздел 6a). Имена параметров — из кода (`db_path` ↔ флаг `--db-path`); `db_path`/`work_dir` имеют значения по умолчанию (`_ibcmd_work/ib`, `_ibcmd_work/conv/<отпечаток файла>`) |
 | `delete_external_report_tool` | `(source_path \| uuid \| report_id, object_type)` | Удаление внешнего отчёта/обработки вместе с её BSL-модулями |
+| `load_configuration_root_modules_tool` (узел V44, 22.10.2026) | `(source_path: str, configuration_uuid: str = None)` | **Второй слой загрузки конфигурации** (не точка входа каталога): четыре модуля предопределённых программ корня — `SessionModule`, `OrdinaryApplicationModule`, `ExternalConnectionModule`, `ManagedApplicationModule` — читаются из `Ext/<имя>.bsl`, каждая строка подтверждается записью индекса состава (`ConfigDumpInfo.xml` → `configuration_objects`); содержимое форм этих модулей грузится тем же инструментом. Конфигурация обязана быть загружена точкой входа (внешнего ключа в схеме нет осознанно), `configuration_uuid` сверяется с `Configuration.xml` и расхождение называется отказом |
+
+Пятый инструмент не является точкой входа загрузки каталога: он продолжает загрузку уже
+загруженной конфигурации, поэтому правила R4/R5 (дубликат → вопрос оператору → `force`) к нему
+не применяются, параметра `force` у него нет, а четыре исхода раздела ниже относятся к
+`load_1c_catalog_tool` и `load_external_object_file_tool`.
 
 Других шагов «подготовки к загрузке» не существует: отдельного инструмента анализа нет,
 анализ — это первые узлы `load_1c_catalog_tool`.
@@ -600,10 +606,14 @@ BGU, 202 с повторно на БП3, 125 с `apply` без предшест�
 ## 8. Вне контракта (не участвуют в загрузке)
 
 **Состояние 14.10.2026: инструменты вне контракта из core-MCP удалены** (дефект п. 11 правил
-закрыт). В `server_configurations_core.py` остались ровно три контрактовых инструмента —
+закрыт). На тот день в `server_configurations_core.py` остались три контрактовых инструмента —
 `get_load_config_rules_tool`, `load_1c_catalog_tool`, `delete_external_report_tool`; это
 проверяется AST-сверкой `python tools/check_mcp_tool_wiring.py` (ошибки «вне EXPECTED_TOOLS»
-были бы видны в rc).
+были бы видны в rc). Состав менялся узлами: **V25** (15.10.2026) добавил
+`load_external_object_file_tool`, **V44** (22.10.2026) — `load_configuration_root_modules_tool`
+(модули предопределённых программ корня, раздел 1). На 24.10.2026 контракт — пять инструментов,
+и ровно столько их перечислено в `EXPECTED_TOOLS` той же сверки; расхождение «документ говорит
+меньше, чем регистрирует сервер» ловит `python tools/check_search_rules_sync.py`.
 
 Удалены: `analyze_config_load_tool` (анализ — внутренняя `detect_load_variant`),
 `list_configurations_tool`, `get_configuration_tool`, `find_config_by_name_uuid_tool`,

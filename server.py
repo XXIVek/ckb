@@ -16,7 +16,7 @@ from mcp_tools_api import get_snippet as _get_snippet, update_snippet as _update
 # Порог усечения один на весь проект (тот же, что у get_config_snippet_tool в
 # server_configurations_enrichment.py): два разных порога дали бы два разных ответа на
 # вопрос «покажи текст целиком».
-from mcp_tools_api import MAX_ANSWER_CHARS
+from mcp_tools_api import MAX_ANSWER_CHARS, MAX_TITLE_DISPLAY_CHARS
 from mcp_tools_loader import load_files as _load_files, load_bsl_docs as _load_bsl_docs, parse_html_file as _parse_html_file, extract_code_example as _extract_code_example
 from loader import detect_tags as _detect_tags
 
@@ -201,7 +201,11 @@ def search_docs_tool(query: str, category: str = None, limit: int = 20,
         lines = [f"Найдено {len(results)} результатов:\n"]
         for r in results[:limit]:
             rtype = r.get('type', '?')
-            title = str(r.get('title', ''))[:80]
+            # Узел R-LAYER: порог — константа mcp_tools_api, а не литерал 80. Карточка слоя
+            # адресуется заголовком, и загрузчик слоя проверяет длину по той же константе:
+            # два разных порога дали бы «заголовок прошёл проверку, но в выдаче обрезан»,
+            # то есть адрес, который нельзя повторить запросом.
+            title = str(r.get('title', ''))[:MAX_TITLE_DISPLAY_CHARS]
             desc = str(r.get('description', ''))[:60]
             # Узел Q1: скрытое состояние обязано быть видимым — иначе include_marked=True
             # отдал бы помеченную строку так же, как обычную.

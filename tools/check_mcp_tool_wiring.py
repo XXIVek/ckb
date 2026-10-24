@@ -98,6 +98,21 @@ EXPECTED_TOOLS = {
     ],
 }
 
+# Снятые имена инструментов (14.10.2026): шесть инструментов export-сервера, которые
+# падали NameError, потому что их функции-источники в монолите server_configurations.py
+# отсутствовали, а таблиц `modified_objects` / `config_export_log` в схеме нет. Список живёт
+# здесь, а не в tools/check_search_rules_sync.py: тексты правил обязаны называть снятый
+# инструмент как снятый (история), но не как живой, и для этого нужен один список на оба
+# скрипта. Возвращать эти имена в регистры нельзя — их отсутствие сторожит EXPECTED_TOOLS.
+DELETED_TOOLS = [
+    "clear_modified_flag_tool",
+    "count_modified_objects_tool",
+    "export_config_changes_tool",
+    "get_export_log_tool",
+    "get_modified_objects_tool",
+    "mark_object_modified_tool",
+]
+
 BUILTIN_NAMES = set(dir(builtins)) | {
     "__file__", "__name__", "__doc__", "__package__", "__spec__", "__loader__",
     "__builtins__", "__debug__", "__path__", "mcp",

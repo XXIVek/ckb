@@ -86,13 +86,16 @@
 | Правила загрузки (Шаг 0) | `get_load_config_rules_tool()` | compact-правила `LOAD_RULES_Config.md` |
 | **Загрузка каталога (точка входа каталога)** | `load_1c_catalog_tool(source_path, force=False)` | тип каталога определяется самим сервером по файлам корневого каталога |
 | **Загрузка двоичного файла внешнего объекта (узел V25)** | `load_external_object_file_tool(file_path, config_file="", db_path="", work_dir="", force=False, keep_layout=False)` | `.erf` / `.epf` → `ibcmd config --db-path <ИБ> export --file=<файл> <база>` → тот же `load_catalog`. **Пути обязаны быть абсолютными**; рабочая ИБ `_ibcmd_work/ib` переиспользуется; `config_file` — `.cf` для загрузки в ИБ (без него имена `cfg:` не разрешатся — это предупреждение, а не отказ, правило R14); имена параметров — только как в коде |
+| Модули предопределённых программ корня (узел V44) | `load_configuration_root_modules_tool(source_path, configuration_uuid=None)` | **второй слой загрузки конфигурации**: `Ext/SessionModule.bsl`, `OrdinaryApplicationModule.bsl`, `ExternalConnectionModule.bsl`, `ManagedApplicationModule.bsl` и содержимое их форм; каждая строка подтверждается записью индекса состава (`ConfigDumpInfo.xml` → `configuration_objects`), поэтому различаются `empty` (пустой модуль), `indexed_no_file` (индекс объявил, файла нет), `file_not_indexed` (файл есть, индекса нет) и `absent` (нет ни тем ни другим). Конфигурация обязана быть загружена точкой входа `load_1c_catalog_tool`; внешнего ключа в схеме нет осознанно (прецедент V20.1); модули объектов и общие модули этим инструментом **не** грузятся |
 | Удаление внешнего объекта | `delete_external_report_tool(source_path \| uuid \| report_id, object_type?)` | снимает запись, детей и обогащение |
 | Привязать внешний объект к конфигурации (узлы V20, V20.1) | `set_object_configuration_tool(uuid \| source_path, configuration_id)` — инструмент enrichment-MCP (контракт 17 → 18); **показывает** привязку карточка `config_enrichment_stats_tool(uuid=…, card=True)`, обратный перечень отдаёт тот же вызов без uuid | привязку заявляет только оператор; `NULL` = «привязка не заявлена», а не «универсальный»; `configuration_id=None` — снять; несуществующий id отклоняется инструментом; внешнего ключа в схеме нет, битая ссылка называется прямо и требует перепривязки; `force=True` переносит значение |
 
-> ⚠️ **Контракт — четыре инструмента** (три утверждены 12.10.2026: `register_external_report_tool`
+> ⚠️ **Контракт — пять инструментов** (три утверждены 12.10.2026: `register_external_report_tool`
 > и `analyze_config_load_tool` убраны, анализ выполняется внутри точки входа; четвёртый —
 > `load_external_object_file_tool`, добавлен узлом V25 15.10.2026 как вторая точка входа, для
-> двоичного файла внешнего объекта). 18 внеконтрактных
+> двоичного файла внешнего объекта; пятый — `load_configuration_root_modules_tool`, добавлен узлом
+> V44 22.10.2026 как второй слой загрузки конфигурации: модули предопределённых программ корня и
+> содержимое их форм). 18 внеконтрактных
 > инструментов (`list_configurations_tool`, `get_configuration_tool`, `find_config_by_name_uuid_tool`,
 > `search_config_objects_tool`, `list_config_objects_tool`, `get_object_structure_tool`,
 > `search_bsl_code_tool`, `get_bsl_module_code_tool`, `list_bsl_modules_tool`,
@@ -216,7 +219,7 @@ XML, флаги изменённых объектов, сборка XML по с�
 │     └─ правка сниппета — update_snippet_tool(..., reason=…) с историей в snippet_audit_log
 │
 ├─ Нужно загрузить / перезагрузить / удалить каталог выгрузки?
-│  └─→ MCP `1c-configurations-core` (контракт — 4 инструмента)
+│  └─→ MCP `1c-configurations-core` (контракт — 5 инструментов)
 │     ├─ get_load_config_rules_tool()          — Шаг 0, правила загрузки
 │     ├─ load_1c_catalog_tool(source_path, force=False)
 │     │     └─ ⚠️ уже загружено → СПРОСИТЬ оператора (перезаписать / удалить / отменить).
@@ -226,6 +229,10 @@ XML, флаги изменённых объектов, сборка XML по с�
 │     │     пути абсолютные; имена параметров — только как в коде; та же точка входа load_catalog
 │     │     после разбора; cfg:-имена типов разрешаются только в ИБ с загруженной конфигурацией
 │     │     (иначе предупреждение, а не отказ — R14); отказ разбора ≠ отказ загрузки (R13)
+│     ├─ load_configuration_root_modules_tool(source_path, configuration_uuid=None)
+│     │        — узел V44: второй слой конфигурации (модули предопределённых программ корня и
+│     │        содержимое их форм); конфигурация обязана быть загружена точкой входа; состояния
+│     │        кода empty / indexed_no_file / file_not_indexed / absent — это состояния, а не ошибки
 │     └─ delete_external_report_tool(...)
 │
 ├─ Вопрос о содержимом загруженного объекта (свойства, реквизиты, формы, код)?
@@ -378,7 +385,7 @@ C:\1C_LLM\ckb\.clinerules\1c-configurations-core_Rule.md
 - Структура базы данных `ckb_1c_configurations` (`external_report`, `attributes`,
   `tabular_sections`, `forms`, `form_ext`, `templates`, `bsl_modules`), витрины
   `v_form_elements`, `v_form_events`
-- Контракт загрузки: три инструмента, четыре исхода, правило R1 (тип по файлам корневого каталога)
+- Контракт загрузки: пять инструментов, четыре исхода, правило R1 (тип по файлам корневого каталога)
 - Порядок создания БД «с нуля»: шаг 1 `src/ddl_external_report.sql` → шаг 1b
   `src/ddl_enrichment.sql` → шаг 2 `create_1c_configurations_db.sql`
 - Критические правила работы с UUID (R3), транзакционностью загрузки и удалением детей

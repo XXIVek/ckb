@@ -18,6 +18,29 @@ MAX_ANSWER_CHARS = 8000
 # перечень без полного числа вводил бы в заблуждение.
 MAX_ALIASES_LISTED = 100
 
+# Узел R-LAYER (24.10.2026): карточка слоя правил адресуется КАНОНИЧЕСКИМ ЗАГОЛОВКОМ, а не id.
+# Причина ровно та же, из-за которой слой xml-format читают по якорям: id сниппетов меняются
+# при пересоздании базы документации (тот же класс дефекта, что битая config_cross_reference).
+# Заголовок — строка, которую человек копирует из правил, поэтому он обязан читаться целиком:
+# search_docs_tool печатает заголовок результата обрезанным до MAX_TITLE_DISPLAY_CHARS
+# (server.py), значит длиннее этого порога заголовок не является адресуемым якорем.
+MAX_TITLE_DISPLAY_CHARS = 80
+# Служебные метки слоёв-карточек. Совпадение начала заголовка разрешено ТОЛЬКО для запроса,
+# начинающегося с одной из меток: иначе обычный запрос («Справочник») начал бы матчить
+# заголовки BSL-сниппетов и молча изменил поведение поиска по всей остальной документации.
+# Префиксный запрос нужен для частей карточки: «core-rules: узел V43» отдаёт ч. 1 и ч. 2 сразу.
+TITLE_LAYER_MARKERS = ("core-rules:",)
+
+
+def normalize_title(value):
+    """Нормализованная форма заголовка: нижний регистр, схлопнутые пробелы.
+
+    Одно определение для предиката в SQL и для проверки загрузчика слоя: разные нормы у
+    записи и поиска дали бы «заголовок есть, а не находится» — тот же класс дефекта, что
+    разные формы ключа модуля до узла V19.
+    """
+    return ' '.join(str(value or '').split()).lower()
+
 
 def add_snippet(question, answer, source_url=None, tags='bsl,code', confidence=0.9, groups_id=None, aliases=None):
     """Create a snippet (optionally linked to a group). Aliases generated from question or provided explicitly."""
@@ -520,6 +543,45 @@ def search_docs(query, category=None, limit=20, include_marked=False):
         ks_mark = "" if include_marked else sql_not_marked("ks.tags")
         ks_mark_params = () if include_marked else (MARK_ARRAY,)
         t_ks_mark = "" if include_marked else sql_not_marked("knowledge_snippets.tags")
+
+        # Шаг 0: Совпадение заголовка карточки слоя (узел R-LAYER, 24.10.2026).
+        # Карточка слоя адресуется каноническим заголовком, а не id и не алиасом: алиасы
+        # карточки не обязательны (решение оператора), поэтому находимость даёт сам заголовок.
+        # Шаг выполняется ТОЛЬКО для запроса, начинающегося со служебной метки слоя
+        # (TITLE_LAYER_MARKERS): иначе обычное «Справочник» стало бы матчить заголовки
+        # BSL-сниппетов и молча изменило бы поведение поиска по всей остальной документации.
+        # Один предикат — совпадение начала (LEFT): точное совпадение всего заголовка является
+        # его частным случаем, а префикс additionally достаёт все части большой карточки
+        # («core-rules: узел v43» -> ч. 1 и ч. 2 сразу).
+        # LIKE не используется: в заголовках есть '_' и '%', их пришлось бы экранировать, а
+        # сервер работает при standard_conforming_strings = off.
+        # Категория и карантин — те же фильтры, что у алиасного шага: «поиск по заголовкам
+        # с категорией» обязан означать ровно ту же изоляцию, что и поиск по алиасам.
+        q_norm = normalize_title(query)
+        prefix_ok = bool(q_norm) and any(q_norm.startswith(m) for m in TITLE_LAYER_MARKERS)
+        if prefix_ok:
+            title_expr = "LOWER(REGEXP_REPLACE(BTRIM(question), '[[:space:]]+', ' ', 'g'))"
+            cur.execute(
+                "SELECT id, question, answer, tags FROM knowledge_snippets WHERE LEFT("
+                + title_expr + ", LENGTH(%s)) = %s" + t_ks_cat + t_ks_mark
+                + " ORDER BY question LIMIT %s",
+                (q_norm, q_norm) + cat_pair + ks_mark_params + (limit,))
+            for row in cur.fetchall():
+                desc = row[2] if row[2] and isinstance(row[2], str) else ''
+                results.append({
+                    'id': int(row[0]), 'title': row[1][:200],
+                    'description': desc[:200] if desc else '',
+                    'rank': 3.0, 'type': 'snippet', 'source': 'title',
+                    'marked': is_marked(row[3]), 'marked_reason': reason_of(row[3])
+                })
+            if results:
+                # Заголовок-адрес — указатель на конкретную карточку: идти дальше за алиасами
+                # и полнотекстовым поиском смысла нет, а подмешивать чужие строки значит
+                # размывать ответ о том, что именно лежит в найденной карточке.
+                results.sort(key=lambda x: x['rank'], reverse=True)
+                cur.close()
+                pool.putconn(conn)
+                return results[:limit]
 
         # Шаг 1: Поиск по алиасам (приоритет) — точное совпадение (case-insensitive)
         cur.execute("""

@@ -4,12 +4,15 @@
 > [docs/config-scenarios/FLOWCHART_1c-configurations-core.md](docs/config-scenarios/FLOWCHART_1c-configurations-core.md).
 > Этот файл — сжатая выжимка для AI-ассистента. При расхождении истинен норматив.
 
-## Контракт MCP `1c-configurations-core` — четыре инструмента
+## Контракт MCP `1c-configurations-core` — пять инструментов
+
+(три утверждены 12.10.2026, четвёртый добавлен узлом V25 15.10.2026, пятый — узлом V44 22.10.2026)
 
 | Инструмент | Когда вызывать |
 |---|---|
 | `get_load_config_rules_tool()` | Шаг 0, перед любой загрузкой |
 | `load_1c_catalog_tool(source_path, force=False)` | **точка входа загрузки каталога** |
+| `load_configuration_root_modules_tool(source_path, configuration_uuid=None)` | **второй слой загрузки конфигурации** (узел V44): четыре модуля предопределённых программ корня (`Ext/SessionModule.bsl`, `OrdinaryApplicationModule.bsl`, `ExternalConnectionModule.bsl`, `ManagedApplicationModule.bsl`) и содержимое их форм. Конфигурация обязана быть загружена точкой входа; состояния кода `empty` / `indexed_no_file` / `file_not_indexed` / `absent` — это состояния, а не ошибки; модули объектов и общие модули этим инструментом не грузятся |
 | `load_external_object_file_tool(file_path, config_file="", db_path="", work_dir="", force=False, keep_layout=False)` | **точка входа загрузки двоичного файла** `.erf` / `.epf` (узел V25): `ibcmd config --db-path <ИБ> export --file=<файл> <база>` → тот же `load_catalog`. Пути обязаны быть абсолютными |
 | `delete_external_report_tool(source_path \| uuid \| report_id, object_type)` | удалить внешний объект и его BSL-модули |
 
