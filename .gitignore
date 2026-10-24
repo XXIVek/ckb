@@ -92,3 +92,27 @@ _p*.txt
 _its_5450.txt
 tools/_d*_out.txt
 
+# --- Логи прогонов 22–24.10.2026 (сверка текстов правил, слой core-правил,
+#     применение миграций, замеры колонок заголовка) ---
+# Правило то же, что в блоках выше: нормативы ссылаются на скрипты проверок
+# (tools/check_search_rules_sync.py, tools/check_mcp_tool_wiring.py,
+# tools/migrate_core_rules_to_layer.py), а их вывод остаётся локально.
+# Шаблоны закрывают ровно те имена, что плодились в корне при этих прогонах;
+# скрипты-зонды узлов (например _v46*, _v47*) шаблонами не закрываются — их
+# судьба решается вместе с коммитом соответствующего узла.
+_cmp_ddl_*.txt
+_mtw_now.txt
+_final_validator.txt
+_breakdown_*.txt
+_layer_*.txt
+_head_*.txt
+_index_titles.txt
+_work_headings.txt
+_mig_dry.txt
+_mig_apply.txt
+_rl_*.txt
+_git_st.txt
+_f1.txt
+_*_answer.txt
+
+
