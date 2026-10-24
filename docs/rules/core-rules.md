@@ -1022,7 +1022,9 @@ get_snippet_tool(id)   # полный текст позиции (длинный 
 
 Правки позиции идут в слой (`update_snippet_tool`, `reason` обязателен) — файл
 правил от этого не растёт.
-Пересборка слоя: `python tools\migrate_core_rules_to_layer.py --apply`; снимок слоя — `layers/core_rules_layer.md`.
+Пересборка слоя: `python tools\migrate_core_rules_to_layer.py --apply`; снимок карточек
+(`--dump`) — локальный артефакт сравнения и в репозиторий не входит: источник истины —
+строки `local_doc`, а целостность слоя проверяет `tools/check_rules_layer.py` адресом.
 
 | Адрес карточки | Позиция (исходный заголовок раздела) |
 |---|---|

@@ -613,8 +613,10 @@ def rules_index(cards, sections):
         "",
         "Правки позиции идут в слой (`update_snippet_tool`, `reason` обязателен) — файл",
         "правил от этого не растёт.",
-        f"Пересборка слоя: `python {MIGRATOR.relative_to(ROOT)} --apply`; "
-        "снимок слоя — `layers/core_rules_layer.md`.",
+        f"Пересборка слоя: `python {MIGRATOR.relative_to(ROOT)} --apply`; снимок карточек "
+        "(`--dump`) — локальный артефакт сравнения и в репозиторий не входит: источник "
+        "истины — строки `local_doc`, а целостность слоя проверяет "
+        "`tools/check_rules_layer.py` адресом.",
         "",
         "| Адрес карточки | Позиция (исходный заголовок раздела) |",
         "|---|---|",
