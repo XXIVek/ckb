@@ -1,0 +1,684 @@
+"""Спецификация слоёв правил проекта (узел RULE-LAYER, 24.10.2026).
+
+Одна точка для трёх потребителей: мигратора `tools/migrate_rules_to_layer.py`, проверки
+`tools/check_rules_layer.py` и стартового слоя `.clinerules/1C_Rule.md`. Причина, по которой
+словарь, разбор и правила адреса живут здесь, а не в вызывающих скриптах: если проверка
+разбирает файл своим кодом, она проверяет свой разбор, а не то, что легло в БД (тот же урок,
+что и с `src/quarantine.py` для карантина и с `src/current_revision.py` для ревизий).
+
+Что такое слой правил
+---------------------
+Правила каждого MCP-сервера — набор карточек `knowledge_snippets` отдельной категории. В
+контекст AI-ассистента всегда загружается только `.clinerules/1C_Rule.md` (маршрутизатор),
+остальное читается по требованию. Исходник текстов — `docs/rules/<метка>.md`: он не попадает
+в контекст, зато остаётся в git (дифф, чтение без БД), а запись в БД делает мигратор.
+Страховочных снимков слоя больше не заводят: источник выдачи — БД, историей правок служит
+`snippet_audit_log` (узел P6), историей текстов — git исходника.
+
+Адрес карточки
+--------------
+`<метка>:<вид>:<цель>[:<подцель>]`, латиницей, строчными, сегменты `[a-z0-9_-]`. Иерархия
+задаётся адресом, а не вложенностью заголовков: префиксный шаг поиска (предикат
+`LEFT(LOWER(question), LEN(запрос)) = запрос` для запроса, начинающегося с метки из
+`TITLE_LAYER_MARKERS`) по началу адреса отдаёт всё поддерево правил одной цели —
+`enrich-rules:quarantine` найдёт и правило карантина, и его подправила. Отсюда требования к
+кодировке: адреса механически выводимы из дерева (править дерево = переименовать адрес),
+регистр и разделитель едины, длина <= `MAX_TITLE_DISPLAY_CHARS` — адрес длиннее порога нельзя
+повторить запросом, поэтому он считается дефектом, а не особенностью формулировки.
+
+Алиасы карточек слоя намеренно не заводятся: точный алиасный шаг сопоставляет со всем
+запросом, и алиасы из адреса дали бы шум по словам `core`, `rules`, `index`. Единственное
+исключение — совместимость при переименовании (`--rename-map`): прежний адрес кладётся
+алиасом той же строки, иначе ссылка из индекса или из прежнего разговора ведёт в никуда.
+"""
+
+import re
+
+try:  # константы берём из кода поиска, а не дублируем: расхождение порога с кодом и есть тот
+      # дефект, из-за которого адрес перестал бы находиться запросом
+    from mcp_tools_api import MAX_ANSWER_CHARS, MAX_TITLE_DISPLAY_CHARS
+except Exception:  # pragma: no cover - импорт тянет драйвер БД; без него модуль всё равно
+                   # описывает формат, а проверка адресов идёт по константам по умолчанию
+    MAX_ANSWER_CHARS = 8000
+    MAX_TITLE_DISPLAY_CHARS = 80
+
+# Метка слоя -> категория `doc_categories`. Запись здесь обязана совпадать с записью в
+# `src/mcp_tools_api.py::TITLE_LAYER_MARKERS`: метка без записи в коде поиска не разрешается
+# префиксным шагом, категория без записи здесь — карточка без изоляции от прочей документации.
+# Расхождение ловит tools/check_rules_layer.py.
+#
+# Значение — одна категория или кортеж категорий (кортеж читается одинаково с одиночной
+# категорией через categories_of). Узел RULE-V2: у правил каждого слоя своя категория с
+# суффиксом `-rules`, не совпадающая с категорией документации того же предмета — прежние
+# коды (1c-knowledge-base, 1c-configurations-core, ...) смешивали правила сервера со строками
+# справки и поднимали в выдачу чужие тексты. Слои формата 1 допереадресовываются по одному.
+LAYERS = {
+    # Корневой индекс (узел RULE-V2): маршрутизатор над слоями. Единственный текст, который
+    # обязан быть в контексте всегда, — .clinerules/1C_Rule.md; он передаёт управление сюда.
+    # Порядок записей = порядок TITLE_LAYER_MARKERS в src/mcp_tools_api.py: сравнение меток
+    # строгое, и перестановка в одном месте означала бы провал проверки без всякого смысла.
+    "rules": ("1c-rules-root",),
+    "core-rules": "1c-configurations-core",
+    "kb-rules": "1c-knowledge-base-rules",
+    "enrich-rules": "1c-configurations-enrichment",
+    "export-rules": "1c-configurations-export",
+}
+
+# Формат слоя: 1 — перенос накопленного файла правил (содержимое диктует дерево исходника),
+# 2 — карточки написаны под двухступенчатое чтение (состояния always/optional/reserved).
+# Слои формата 1 помечены явно и переводятся по одному: проверка обязана называть непереведённый
+# слой, а не молча применять к нему требования формата 2 (у карточек переноса нет состояний, и
+# строгая проверка ругалась бы на формат, а не на правило).
+LAYER_FORMAT = {
+    "rules": 2,
+    "kb-rules": 2,
+    "core-rules": 1,
+    "enrich-rules": 1,
+    "export-rules": 1,
+}
+
+RULES_DIR = "docs/rules"
+ARCHIVE_DIR = "Arhiv_Rules"
+INDEX_LEAF = "index"
+ROOT_MARKER = "rules"
+
+# Ключ идемпотентности карточки. Им является source_url, а не id: id меняются при пересоздании
+# базы документации, а адрес устойчив и его задаём мы (тот же приём, что в
+# tools/migrate_core_rules_to_layer.py).
+SOURCE_SCHEME = "rules-layer://"
+
+# Адрес: метка + непустые сегменты. Двоеточие — единственный разделитель дерева; пробел,
+# падеж и заглавные буквы в адресе запрещены, потому что нормализация запроса снимает их, и
+# «человек написал» разошлось бы с «код ищет».
+_ADDRESS_TAIL = r"(?::[a-z0-9][a-z0-9_-]*)+"
+
+# Заголовок карточки в файле-исходнике: ровно `## <адрес>`. `###` остаётся частью текста —
+# подзаголовок правила, а не новый адрес (иначе подпункт не читался бы внутри правила).
+_HEADING_RE = re.compile(r"^##[ \t]+(\S+)[ \t]*$", re.MULTILINE)
+# ─────────────────────────────────────────────────────────────────────────────────────
+# Формат 2 (узел RULE-V2): состояния карточек, разделы, бюджеты.
+#
+# Дерево адреса и есть классификатор правил: «когда читать» не выносят в отдельный признак —
+# оно зашито в путь (always / optional / reserved), поэтому префиксный шаг поиска отдаёт всё
+# поддерево состояния разом, а проверка считает бюджет по префиксу.
+#
+#   always    — применяется почти всегда при работе с этим MCP. Сумма answer ограничена
+#               ALWAYS_BUDGET_CHARS: слой, чьи «всегда»-правила не влезают в бюджет, перестаёт
+#               читаться целиком и правило молча перестаёт применяться. Порог жёсткий: провал
+#               бюджета = провал проверки, а не предупреждение.
+#   optional  — применяется по ситуации. Требование к индексу — строка «когда нужен»: без неё
+#               правило не применят вовсе.
+#   reserved  — правило осознано, но текста нет. Карточка короткая и обязана назвать триггер
+#               формулировки и где знание лежит сейчас (журнал, файл). Состояние заведено
+#               против двух одинаковых соблазнов: не писать правило вообще (оно не найдётся
+#               нигде) и перенести старый текст под новый адрес (тогда «правило есть», но
+#               читается оно как снимок, а не как правило).
+#   checks    — правила проверки слоя: чем доказывать, что правило ещё верно. Отдельное
+#               состояние, потому что читаются после правки, а не перед ней; при этом каждая
+#               строка индекса обязана называть свой инструмент проверки — правило без проверки
+#               нечем подтвердить.
+#   journal   — перенесённые прежние правила. Снимок, а не рабочий контракт: вне бюджетов, вне
+#               требований разделов и вне требования исходника. Удалять нельзя (в нём замеры и
+#               причины решений), читать как правило нельзя (оно описывало состояние до перехода).
+# ─────────────────────────────────────────────────────────────────────────────────────
+# Состояния названы константами: сравнения в коде и словарь состояний обязаны давать одно
+# и то же слово. Литерал в сравнении расходится со словарём молча — опечатка читается как
+# «такого состояния нет», и карточка перестаёт относиться к слою без единого сообщения.
+STATE_ALWAYS = "always"
+STATE_OPTIONAL = "optional"
+STATE_RESERVED = "reserved"
+STATE_CHECKS = "checks"
+STATE_JOURNAL = "journal"
+LAYER_STATES = (STATE_ALWAYS, STATE_OPTIONAL, STATE_RESERVED, STATE_CHECKS, STATE_JOURNAL)
+
+# Бюджет «всегда»-правил слоя, символов answer. Смысл числа: «всегда»-часть слоя должна
+# прочитываться за один заход после индекса. Численных порогов в проверках проекта раньше не
+# было ни в одном слое — здесь порог есть, и он ограничивает конструкцию, а не стиль.
+ALWAYS_BUDGET_CHARS = 12000
+# Резервная карточка короткая по определению: длинный текст в reserved означает, что правило
+# уже написано и только притворяется несуществующим.
+RESERVED_MAX_CHARS = 1200
+
+# Обязательные разделы карточки по состоянию. Разделы — машинные якоря: проверка требует их
+# наличия, человек читает их как структуру ответа. Названия — латиница верхним регистром,
+# чтобы разбор раздела не путался с заголовками `###` внутри текста.
+STATE_SECTIONS = {
+    STATE_ALWAYS: ("WHEN", "MUST", "FORBID", "TOOLS", "CHECK", "SOURCE"),
+    STATE_OPTIONAL: ("WHEN", "MUST", "FORBID", "TOOLS", "CHECK", "SOURCE"),
+    STATE_CHECKS: ("WHEN", "MUST", "FORBID", "TOOLS", "CHECK", "SOURCE"),
+    STATE_RESERVED: ("WHEN", "TRIGGER", "WHERE"),
+}
+# Разделы карточки-индекса слоя: по одному на состояние плюс «что это за слой» и «где править».
+# Индекс без раздела состояния означает, что состояние в слое не используется, — это называется
+# в тексте индекса, а не молча. Индекс состояния (always/optional/checks) несёт только WHEN:
+# его содержимое — таблица строк, и её проверяет validate_index_graph по колонкам.
+INDEX_SECTIONS = ("WHEN", "SCOPE", "ALWAYS", "OPTIONAL", "RESERVED", "CHECKS", "JOURNAL", "EDIT")
+STATE_INDEX_SECTIONS = ("WHEN",)
+
+# Колонка индекса, называющая инструмент проверки (или правки) строки. Заголовок ищется по
+# ключу, а не по полному тексту: формулировка в таблице может быть короче, смысл один.
+CHECK_COLUMN_KEYS = ("чем проверяется", "чем доказывается", "чем правится")
+
+_SECTION_RE = re.compile(r"^===\s*([A-Z][A-Z0-9_]*)", re.MULTILINE)
+# Токен адреса внутри текста карточки (те же сегменты, что и грамматика): индекс не вправе
+# ссылаться на несуществующее правило — ссылка в никуда в индексе и есть та дыра, из-за
+# которой «правило есть, но его не найти».
+_ADDRESS_TOKEN_RE = re.compile(r"\b([a-z][a-z0-9]*(?:-[a-z0-9]+)*(?::[a-z0-9][a-z0-9_-]*)+)\b")
+# Токен артефакта в ячейке «чем проверяется»: путь к файлу или имя инструмента MCP. Различаются
+# просто: путь содержит расширение или разделитель, инструмент MCP заканчивается на `_tool`.
+# Отдельный разбор для имени без каталога (`validate_load_flow.py` лежит в корне проекта) нужен
+# затем, что так в правилах называют большинство валидаторов; без него ссылка осталась бы
+# непроверенной, а «проверка есть» — необоснованным утверждением.
+_PATH_TOKEN_RE = re.compile(r"\b((?:[A-Za-z0-9_.\-]+[/\\])+[A-Za-z0-9_.\-]+\.(?:py|sql|md|json))\b")
+_BARE_PATH_TOKEN_RE = re.compile(r"\b([A-Za-z0-9_\-]+\.(?:py|sql|md))\b")
+_TOOL_TOKEN_RE = re.compile(r"\b[a-z][a-z0-9_]*_tool\b")
+
+
+
+
+def markers():
+    """Метки слоёв — тот же порядок, что ожидается в TITLE_LAYER_MARKERS."""
+    return tuple(LAYERS)
+
+
+def categories_of(marker):
+    """Категории слоя кортежом. Одна категория тоже возвращается кортежем: вызывающий не
+    должен проверять тип значения, чтобы не забыть ветку с кортежем (так теряются слои)."""
+    value = LAYERS.get(marker)
+    if value is None:
+        return ()
+    return tuple(value) if isinstance(value, (tuple, list)) else (value,)
+
+
+def category_of(marker):
+    """Первичная категория слоя — для отчётов и для поиска строк мигратором. Принадлежность
+    строки слою задаёт метку в заголовке, а не категорию, поэтому мигратор ищет по метке."""
+    categories = categories_of(marker)
+    return categories[0] if categories else None
+
+
+def marker_for_path(path):
+    """Метка по имени файла-исходника: docs/rules/<метка>.md. Имя файла = метка, поэтому
+    добавить слой — значит добавить строку в LAYERS и файл с таким именем, а не править разбор."""
+    name = str(path).replace("\\", "/").rsplit("/", 1)[-1]
+    if not name.endswith(".md"):
+        return None
+    marker = name[:-3]
+    return marker if marker in LAYERS else None
+
+
+def source_url(address):
+    return SOURCE_SCHEME + address
+
+
+def marker_of(address):
+    """Метка слоя по адресу ('enrich-rules:quarantine:mark' -> 'enrich-rules'). Метка — первая
+    часть адреса до первого ':', поэтому хранить её отдельно негде и незачем: карта
+    переименований, индекс и проверка выводят её из самого адреса."""
+    return (address or "").split(":", 1)[0]
+
+
+def address_parts(address):
+    """Сегменты адреса после метки (для адреса без метки — все сегменты)."""
+    for marker in LAYERS:
+        if address == marker or address.startswith(marker + ":"):
+            return [p for p in address[len(marker):].split(":") if p]
+    return [p for p in address.split(":") if p]
+
+
+def parent_prefix(address):
+    """Префикс родителя по дереву адресов ('a:b:c' -> 'a:b'); для вершины дерева — ''.
+    Индекс вправе перечислять поддеревья, поэтому подправило считается покрытым и когда назван
+    его родитель: перечислять в индексе каждую подправило — значит удвоить дерево и неминуемо
+    с ним разойтись."""
+    parts = [p for p in address.split(":") if p]
+    return ":".join(parts[:-1]) if len(parts) > 1 else ""
+
+
+def index_address(marker):
+    return f"{marker}:{INDEX_LEAF}"
+
+
+def tags_for(address, marker_or_category):
+    """Теги карточки: категории слоя (ими поиск изолирует слой от прочей документации — фильтр
+    по `category` работает по тегам цели), метка, признак слоя и состояние (первый сегмент после
+    метки). Состояние заведено затем, чтобы отличать рабочие правила от перенесённого журнала:
+    у карточек журнала свои теги, и строгие проверки формата по ним проходить не должны.
+
+    Аргументом подаётся МЕТКА слоя, а не одна категория: корневой слой `rules` читают все четыре
+    MCP, и тег единственной категории сделал бы его невидимым для трёх остальных (фильтр —
+    пересечение тегов, поэтому в тегах лежат все категории слоя). Метка выводится из адреса,
+    поэтому вызов `tags_for(address, category)` остаётся рабочим: если аргумент не является
+    меткой из LAYERS, он трактуется как одна категория (обратная совместимость)."""
+    marker_arg = marker_of(marker_or_category)
+    categories = categories_of(marker_arg) or ((str(marker_or_category),) if marker_or_category else ())
+    kind = state_of(address) or INDEX_LEAF
+    return list(dict.fromkeys(
+        [t for t in (*categories, marker_of(address), "rules-layer", kind) if t]
+    ))
+
+
+def validate_address(address, marker):
+    """Ошибки одного адреса. Отдельная функция потому, что те же требования предъявляются и к
+    адресам исходника, и к обеим сторонам карты переименований."""
+    if marker not in LAYERS:
+        return [f"неизвестная метка слоя {marker!r} — её нет в LAYERS"]
+    errors = []
+    if not re.fullmatch(re.escape(marker) + _ADDRESS_TAIL, address or ""):
+        errors.append(
+            f"адрес {address!r} не соответствует грамматике "
+            f"'{marker}:<вид>:<цель>[:<подцель>]' (сегменты [a-z0-9][a-z0-9_-]*, "
+            f"разделитель дерева — только ':')"
+        )
+    if len(address or "") > MAX_TITLE_DISPLAY_CHARS:
+        errors.append(
+            f"адрес {address!r} длиннее MAX_TITLE_DISPLAY_CHARS ({len(address)} > "
+            f"{MAX_TITLE_DISPLAY_CHARS}): такой адрес нельзя повторить запросом поиска, "
+            f"то есть короткое имя — часть контракта, а не стиль формулировки"
+        )
+    return errors
+
+
+def fence_spans(text):
+    """Характерные интервалы fenced code blocks (``` ... ```), включая сами строки-границы.
+
+    Нужны затем, что структура markdown внутри код-блока не определена: строка `## что-то`
+    внутри ```-блока — это текст примера, а не заголовок. Без этого разбора перенос файла,
+    в котором есть пример с `## ` внутри блока, дал бы фантомную карточку (замер 24.10.2026
+    на core-слое: фантом 'Предупреждения' и его повторный перенос как «ручной» карточки).
+    """
+    spans = []
+    start = None
+    pos = 0
+    for line in re.finditer(r"(?m)^(```|~~~)[^\n]*\n?", text or ""):
+        if start is None:
+            start = line.start()
+        else:
+            spans.append((start, line.end()))
+            start = None
+    if start is not None:  # незакрытый блок в исходнике: считаем блоком до конца текста
+        spans.append((start, len(text)))
+    return spans
+
+
+def iter_headings(text, heading_re=_HEADING_RE):
+    """Заголовки верхнего уровня вне код-блоков — единственный источник карточек."""
+    blocked = fence_spans(text)
+    for m in heading_re.finditer(text or ""):
+        if any(start <= m.start() < end for start, end in blocked):
+            continue
+        yield m
+
+
+def parse_document(text, marker):
+    """Файл-исходник слоя -> карточки + список ошибок.
+
+    Разбор один на два контура (миграция и проверка) намеренно: иначе проверка проверяла бы
+    свой разбор, а не тот, что пишет в БД. Формат: `## <адрес>` = карточка, её answer — текст
+    до следующего заголовка `##` (строки `###` остаются текстом правила). Всё до первого `##`
+    — шапка файла, в ней служебный комментарий с меткой и категорией; в карточки он не идёт.
+
+    Правила, которые проверяются здесь, а не в вызывающем коде:
+      * адрес принадлежит метке этого файла и удовлетворяет грамматике (validate_address);
+      * карточка непустая и её answer не длиннее MAX_ANSWER_CHARS — длинное правило режется
+        подправелом дерева, а не вторым абзацем карточки: дерево адресов для этого и введено;
+      * адрес уникален в файле (дубль = две карточки одного правила, поиск отдаст обе);
+      * карточка `<метка>:index` есть: без неё маршрутизатор не знает, с чего начать слой;
+      * каждая карточка названа в тексте индекса (полным адресом, а для подправила — полным
+        адресом или префиксом родителя). Молча записанная и нигде не названная карточка
+        перестаёт существовать для того, кто читает слой по индексу.
+    """
+    errors = []
+    matches = list(iter_headings(text))
+    if not matches:
+        return [], [f"в файле слоя {marker!r} нет ни одной карточки: заголовок вида '## <адрес>'"]
+    for start, end in fence_spans(text):
+        if end == len(text) and not text[max(start, 0):end].rstrip().endswith(("```", "~~~")):
+            errors.append(
+                f"в файле слоя {marker!r} незакрытый код-блок со строки {text.count(chr(10), 0, start) + 1}"
+                ": после него заголовки перестают быть карточками, и весь остальной файл "
+                "читается как текст примера"
+            )
+    cards, seen = [], {}
+    index_text = ""
+    for i, m in enumerate(matches):
+        address = m.group(1)
+        start = m.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        body = text[start:end].strip()
+        before = len(errors)
+        errors += validate_address(address, marker)
+        if len(errors) > before:
+            # карточку с невалидным адресом в БД писать нельзя: она не читается запросом,
+            # а молча пропущенная — исчезает бесследно. Поэтому: отказ + строка не создаётся
+            continue
+        if address in seen:
+            errors.append(f"дубликат адреса {address!r} — карточка одного правила должна быть одна")
+            continue
+        seen[address] = True
+        if not body:
+            errors.append(f"{address}: пустое содержимое — карточку не о чем читать")
+            continue
+        if len(body) > MAX_ANSWER_CHARS:
+            errors.append(
+                f"{address}: answer {len(body)} > MAX_ANSWER_CHARS ({MAX_ANSWER_CHARS}) — "
+                f"правило делится подправелом адреса ({address}:<подцель>), а не вторым "
+                f"абзацем той же карточки"
+            )
+        category = category_of(marker) or ""
+        if LAYER_FORMAT.get(marker, 1) == 2:
+            # Формат 2 требует состояния в адресе: правило вне always/optional/reserved/checks/
+            # journal не читается ни «всегда», ни «по ситуации», и ни один бюджет по нему не
+            # считается. Индекс слоя — единственная карточка над состояниями.
+            if not is_index_address(address) and state_of(address) is None:
+                errors.append(
+                    f"{address}: адрес вне состояний слоя ({', '.join(LAYER_STATES)}) — "
+                    f"правило без состояния не читается ни как «всегда», ни как «по ситуации»"
+                )
+            missing = [s for s in required_sections(address) if s not in sections_of(body)]
+            if missing:
+                errors.append(
+                    f"{address}: нет разделов {', '.join('===' + s for s in missing)} — "
+                    f"разделы карточки {state_of(address) or 'index'} обязательны: без WHEN "
+                    f"правило не применимо, без CHECK его нечем подтвердить"
+                )
+            if state_of(address) == STATE_RESERVED and len(body) > RESERVED_MAX_CHARS:
+                errors.append(
+                    f"{address}: резервная карточка {len(body)} > RESERVED_MAX_CHARS "
+                    f"({RESERVED_MAX_CHARS}) — длинный текст в reserved означает, что правило "
+                    f"уже написано и только притворяется несуществующим"
+                )
+        cards.append({
+            "address": address,
+            "answer": body,
+            "tags": tags_for(address, marker),
+            "source_url": source_url(address),
+            "category": category,
+            "categories": categories_of(marker),
+            "marker": marker,
+            "state": state_of(address),
+            "depth": len(address_parts(address)),
+        })
+        if address == index_address(marker):
+            index_text = body
+    if not index_text:
+        errors.append(
+            f"в слое {marker!r} нет карточки-индекса {index_address(marker)!r} — "
+            f"её адрес читает маршрутизатор, чтобы начать работу со слоя"
+        )
+    else:
+        index_blobs = {c["address"]: c["answer"] for c in cards if is_index_address(c["address"])}
+        all_index_text = "\n".join(index_blobs.values())
+        for card in cards:
+            address = card["address"]
+            if address in index_blobs:
+                continue
+            if address in all_index_text:
+                continue
+            parent = parent_prefix(address)
+            if card["depth"] >= 2 and parent and parent in all_index_text:
+                continue  # подправило покрыто указанием поддерева — так и задумано
+            errors.append(
+                f"{address}: карточка не названа ни в одном индексе слоя — "
+                f"записанное и не названное правило перестаёт существовать для того, "
+                f"кто читает слой по индексу"
+            )
+    if LAYER_FORMAT.get(marker, 1) == 2:
+        errors += validate_index_graph(marker, cards)
+    return cards, errors
+
+
+def validate_index_graph(marker, cards):
+    """Формат 2: индекс состояния — таблица, у каждой строки которой назван инструмент проверки,
+    и каждая названная в индексе ссылка слоя обязана существовать. Плюс бюджет `always`.
+
+    Почему это проверяется, а не оставляется на совесть автора: правило без указанной проверки
+    нечем подтвердить (оно остаётся текстом, который никто не может ни применить, ни опровергнуть),
+    а ссылка индекса в никуда — та же дыра, из-за которой «правило есть, но его не найти».
+    Межслойные ссылки здесь не проверяются: карточка другого слоя живёт не в этом файле, их
+    разрешает tools/check_rules_layer.py по БД.
+    """
+    errors = []
+    by_address = {c["address"]: c for c in cards}
+    total, always_cards = always_budget(marker, [(c["address"], c["answer"]) for c in cards])
+    if total > ALWAYS_BUDGET_CHARS:
+        errors.append(
+            f"[{marker}] бюджет always превышен: {total} > {ALWAYS_BUDGET_CHARS} символов "
+            f"по {len(always_cards)} карточкам ({', '.join(always_cards[:6])}). «Всегда»-часть "
+            f"слоя обязана читаться за один заход после индекса: перенеси правило в optional "
+            f"(по ситуации) или раздели его — молча превышать порог нельзя"
+        )
+    for card in cards:
+        if not is_index_address(card["address"]):
+            continue
+        state = state_of(card["address"])
+        tables = markdown_tables(card["answer"])
+        if state in (STATE_ALWAYS, STATE_OPTIONAL, STATE_CHECKS):
+            if not tables:
+                errors.append(
+                    f"{card['address']}: индекс состояния без таблицы — строки индекса "
+                    f"читаются колонками, текстом списка проверка не работает"
+                )
+            for table in tables:
+                cols = check_columns(table)
+                if not cols:
+                    errors.append(
+                        f"{card['address']}: в таблице индекса нет колонки "
+                        f"«{CHECK_COLUMN_KEYS[0]}» — правило без названного инструмента "
+                        f"проверки нечем подтвердить"
+                    )
+                    continue
+                for row in table["rows"]:
+                    for idx in cols:
+                        if idx >= len(row) or not row[idx].strip():
+                            head = row[0] if row and row[0] else "?"
+                            errors.append(
+                                f"{card['address']}: строка {head!r} без инструмента проверки — "
+                                f"назови скрипт, SQL-сверку или инструмент контракта"
+                            )
+        for token in address_tokens(card["answer"]):
+            if marker_of(token) != marker or address_resolves(token, by_address):
+                continue
+            if state_of(token) == STATE_JOURNAL:
+                # Карточки журнала намеренно не лежат в файле-исходнике: это снимок прежних
+                # правил, и переносить его в черновик рабочих правил — значит выдать снимок за
+                # действующее знание. Оглавление журнала при этом обязан разрешать проверка по БД
+                # (tools/check_rules_layer.py), а не молчание парсера.
+                continue
+            errors.append(
+                f"{card['address']}: индекс ссылается на {token!r}, которой нет среди карточек "
+                f"слоя — ссылка индекса в никуда означает, что правила ищут, а его нет"
+            )
+    return errors
+
+
+def load_document(path):
+    """Чтение файла-исходника и определение метки по имени. Ошибка возвращается текстом,
+    а не исключением: мигратор и проверка печатают один и тот же отказ."""
+    marker = marker_for_path(path)
+    if marker is None:
+        return None, [], (f"имя {path} не является именем слоя: ожидается "
+                          f"{RULES_DIR}/<метка>.md, метки: {', '.join(markers())}")
+    try:
+        text = open(path, encoding="utf-8").read()
+    except OSError as exc:
+        return None, [], f"не читается {path}: {exc}"
+    cards, errors = parse_document(text, marker)
+    return cards, errors, None
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+# Разбор формата 2: состояния, разделы, таблицы индекса, артефакты.
+# Функции общие для мигратора и проверки: расхождение двух разборов дало бы «проходит у
+# одного, падает у другого», и непонятно было бы, какой из них настоящий.
+# ─────────────────────────────────────────────────────────────────────────────────────
+
+def state_of(address):
+    """Состояние карточки по адресу ('kb-rules:always:index' -> 'always'); для индекса слоя
+    ('kb-rules:index') — None: индекс живёт над состояниями и описывает всё дерево."""
+    parts = address_parts(address)
+    if parts and parts[0] in LAYER_STATES:
+        return parts[0]
+    return None
+
+
+def is_index_address(address):
+    """Индексная карточка: индекс слоя или индекс состояния (`<метка>:always:index`)."""
+    parts = address_parts(address)
+    if not parts:
+        return False
+    if len(parts) == 1:
+        return parts[0] == INDEX_LEAF
+    return parts[-1] == INDEX_LEAF and parts[0] in LAYER_STATES
+
+
+def sections_of(answer):
+    """Названия разделов карточки в порядке текста. Пустой список — карточка без структуры."""
+    return [m.group(1) for m in _SECTION_RE.finditer(answer or "")]
+
+
+def section_bodies(text):
+    """Разделы карточки текстом: {ИМЯ: содержимое до следующего раздела}.
+
+    `sections_of` отвечает на вопрос «какие разделы есть», этот — «что в них написано».
+    Разница не косметическая: индекс обязан назвать неиспользуемое состояние текстом, а не
+    пустым заголовком, и пустой заголовок объявлением не считается.
+    """
+    body = text or ""
+    found = list(_SECTION_RE.finditer(body))
+    out = {}
+    for i, m in enumerate(found):
+        end = found[i + 1].start() if i + 1 < len(found) else len(body)
+        out[m.group(1)] = body[m.end():end].strip()
+    return out
+
+
+def declares_state(index_text, state):
+    """Индекс слоя описывает состояние текстом, а не молчит о нём пустым заголовком."""
+    return bool(section_bodies(index_text).get(str(state).upper()))
+
+
+def required_sections(address):
+    """Какие разделы обязаны быть у карточки этого адреса.
+
+    Журнал — пустой кортеж, включая индекс журнала: перенесённый текст не переписывался под
+    формат, и требовать от него структуры — значит ругаться на формат, а не на правило (текст
+    журнала и есть запись о том, что было; переписанный, он перестаёт быть доказательством).
+    Индекс слоя описывает всё дерево (разделы состояний), индекс состояния — только условие
+    чтения: строки его таблицы проверяются по колонкам, а не разделами.
+    """
+    state = state_of(address)
+    if state == STATE_JOURNAL:
+        return ()
+    if is_index_address(address):
+        return INDEX_SECTIONS if state is None else STATE_INDEX_SECTIONS
+    if state is None:
+        return ()
+    return STATE_SECTIONS.get(state, ())
+
+
+def always_budget(marker, pairs):
+    """Объём «всегда»-правил слоя: (сумма answer, адреса). Считается по префиксу адреса, а не
+    по тегу состояния: тег — производное от адреса, и расхождение тега с адресом всплывает
+    ровно на этом счёте."""
+    total, cards = 0, []
+    prefix = f"{marker}:always:"
+    for address, answer in pairs:
+        if address.startswith(prefix):
+            total += len(answer or "")
+            cards.append(address)
+    return total, cards
+
+
+def markdown_tables(answer):
+    """Таблицы markdown текста карточки: [{'header': [...], 'rows': [[...]]}].
+
+    Индекс состояния — таблица, и проверка читает её колонками: колонка «чем проверяется»
+    обязательна у таблиц always/optional/checks, а адрес каждой строки обязан существовать.
+    """
+    tables, current = [], None
+    for line in (answer or "").splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            current = None
+            continue
+        cells = [c.strip() for c in stripped.strip("|").split("|")]
+        if not cells or all(set(c) <= set("-: ") for c in cells):
+            continue  # строка-разделитель `|---|---|`
+        if current is None:
+            current = {"header": cells, "rows": []}
+            tables.append(current)
+        else:
+            current["rows"].append(cells)
+    return tables
+
+
+def check_columns(table):
+    """Позиции колонок «чем проверяется» / «чем правится» в таблице индекса."""
+    return [i for i, cell in enumerate(table["header"])
+            if any(key in cell.lower() for key in CHECK_COLUMN_KEYS)]
+
+
+def address_tokens(text):
+    """Адреса, названные в тексте карточки, — для проверки ссылок индекса."""
+    return [m.group(1) for m in _ADDRESS_TOKEN_RE.finditer(text or "")]
+
+
+def artifact_tokens(text):
+    """Артефакты, названные в ячейке «чем проверяется»: пути файлов и имена инструментов MCP.
+    Порядок токенов сохраняется, дубли снимаются: одна и та же проверка, названная в двух
+    строках индекса, — не два факта."""
+    tokens = [m.group(1).replace("\\", "/") for m in _PATH_TOKEN_RE.finditer(text or "")]
+    tokens += [m.group(1) for m in _BARE_PATH_TOKEN_RE.finditer(text or "")]
+    tokens += [m.group(0) for m in _TOOL_TOKEN_RE.finditer(text or "")]
+    return list(dict.fromkeys(tokens))
+
+
+def address_resolves(token, known):
+    """Ссылается ли индекс на существующее правило: точный адрес или префикс поддерева.
+    Префикс разрешён намеренно (то же правило, что с parent_prefix в разборе файла): индекс
+    вправе перечислять поддерево, а не каждую подкарточку, — иначе он удваивает дерево и
+    неминуемо с ним расходится. Голый префикс без детей — ссылка в никуда."""
+    return token in known or any(known_address.startswith(token + ":")
+                                 for known_address in known)
+
+
+
+def expected_tools(root=None):
+    """Имена инструментов, зарегистрированных в MCP-серверах, — из EXPECTED_TOOLS скрипта
+    tools/check_mcp_tool_wiring.py. Источник выбран намеренно: тот же словарь сторожит состав
+    серверов, поэтому правило не может сослаться на несуществующий инструмент и остаться
+    зелёным: у правил и у регистрации один список."""
+    from pathlib import Path
+
+    root = Path(root) if root else Path(__file__).resolve().parent.parent
+    try:
+        text = (root / "tools" / "check_mcp_tool_wiring.py").read_text(encoding="utf-8")
+    except OSError:
+        return set()
+    block = re.search(r"EXPECTED_TOOLS\s*=\s*\{(.*?)\n\}", text, re.S)
+    if not block:
+        return set()
+    return set(re.findall(r'"([a-z][a-z0-9_]*_tool)"', block.group(1)))
+
+
+def artifact_exists(token, root=None):
+    """Существует ли названный артефакт: файл проверки (путь от корня проекта, с поиском в
+    tools/ и src/, если каталог не указан) или зарегистрированный инструмент MCP. Ложь
+    означает «правило ссылается на то, чего нет» — тот класс расхождения, который и ловит
+    проверка: текст правила живёт, а инструмент, который его подтверждает, удалён."""
+    from pathlib import Path
+
+    root = Path(root) if root else Path(__file__).resolve().parent.parent
+    token = (token or "").strip().strip("`").replace("\\", "/")
+    if not token:
+        return False
+    if token.endswith("_tool"):
+        return token in expected_tools(root)
+    for candidate in (root / token, root / "tools" / token, root / "src" / token):
+        if candidate.exists():
+            return True
+    return False
+
+
+
