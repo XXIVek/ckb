@@ -1,0 +1,47 @@
+======================================================================
+layer_cards
+   (6125, 10628, 'rules:core-rules:')
+   (6127, 8586, 'rules:enrich-rules:')
+   (6128, 4336, 'rules:export-rules:')
+   (6126, 10935, 'rules:kb-rules:')
+   (6092, 793, 'rules:kb-rules:checks:index')
+   (6036, 4768, 'rules:kb-rules:journal:index')
+======================================================================
+by_prefix
+   ('core-rules: (прежний)', 79, 272184, 44)
+   ('enrich-rules: (прежний)', 16, 55805, 21)
+   ('export-rules: (прежний)', 8, 11790, 21)
+   ('rules: (корень)', 9, 41245, 32)
+   ('rules:core-rules:', 1, 10628, 17)
+   ('rules:enrich-rules:', 1, 8586, 19)
+   ('rules:export-rules:', 1, 4336, 19)
+   ('rules:kb-rules:', 57, 131763, 47)
+   ('прочее', 9, 13721, 33)
+======================================================================
+kinds
+   ('rules:kb-rules :\x01', 44)
+   ('rules :\x01', 6)
+   ('rules:', 1)
+   ('rules:core-rules:', 1)
+   ('rules:enrich-rules:', 1)
+   ('rules:export-rules:', 1)
+   ('rules:index', 1)
+   ('rules:kb-rules:', 1)
+   ('rules:kb-rules:add-aliases-tool', 1)
+   ('rules:kb-rules:add-snippet-tool', 1)
+   ('rules:kb-rules:detect-tags-tool', 1)
+   ('rules:kb-rules:get-db-state-tool', 1)
+   ('rules:kb-rules:list-categories-tool', 1)
+   ('rules:kb-rules:list-marked-snippets-tool', 1)
+   ('rules:kb-rules:load-bsl-tool', 1)
+   ('rules:kb-rules:load-doc-tool', 1)
+   ('rules:kb-rules:load-single-html-tool', 1)
+   ('rules:kb-rules:mark-snippet-for-deletion-tool', 1)
+   ('rules:kb-rules:unmark-snippet-for-deletion-tool', 1)
+   ('rules:kb-rules:update-snippet-tool', 1)
+   ('rules:reserved:layer-migration', 1)
+======================================================================
+tags_of_layer_cards
+   ('rules:core-rules:', ['1c-rules-root', 'rules', 'rules-layer', 'tree-node', '1c-configurations-core'], None, True, 1.0)
+   ('rules:enrich-rules:', ['1c-rules-root', 'rules', 'rules-layer', 'tree-node', '1c-configurations-enrichment'], None, True, 1.0)
+   ('rules:export-rules:', ['1c-rules-root', 'rules', 'rules-layer', 'tree-node', '1c-configurations-export'], None, True, 1.0)

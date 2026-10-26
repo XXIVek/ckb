@@ -21,6 +21,13 @@ answer — текст до следующего `##`. Разбор и прави
 этого переезд адреса рвал ссылки из индекса и из прежних разговоров; алиас при этом ровно
 один на переименование, шум из слов адреса по-прежнему не заводится.
 
+Ручные алиасы карточки мигратор берёт из раздела `===ALIASES===` исходника и пишет их операцией
+`add_aliases` (та же, что доступна оператору как `add_aliases_tool`; идемпотентна на уровне БД).
+Алиасы объявлены в исходнике, а не заводятся руками в базе, по той же причине, по которой там же
+объявлены тексты правил: строку правила правит и пересоздаёт мигратор, а алиас, существующий
+только в БД, не виден в диффе git и пропадает вместе со строкой — правило начинает искаться по
+слову, которого нет ни в одном исходнике.
+
 Удалений мигратор не делает: карточка, пропавшая из исходника, печатается как «в БД есть, в
 исходнике нет» и остаётся до осознанного решения (снимается `mark_snippet_for_deletion_tool`,
 узел Q1). Молча снять правило — значит потерять его так же, как молча не записать.
@@ -81,8 +88,9 @@ def insert_card(cur, card):
     Причина не в удобстве: `add_snippet` при groups_id IS NULL генерирует алиасы из вопроса,
     а слой адресуется заголовком (шаг заголовков, `TITLE_LAYER_MARKERS`). Алиасы от адреса
     вида `export-rules:workflow:cycle` дали бы в точном алиасном шаге шум по словам `export`,
-    `rules`, `workflow`, `cycle` — тот дефект, из-за которого алиасы слоя намеренно не
-    заводятся (решение оператора 24.10.2026).
+    `rules`, `workflow`, `cycle` — тот дефект, из-за которого алиасы из адреса не выводятся.
+    Ручные алиасы карточки (раздел `===ALIASES===`) пишутся отдельно, `sync_aliases`, и только
+    те, что объявлены оператором в исходнике.
     """
     cur.execute(
         "INSERT INTO knowledge_snippets (groups_id, question, answer, source_url, tags, "
@@ -93,6 +101,31 @@ def insert_card(cur, card):
     return row["id"] if row else None
 
 
+def sync_aliases(card, snippet_id):
+    """Ручные алиасы карточки, объявленные исходником (`===ALIASES===`).
+
+    Пишет `add_aliases` — та же операция, которой оператор добавляет алиасы через
+    `add_aliases_tool`, и та же идемпотентность (ON CONFLICT DO NOTHING): повторный прогон
+    мигратора не размножает алиасы. Алиасы пишутся и для карточек «без изменений»: алиас
+    дописывают в исходник тогда, когда текст правила уже правильный, и пропуск такой карточки
+    означал бы «алиас объявлен, но не работает».
+
+    Возвращает (объявлено, добавлено, ошибка). Молча не записать алиас нельзя: правило, которое
+    ищут по слову, которого в базе нет, не находится — это тот же дефект, что карточка, не
+    названная в индексе.
+    """
+    declared = RL.aliases_of(card["answer"])
+    if not declared:
+        return 0, 0, None
+    if not snippet_id:
+        return len(declared), 0, "id строки не получен — алиасы писать некуда"
+    from mcp_tools_api import add_aliases  # noqa: E402  (после sys.path, общий контракт алиасов)
+    res = add_aliases(declared, snippets_id=snippet_id)
+    if not res.get("success"):
+        return len(declared), 0, res.get("error") or "алиасы не записаны"
+    return len(declared), int(res.get("added") or 0), None
+
+
 def apply_cards(cur, cards, existing, renames):
     """Одна карточка = одно действие: вставка, правка той же строки или ничего.
 
@@ -100,10 +133,15 @@ def apply_cards(cur, cards, existing, renames):
     строка со старым, правится ОНА: адрес — это имя той же записи, а не новое знание. Старый
     адрес после этого остаётся алиасом (`update_snippet` дополняет алиасы аддитивно и никогда
     их не удаляет), поэтому прежняя ссылка продолжает находиться.
+
+    Ручные алиасы исходника (`===ALIASES===`) дописываются к строке на любой ветке, включая
+    «без изменений»: идемпотентность у `add_aliases` на уровне БД, а пропуск ветки означал бы
+    объявленный и незаписанный алиас.
     """
     from mcp_tools_api import update_snippet
 
     added = updated = unchanged = renamed = 0
+    alias_cards = alias_rows = 0
     failed = []
     for card in cards:
         old = existing.get(card["source_url"])
@@ -113,13 +151,27 @@ def apply_cards(cur, cards, existing, renames):
             if old:
                 renamed += 1
         if not old:
-            if insert_card(cur, card):
+            new_id = insert_card(cur, card)
+            if new_id:
                 added += 1
             else:
                 failed.append(f"вставка {card['address']}: id не получен")
+                continue
+            declared, wrote, err = sync_aliases(card, new_id)
+            if err:
+                failed.append(f"{card['address']}: алиасы не записаны: {err}")
+            if declared:
+                alias_cards += 1
+                alias_rows += wrote
             continue
         if old["question"] == card["address"] and old["answer"] == card["answer"] and not old_address:
             unchanged += 1
+            declared, wrote, err = sync_aliases(card, old["id"])
+            if err:
+                failed.append(f"{card['address']}: алиасы не записаны: {err}")
+            if declared:
+                alias_cards += 1
+                alias_rows += wrote
             continue
         res = update_snippet(
             old["id"], new_question=card["address"], new_answer=card["answer"],
@@ -129,18 +181,38 @@ def apply_cards(cur, cards, existing, renames):
         )
         if res.get("success"):
             updated += 1
+            declared, wrote, err = sync_aliases(card, old["id"])
+            if err:
+                failed.append(f"{card['address']}: алиасы не записаны: {err}")
+            if declared:
+                alias_cards += 1
+                alias_rows += wrote
         else:
             failed.append(f"id={old['id']} {card['address']}: {res.get('error') or 'строки нет'}")
-    return added, updated, unchanged, renamed, failed
+    return added, updated, unchanged, renamed, alias_cards, alias_rows, failed
 
 
 # ------------------------------------------------------------------ разбор
 
 def collect_targets(args):
-    """Файлы-исходники, которые обрабатываем. --all берёт всё из docs/rules: добавить слой —
-    это положить файл с именем-меткой, а не править список в скрипте."""
+    """Файлы-исходники, которые обрабатываем. --all берёт из docs/rules только файлы-слои.
+
+    Каталог `docs/rules` держит не только исходники слоёв: в него перенесены прежние нормативы
+    (`SEARCH_RULES.md`, `LOAD_RULES*.md`, `1c-*_Rule.md`) как архивы и входы планогенератора.
+    Имя файла слоя — это его метка (`marker_for_path`), и молча пытаться загрузить архив как слой
+    значит получить отказ разбора вместо работы; молча пропустить без объявления — значит
+    потерять слой, опечатку в имени которого никто не заметил. Поэтому: берём метки, а пропущенные
+    называем списком.
+    """
     if args.all:
-        return sorted((PROJECT_ROOT / RL.RULES_DIR).glob("*.md"))
+        directory = PROJECT_ROOT / RL.RULES_DIR
+        found = sorted(directory.glob("*.md")) if directory.exists() else []
+        chosen = [p for p in found if RL.marker_for_path(p)]
+        skipped = [p.name for p in found if not RL.marker_for_path(p)]
+        if skipped:
+            print(f"файлы каталога {RL.RULES_DIR}, не являющиеся исходниками слоёв "
+                  f"(имя != метка), пропущены: {', '.join(skipped)}")
+        return chosen
     return [Path(f) for f in (args.file or [])]
 
 
@@ -175,8 +247,13 @@ def report(marker, cards):
     порогов. Максимумы печатаются, а не только сами пороги: «адрес короткий» без замера —
     это утверждение, а не факт."""
     print(f"\n[{marker}] карточек: {len(cards)}")
+    aliased = 0
     for card in sorted(cards, key=lambda c: c["address"]):
-        print(f"  {card['address']:<{RL.MAX_TITLE_DISPLAY_CHARS}} answer {len(card['answer']):>5}")
+        declared = RL.aliases_of(card["answer"])
+        aliased += 1 if declared else 0
+        print(f"  {card['address']:<{RL.MAX_TITLE_DISPLAY_CHARS}} answer {len(card['answer']):>5}"
+              + (f"  алиасы {len(declared)}: {', '.join(declared)}" if declared else ""))
+    print(f"  карточек с ручными алиасами: {aliased}")
     longest_t = max((len(c["address"]) for c in cards), default=0)
     longest_a = max((len(c["answer"]) for c in cards), default=0)
     print(f"  пороги: адрес <= {RL.MAX_TITLE_DISPLAY_CHARS} (максимум {longest_t}); "
@@ -233,7 +310,8 @@ def main(argv=None):
 
     from database import get_cursor, seed_categories  # noqa: E402  (после sys.path)
 
-    totals = {"added": 0, "updated": 0, "unchanged": 0, "renamed": 0}
+    totals = {"added": 0, "updated": 0, "unchanged": 0, "renamed": 0,
+              "alias_cards": 0, "alias_rows": 0}
     failed = []
     with get_cursor() as cur:
         cat_added, cat_present = seed_categories(cur)
@@ -242,10 +320,11 @@ def main(argv=None):
             category = cards[0]["category"]
             existing = existing_layer_rows(cur, category)
             print(f"\n[{category}] карточек слоя в БД до: {len(existing)}")
-            added, updated, unchanged, renamed, layer_failed = apply_cards(
-                cur, cards, existing, renames)
+            (added, updated, unchanged, renamed, alias_cards, alias_rows,
+             layer_failed) = apply_cards(cur, cards, existing, renames)
             for key, value in (("added", added), ("updated", updated),
-                               ("unchanged", unchanged), ("renamed", renamed)):
+                               ("unchanged", unchanged), ("renamed", renamed),
+                               ("alias_cards", alias_cards), ("alias_rows", alias_rows)):
                 totals[key] += value
             failed += layer_failed
             stale = sorted(set(existing) - {c["source_url"] for c in cards})
@@ -253,10 +332,12 @@ def main(argv=None):
                 print(f"  ⚠️ в БД есть, в исходнике нет: id={existing[url]['id']} "
                       f"{existing[url]['question']} (не удаляем — решение снимает оператор)")
             print(f"  добавлено {added}, обновлено {updated}, без изменений {unchanged}, "
-                  f"переименовано {renamed}, стрых {len(stale)}")
+                  f"переименовано {renamed}, стрых {len(stale)}; алиасов объявлено на "
+                  f"{alias_cards} карточках, новых строк {alias_rows}")
 
     print(f"\nитог: добавлено {totals['added']}, обновлено {totals['updated']}, "
-          f"без изменений {totals['unchanged']}, переименовано {totals['renamed']}")
+          f"без изменений {totals['unchanged']}, переименовано {totals['renamed']}; "
+          f"алиасы на {totals['alias_cards']} карточках, новых строк {totals['alias_rows']}")
     if failed:
         print("ОШИБКИ ЗАПИСИ:")
         for f in failed:

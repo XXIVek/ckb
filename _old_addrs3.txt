@@ -1,0 +1,106 @@
+=== core-rules: 79
+   5957   1092 core-rules/п-1             core-rules: п. 1
+   5971   1612 core-rules/п-10            core-rules: п. 10
+   5972   1529 core-rules/п-11            core-rules: п. 11
+   5973   1084 core-rules/п-12            core-rules: п. 12
+   5974   2669 core-rules/п-13            core-rules: п. 13
+   5966   3491 core-rules/п-14            core-rules: п. 14
+   5967   3502 core-rules/п-15            core-rules: п. 15
+   5968   6801 core-rules/п-16            core-rules: п. 16
+   5969   2991 core-rules/п-17            core-rules: п. 17
+   5970   2500 core-rules/п-18            core-rules: п. 18
+   5975   6071 core-rules/п-19            core-rules: п. 19
+   5958    242 core-rules/п-2             core-rules: п. 2
+   5976   5684 core-rules/п-20            core-rules: п. 20
+   5977   5000 core-rules/п-21            core-rules: п. 21
+   5978   7522 core-rules/п-22-ч-1        core-rules: п. 22 ч. 1
+   5979   2207 core-rules/п-22-ч-2        core-rules: п. 22 ч. 2
+   5980   7473 core-rules/п-23-ч-1        core-rules: п. 23 ч. 1
+   5981   2554 core-rules/п-23-ч-2        core-rules: п. 23 ч. 2
+   5959    241 core-rules/п-3             core-rules: п. 3
+   5952   1256 core-rules/п-30-дополнение-21-10-2026 core-rules: п. 30 (дополнение 21.10.2026)
+   5988   7155 core-rules/п-30-ч-1        core-rules: п. 30 ч. 1
+   5989   2689 core-rules/п-30-ч-2        core-rules: п. 30 ч. 2
+   5993   4326 core-rules/п-32            core-rules: п. 32
+   5960    813 core-rules/п-4             core-rules: п. 4
+   5961   6702 core-rules/п-5             core-rules: п. 5
+   5962   2400 core-rules/п-6             core-rules: п. 6
+   5963    824 core-rules/п-7             core-rules: п. 7
+   5964   1415 core-rules/п-8             core-rules: п. 8
+   5965   3290 core-rules/п-9             core-rules: п. 9
+   5956    877 core-rules/узел-v19-дополнение-18-10-2026 core-rules: узел V19 (дополнение 18.10.2026)
+   5982   4026 core-rules/узел-v31        core-rules: узел V31
+   5983   3114 core-rules/узел-v32        core-rules: узел V32
+   5984   4281 core-rules/узел-v33        core-rules: узел V33
+   5985   6147 core-rules/узел-v38        core-rules: узел V38
+   5955    589 core-rules/узел-v38-дополнение-19-10-2026 core-rules: узел V38 (дополнение 19.10.2026)
+   5986   6297 core-rules/узел-v39        core-rules: узел V39
+   5954   1225 core-rules/узел-v39-дополнение-21-10-2026 core-rules: узел V39 (дополнение 21.10.2026)
+   5987   5354 core-rules/узел-v40        core-rules: узел V40
+   5953   1897 core-rules/узел-v40-дополнение-21-10-2026 core-rules: узел V40 (дополнение 21.10.2026)
+   5951   2183 core-rules/узел-v42-дополнение-21-10-2026 core-rules: узел V42 (дополнение 21.10.2026)
+   5950   1729 core-rules/узел-v42-дополнение-22-10-2026 core-rules: узел V42 (дополнение 22.10.2026)
+   5990    856 core-rules/узел-v42-ч-1    core-rules: узел V42 ч. 1
+   5991   7495 core-rules/узел-v42-ч-2    core-rules: узел V42 ч. 2
+   5992   3194 core-rules/узел-v42-ч-3    core-rules: узел V42 ч. 3
+   5949   3068 core-rules/узел-v43-дополнение-22-10-2026 core-rules: узел V43 (дополнение 22.10.2026)
+   5994   7227 core-rules/узел-v43-ч-1    core-rules: узел V43 ч. 1
+   5995    767 core-rules/узел-v43-ч-2    core-rules: узел V43 ч. 2
+   6004   5032 rules-layer://core-rules:index core-rules:index
+   6005    260 rules-layer://core-rules:ref:01 core-rules:ref:01
+   6006   4364 rules-layer://core-rules:ref:02 core-rules:ref:02
+   6007   6441 rules-layer://core-rules:ref:02:2 core-rules:ref:02:2
+   6008   4524 rules-layer://core-rules:ref:03 core-rules:ref:03
+   6009   4937 rules-layer://core-rules:ref:03:2 core-rules:ref:03:2
+   6010   4363 rules-layer://core-rules:ref:03:3 core-rules:ref:03:3
+   6011   5326 rules-layer://core-rules:ref:03:4 core-rules:ref:03:4
+   6012   3613 rules-layer://core-rules:ref:03:5 core-rules:ref:03:5
+   6013   5493 rules-layer://core-rules:ref:04 core-rules:ref:04
+   6014   3294 rules-layer://core-rules:ref:04:2 core-rules:ref:04:2
+   6015   4462 rules-layer://core-rules:ref:04:3 core-rules:ref:04:3
+   6016   3682 rules-layer://core-rules:ref:05 core-rules:ref:05
+   6017   5693 rules-layer://core-rules:ref:05:2 core-rules:ref:05:2
+   6018   3783 rules-layer://core-rules:ref:05:3 core-rules:ref:05:3
+   6019   6049 rules-layer://core-rules:ref:06 core-rules:ref:06
+   6020   2554 rules-layer://core-rules:ref:06:2 core-rules:ref:06:2
+   6021   4010 rules-layer://core-rules:ref:06:3 core-rules:ref:06:3
+   6022   5831 rules-layer://core-rules:ref:07 core-rules:ref:07
+   6023   1663 rules-layer://core-rules:ref:08 core-rules:ref:08
+   6024    700 rules-layer://core-rules:ref:09 core-rules:ref:09
+   6025   6286 rules-layer://core-rules:ref:10 core-rules:ref:10
+   6026   1623 rules-layer://core-rules:ref:11 core-rules:ref:11
+   6027   1321 rules-layer://core-rules:ref:12 core-rules:ref:12
+   6028   2466 rules-layer://core-rules:ref:13 core-rules:ref:13
+   6029   3988 rules-layer://core-rules:ref:14 core-rules:ref:14
+   6030   4099 rules-layer://core-rules:ref:15 core-rules:ref:15
+   6031   4950 rules-layer://core-rules:ref:16 core-rules:ref:16
+   6032   1205 rules-layer://core-rules:ref:17 core-rules:ref:17
+   6033   1067 rules-layer://core-rules:ref:18 core-rules:ref:18
+   6034   1984 rules-layer://core-rules:ref:19 core-rules:ref:19
+   6035   1660 rules-layer://core-rules:ref:20 core-rules:ref:20
+=== enrich-rules: 16
+   6064   2619 rules-layer://enrich-rules:index enrich-rules:index
+   6065    772 rules-layer://enrich-rules:ref:01 enrich-rules:ref:01
+   6066   2521 rules-layer://enrich-rules:ref:02 enrich-rules:ref:02
+   6067   1190 rules-layer://enrich-rules:ref:03 enrich-rules:ref:03
+   6068   6891 rules-layer://enrich-rules:ref:04 enrich-rules:ref:04
+   6069   2094 rules-layer://enrich-rules:ref:05 enrich-rules:ref:05
+   6070   5338 rules-layer://enrich-rules:ref:06 enrich-rules:ref:06
+   6071   3905 rules-layer://enrich-rules:ref:06:2 enrich-rules:ref:06:2
+   6072   5687 rules-layer://enrich-rules:ref:07 enrich-rules:ref:07
+   6073   4339 rules-layer://enrich-rules:ref:08 enrich-rules:ref:08
+   6074   5438 rules-layer://enrich-rules:ref:08:2 enrich-rules:ref:08:2
+   6075   1199 rules-layer://enrich-rules:ref:08:3 enrich-rules:ref:08:3
+   6076   2320 rules-layer://enrich-rules:ref:09 enrich-rules:ref:09
+   6077   5760 rules-layer://enrich-rules:ref:10 enrich-rules:ref:10
+   6078   3088 rules-layer://enrich-rules:ref:10:2 enrich-rules:ref:10:2
+   6079   2644 rules-layer://enrich-rules:ref:11 enrich-rules:ref:11
+=== export-rules: 8
+   6002    814 rules-layer://export-rules:checks export-rules:checks
+   5998   1643 rules-layer://export-rules:contract export-rules:contract
+   6003   1389 rules-layer://export-rules:edit export-rules:edit
+   5996   1456 rules-layer://export-rules:index export-rules:index
+   6000   1291 rules-layer://export-rules:needs export-rules:needs
+   5999   1721 rules-layer://export-rules:removed export-rules:removed
+   5997   1630 rules-layer://export-rules:status export-rules:status
+   6001   1846 rules-layer://export-rules:workflow export-rules:workflow

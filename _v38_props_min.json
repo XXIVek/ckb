@@ -1,0 +1,2310 @@
+{
+ "fixture": "C:\\1C_LLM\\LoadDoc\\Configurations\\XML_files\\MinCfg",
+ "sampled_per_kind": null,
+ "files_parsed": 55,
+ "parse_errors": [],
+ "parse_errors_total": 0,
+ "kinds_total": 46,
+ "kinds_parsed": 46,
+ "counts": {
+  "distinct_property_names": 204,
+  "common_properties": 3,
+  "child_element_tags": 10,
+  "child_uuid_values": 84,
+  "child_uuid_collisions": 0,
+  "meta_uuid_duplicates": 0
+ },
+ "common_properties": [
+  "Comment",
+  "Name",
+  "Synonym"
+ ],
+ "single_kind_properties": {
+  "AccountingRegisters": [
+   "ChartOfAccounts",
+   "Correspondence",
+   "PeriodAdjustmentLength"
+  ],
+  "AccumulationRegisters": [
+   "RegisterType"
+  ],
+  "BusinessProcesses": [
+   "CreateTaskInPrivilegedMode",
+   "Task"
+  ],
+  "CalculationRegisters": [
+   "ActionPeriod",
+   "BasePeriod",
+   "ChartOfCalculationTypes",
+   "Periodicity",
+   "Schedule",
+   "ScheduleDate",
+   "ScheduleValue"
+  ],
+  "Catalogs": [
+   "HierarchyType",
+   "LevelCount",
+   "LimitLevelCount",
+   "Owners",
+   "SubordinationUse"
+  ],
+  "ChartsOfAccounts": [
+   "AutoOrderByCode",
+   "CodeMask",
+   "ExtDimensionTypes",
+   "MaxExtDimensionCount",
+   "OrderLength"
+  ],
+  "ChartsOfCalculationTypes": [
+   "ActionPeriodUse",
+   "BaseCalculationTypes",
+   "DependenceOnCalculationTypes"
+  ],
+  "ChartsOfCharacteristicTypes": [
+   "CharacteristicExtValues"
+  ],
+  "CommandGroups": [
+   "Category"
+  ],
+  "CommonAttributes": [
+   "AuthenticationSeparation",
+   "AutoUse",
+   "ConditionalSeparation",
+   "ConfigurationExtensionsSeparation",
+   "DataSeparation",
+   "DataSeparationUse",
+   "DataSeparationValue",
+   "FillFromFillingValue",
+   "FillValue",
+   "Indexing",
+   "SeparatedDataUse",
+   "UsersSeparation"
+  ],
+  "CommonCommands": [
+   "CommandParameterType",
+   "Group",
+   "ModifiesData",
+   "OnMainServerUnavalableBehavior",
+   "ParameterUseMode",
+   "Shortcut"
+  ],
+  "CommonForms": [
+   "FormType",
+   "UsePurposes"
+  ],
+  "CommonModules": [
+   "ClientManagedApplication",
+   "ClientOrdinaryApplication",
+   "ExternalConnection",
+   "Global",
+   "Privileged",
+   "ReturnValuesReuse",
+   "Server",
+   "ServerCall"
+  ],
+  "CommonPictures": [
+   "AvailabilityForAppearance",
+   "AvailabilityForChoice"
+  ],
+  "CommonTemplates": [
+   "TemplateType"
+  ],
+  "DocumentJournals": [
+   "RegisteredDocuments"
+  ],
+  "Documents": [
+   "Numerator",
+   "PostInPrivilegedMode",
+   "Posting",
+   "RealTimePosting",
+   "RegisterRecords",
+   "RegisterRecordsDeletion",
+   "RegisterRecordsWritingOnPost",
+   "SequenceFilling",
+   "UnpostInPrivilegedMode"
+  ],
+  "EventSubscriptions": [
+   "Event",
+   "Handler",
+   "Source"
+  ],
+  "ExchangePlans": [
+   "DistributedInfoBase",
+   "IncludeConfigurationExtensions",
+   "StandardAttributes"
+  ],
+  "FunctionalOptions": [
+   "Location",
+   "PrivilegedGetMode"
+  ],
+  "HTTPServices": [
+   "RootURL"
+  ],
+  "InformationRegisters": [
+   "AuxiliaryRecordForm",
+   "DefaultRecordForm",
+   "EnableTotalsSliceFirst",
+   "EnableTotalsSliceLast",
+   "ExtendedRecordPresentation",
+   "InformationRegisterPeriodicity",
+   "MainFilterOnPeriod",
+   "RecordPresentation",
+   "WriteMode"
+  ],
+  "IntegrationServices": [
+   "ExternalIntegrationServiceAddress"
+  ],
+  "Interfaces": [
+   "Switchable"
+  ],
+  "Languages": [
+   "LanguageCode"
+  ],
+  "Reports": [
+   "AuxiliarySettingsForm",
+   "DefaultSettingsForm",
+   "DefaultVariantForm",
+   "MainDataCompositionSchema",
+   "SettingsStorage",
+   "VariantsStorage"
+  ],
+  "ScheduledJobs": [
+   "Description",
+   "Key",
+   "MethodName",
+   "RestartCountOnFailure",
+   "RestartIntervalOnFailure"
+  ],
+  "SettingsStorages": [
+   "AuxiliaryLoadForm",
+   "AuxiliarySaveForm",
+   "DefaultLoadForm",
+   "DefaultSaveForm"
+  ],
+  "StyleItems": [
+   "Value"
+  ],
+  "Subsystems": [
+   "IncludeInCommandInterface",
+   "UseOneCommand"
+  ],
+  "Tasks": [
+   "Addressing",
+   "CurrentPerformer",
+   "MainAddressingAttribute",
+   "TaskNumberAutoPrefix"
+  ],
+  "WebServices": [
+   "DescriptorFileName",
+   "XDTOPackages"
+  ],
+  "WebSocketClients": [
+   "AutoConnect",
+   "Headers",
+   "Password",
+   "ServerURL",
+   "Timeout",
+   "UseOSAuthentication",
+   "UseOSProxy",
+   "User"
+  ],
+  "WSReferences": [
+   "LocationURL"
+  ]
+ },
+ "kinds": {
+  "AccountingRegisters": {
+   "objects": 1,
+   "kind_tags": {
+    "AccountingRegister": 1
+   },
+   "props_total": 16,
+   "props_not_common": [
+    "AuxiliaryListForm",
+    "ChartOfAccounts",
+    "Correspondence",
+    "DataLockControlMode",
+    "DefaultListForm",
+    "EnableTotalsSplitting",
+    "Explanation",
+    "ExtendedListPresentation",
+    "FullTextSearch",
+    "IncludeHelpInContents",
+    "ListPresentation",
+    "PeriodAdjustmentLength",
+    "UseStandardCommands"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "UseStandardCommands": 1,
+    "IncludeHelpInContents": 1,
+    "Correspondence": 1,
+    "PeriodAdjustmentLength": 1,
+    "DataLockControlMode": 1,
+    "EnableTotalsSplitting": 1,
+    "FullTextSearch": 1
+   },
+   "filled_false": {
+    "Synonym": 1,
+    "Comment": 1,
+    "ChartOfAccounts": 1,
+    "DefaultListForm": 1,
+    "AuxiliaryListForm": 1,
+    "ListPresentation": 1,
+    "ExtendedListPresentation": 1,
+    "Explanation": 1
+   },
+   "child_tags": {
+    "Resource": 1
+   }
+  },
+  "AccumulationRegisters": {
+   "objects": 1,
+   "kind_tags": {
+    "AccumulationRegister": 1
+   },
+   "props_total": 14,
+   "props_not_common": [
+    "AuxiliaryListForm",
+    "DataLockControlMode",
+    "DefaultListForm",
+    "EnableTotalsSplitting",
+    "Explanation",
+    "ExtendedListPresentation",
+    "FullTextSearch",
+    "IncludeHelpInContents",
+    "ListPresentation",
+    "RegisterType",
+    "UseStandardCommands"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "UseStandardCommands": 1,
+    "RegisterType": 1,
+    "IncludeHelpInContents": 1,
+    "DataLockControlMode": 1,
+    "FullTextSearch": 1,
+    "EnableTotalsSplitting": 1
+   },
+   "filled_false": {
+    "Synonym": 1,
+    "Comment": 1,
+    "DefaultListForm": 1,
+    "AuxiliaryListForm": 1,
+    "ListPresentation": 1,
+    "ExtendedListPresentation": 1,
+    "Explanation": 1
+   },
+   "child_tags": {
+    "Resource": 1
+   }
+  },
+  "Bots": {
+   "objects": 1,
+   "kind_tags": {
+    "Bot": 1
+   },
+   "props_total": 5,
+   "props_not_common": [
+    "Picture",
+    "Predefined"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Predefined": 1
+   },
+   "filled_false": {
+    "Synonym": 1,
+    "Comment": 1,
+    "Picture": 1
+   },
+   "child_tags": {}
+  },
+  "BusinessProcesses": {
+   "objects": 1,
+   "kind_tags": {
+    "BusinessProcess": 1
+   },
+   "props_total": 39,
+   "props_not_common": [
+    "Autonumbering",
+    "AuxiliaryChoiceForm",
+    "AuxiliaryListForm",
+    "AuxiliaryObjectForm",
+    "BasedOn",
+    "Characteristics",
+    "CheckUnique",
+    "ChoiceDataGetModeOnInputByString",
+    "ChoiceHistoryOnInput",
+    "CreateOnInput",
+    "CreateTaskInPrivilegedMode",
+    "DataHistory",
+    "DataLockControlMode",
+    "DataLockFields",
+    "DefaultChoiceForm",
+    "DefaultListForm",
+    "DefaultObjectForm",
+    "EditType",
+    "ExecuteAfterWriteDataHistoryVersionProcessing",
+    "Explanation",
+    "ExtendedListPresentation",
+    "ExtendedObjectPresentation",
+    "FullTextSearch",
+    "FullTextSearchOnInputByString",
+    "IncludeHelpInContents",
+    "InputByString",
+    "ListPresentation",
+    "NumberAllowedLength",
+    "NumberLength",
+    "NumberPeriodicity",
+    "NumberType",
+    "ObjectPresentation",
+    "SearchStringModeOnInputByString",
+    "Task",
+    "UpdateDataHistoryImmediatelyAfterWrite",
+    "UseStandardCommands"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "UseStandardCommands": 1,
+    "EditType": 1,
+    "InputByString": 1,
+    "CreateOnInput": 1,
+    "SearchStringModeOnInputByString": 1,
+    "ChoiceDataGetModeOnInputByString": 1,
+    "FullTextSearchOnInputByString": 1,
+    "ChoiceHistoryOnInput": 1,
+    "NumberType": 1,
+    "NumberLength": 1,
+    "NumberAllowedLength": 1,
+    "CheckUnique": 1,
+    "Autonumbering": 1,
+    "NumberPeriodicity": 1,
+    "Task": 1,
+    "CreateTaskInPrivilegedMode": 1,
+    "DataLockControlMode": 1,
+    "IncludeHelpInContents": 1,
+    "FullTextSearch": 1,
+    "DataHistory": 1,
+    "UpdateDataHistoryImmediatelyAfterWrite": 1,
+    "ExecuteAfterWriteDataHistoryVersionProcessing": 1
+   },
+   "filled_false": {
+    "Synonym": 1,
+    "Comment": 1,
+    "DefaultObjectForm": 1,
+    "DefaultListForm": 1,
+    "DefaultChoiceForm": 1,
+    "AuxiliaryObjectForm": 1,
+    "AuxiliaryListForm": 1,
+    "AuxiliaryChoiceForm": 1,
+    "Characteristics": 1,
+    "BasedOn": 1,
+    "DataLockFields": 1,
+    "ObjectPresentation": 1,
+    "ExtendedObjectPresentation": 1,
+    "ListPresentation": 1,
+    "ExtendedListPresentation": 1,
+    "Explanation": 1
+   },
+   "child_tags": {}
+  },
+  "CalculationRegisters": {
+   "objects": 1,
+   "kind_tags": {
+    "CalculationRegister": 1
+   },
+   "props_total": 19,
+   "props_not_common": [
+    "ActionPeriod",
+    "AuxiliaryListForm",
+    "BasePeriod",
+    "ChartOfCalculationTypes",
+    "DataLockControlMode",
+    "DefaultListForm",
+    "Explanation",
+    "ExtendedListPresentation",
+    "FullTextSearch",
+    "IncludeHelpInContents",
+    "ListPresentation",
+    "Periodicity",
+    "Schedule",
+    "ScheduleDate",
+    "ScheduleValue",
+    "UseStandardCommands"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "UseStandardCommands": 1,
+    "Periodicity": 1,
+    "ActionPeriod": 1,
+    "BasePeriod": 1,
+    "ChartOfCalculationTypes": 1,
+    "IncludeHelpInContents": 1,
+    "DataLockControlMode": 1,
+    "FullTextSearch": 1
+   },
+   "filled_false": {
+    "Synonym": 1,
+    "Comment": 1,
+    "DefaultListForm": 1,
+    "AuxiliaryListForm": 1,
+    "Schedule": 1,
+    "ScheduleValue": 1,
+    "ScheduleDate": 1,
+    "ListPresentation": 1,
+    "ExtendedListPresentation": 1,
+    "Explanation": 1
+   },
+   "child_tags": {}
+  },
+  "Catalogs": {
+   "objects": 1,
+   "kind_tags": {
+    "Catalog": 1
+   },
+   "props_total": 53,
+   "props_not_common": [
+    "Autonumbering",
+    "AuxiliaryChoiceForm",
+    "AuxiliaryFolderChoiceForm",
+    "AuxiliaryFolderForm",
+    "AuxiliaryListForm",
+    "AuxiliaryObjectForm",
+    "BasedOn",
+    "Characteristics",
+    "CheckUnique",
+    "ChoiceDataGetModeOnInputByString",
+    "ChoiceHistoryOnInput",
+    "ChoiceMode",
+    "CodeAllowedLength",
+    "CodeLength",
+    "CodeSeries",
+    "CodeType",
+    "CreateOnInput",
+    "DataHistory",
+    "DataLockControlMode",
+    "DataLockFields",
+    "DefaultChoiceForm",
+    "DefaultFolderChoiceForm",
+    "DefaultFolderForm",
+    "DefaultListForm",
+    "DefaultObjectForm",
+    "DefaultPresentation",
+    "DescriptionLength",
+    "EditType",
+    "ExecuteAfterWriteDataHistoryVersionProcessing",
+    "Explanation",
+    "ExtendedListPresentation",
+    "ExtendedObjectPresentation",
+    "FoldersOnTop",
+    "FullTextSearch",
+    "FullTextSearchOnInputByString",
+    "Hierarchical",
+    "HierarchyType",
+    "IncludeHelpInContents",
+    "InputByString",
+    "LevelCount",
+    "LimitLevelCount",
+    "ListPresentation",
+    "ObjectPresentation",
+    "Owners",
+    "PredefinedDataUpdate",
+    "QuickChoice",
+    "SearchStringModeOnInputByString",
+    "SubordinationUse",
+    "UpdateDataHistoryImmediatelyAfterWrite",
+    "UseStandardCommands"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Synonym": 1,
+    "Hierarchical": 1,
+    "HierarchyType": 1,
+    "LimitLevelCount": 1,
+    "LevelCount": 1,
+    "FoldersOnTop": 1,
+    "UseStandardCommands": 1,
+    "SubordinationUse": 1,
+    "CodeLength": 1,
+    "DescriptionLength": 1,
+    "CodeType": 1,
+    "CodeAllowedLength": 1,
+    "CodeSeries": 1,
+    "CheckUnique": 1,
+    "Autonumbering": 1,
+    "DefaultPresentation": 1,
+    "PredefinedDataUpdate": 1,
+    "EditType": 1,
+    "QuickChoice": 1,
+    "ChoiceMode": 1,
+    "InputByString": 1,
+    "SearchStringModeOnInputByString": 1,
+    "FullTextSearchOnInputByString": 1,
+    "ChoiceDataGetModeOnInputByString": 1,
+    "IncludeHelpInContents": 1,
+    "DataLockControlMode": 1,
+    "FullTextSearch": 1,
+    "CreateOnInput": 1,
+    "ChoiceHistoryOnInput": 1,
+    "DataHistory": 1,
+    "UpdateDataHistoryImmediatelyAfterWrite": 1,
+    "ExecuteAfterWriteDataHistoryVersionProcessing": 1
+   },
+   "filled_false": {
+    "Comment": 1,
+    "Owners": 1,
+    "Characteristics": 1,
+    "DefaultObjectForm": 1,
+    "DefaultFolderForm": 1,
+    "DefaultListForm": 1,
+    "DefaultChoiceForm": 1,
+    "DefaultFolderChoiceForm": 1,
+    "AuxiliaryObjectForm": 1,
+    "AuxiliaryFolderForm": 1,
+    "AuxiliaryListForm": 1,
+    "AuxiliaryChoiceForm": 1,
+    "AuxiliaryFolderChoiceForm": 1,
+    "BasedOn": 1,
+    "DataLockFields": 1,
+    "ObjectPresentation": 1,
+    "ExtendedObjectPresentation": 1,
+    "ListPresentation": 1,
+    "ExtendedListPresentation": 1,
+    "Explanation": 1
+   },
+   "child_tags": {
+    "Attribute": 1
+   }
+  },
+  "ChartsOfAccounts": {
+   "objects": 1,
+   "kind_tags": {
+    "ChartOfAccounts": 1
+   },
+   "props_total": 44,
+   "props_not_common": [
+    "AutoOrderByCode",
+    "AuxiliaryChoiceForm",
+    "AuxiliaryListForm",
+    "AuxiliaryObjectForm",
+    "BasedOn",
+    "Characteristics",
+    "CheckUnique",
+    "ChoiceDataGetModeOnInputByString",
+    "ChoiceHistoryOnInput",
+    "ChoiceMode",
+    "CodeLength",
+    "CodeMask",
+    "CodeSeries",
+    "CreateOnInput",
+    "DataHistory",
+    "DataLockControlMode",
+    "DataLockFields",
+    "DefaultChoiceForm",
+    "DefaultListForm",
+    "DefaultObjectForm",
+    "DefaultPresentation",
+    "DescriptionLength",
+    "EditType",
+    "ExecuteAfterWriteDataHistoryVersionProcessing",
+    "Explanation",
+    "ExtDimensionTypes",
+    "ExtendedListPresentation",
+    "ExtendedObjectPresentation",
+    "FullTextSearch",
+    "FullTextSearchOnInputByString",
+    "IncludeHelpInContents",
+    "InputByString",
+    "ListPresentation",
+    "MaxExtDimensionCount",
+    "ObjectPresentation",
+    "OrderLength",
+    "PredefinedDataUpdate",
+    "QuickChoice",
+    "SearchStringModeOnInputByString",
+    "UpdateDataHistoryImmediatelyAfterWrite",
+    "UseStandardCommands"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "UseStandardCommands": 1,
+    "IncludeHelpInContents": 1,
+    "MaxExtDimensionCount": 1,
+    "CodeLength": 1,
+    "DescriptionLength": 1,
+    "CodeSeries": 1,
+    "CheckUnique": 1,
+    "DefaultPresentation": 1,
+    "PredefinedDataUpdate": 1,
+    "EditType": 1,
+    "QuickChoice": 1,
+    "ChoiceMode": 1,
+    "InputByString": 1,
+    "SearchStringModeOnInputByString": 1,
+    "FullTextSearchOnInputByString": 1,
+    "ChoiceDataGetModeOnInputByString": 1,
+    "CreateOnInput": 1,
+    "ChoiceHistoryOnInput": 1,
+    "AutoOrderByCode": 1,
+    "OrderLength": 1,
+    "DataLockControlMode": 1,
+    "FullTextSearch": 1,
+    "DataHistory": 1,
+    "UpdateDataHistoryImmediatelyAfterWrite": 1,
+    "ExecuteAfterWriteDataHistoryVersionProcessing": 1
+   },
+   "filled_false": {
+    "Synonym": 1,
+    "Comment": 1,
+    "BasedOn": 1,
+    "ExtDimensionTypes": 1,
+    "CodeMask": 1,
+    "Characteristics": 1,
+    "DefaultObjectForm": 1,
+    "DefaultListForm": 1,
+    "DefaultChoiceForm": 1,
+    "AuxiliaryObjectForm": 1,
+    "AuxiliaryListForm": 1,
+    "AuxiliaryChoiceForm": 1,
+    "DataLockFields": 1,
+    "ObjectPresentation": 1,
+    "ExtendedObjectPresentation": 1,
+    "ListPresentation": 1,
+    "ExtendedListPresentation": 1,
+    "Explanation": 1
+   },
+   "child_tags": {}
+  },
+  "ChartsOfCalculationTypes": {
+   "objects": 1,
+   "kind_tags": {
+    "ChartOfCalculationTypes": 1
+   },
+   "props_total": 42,
+   "props_not_common": [
+    "ActionPeriodUse",
+    "AuxiliaryChoiceForm",
+    "AuxiliaryListForm",
+    "AuxiliaryObjectForm",
+    "BaseCalculationTypes",
+    "BasedOn",
+    "Characteristics",
+    "ChoiceDataGetModeOnInputByString",
+    "ChoiceHistoryOnInput",
+    "ChoiceMode",
+    "CodeAllowedLength",
+    "CodeLength",
+    "CodeType",
+    "CreateOnInput",
+    "DataHistory",
+    "DataLockControlMode",
+    "DataLockFields",
+    "DefaultChoiceForm",
+    "DefaultListForm",
+    "DefaultObjectForm",
+    "DefaultPresentation",
+    "DependenceOnCalculationTypes",
+    "DescriptionLength",
+    "EditType",
+    "ExecuteAfterWriteDataHistoryVersionProcessing",
+    "Explanation",
+    "ExtendedListPresentation",
+    "ExtendedObjectPresentation",
+    "FullTextSearch",
+    "FullTextSearchOnInputByString",
+    "IncludeHelpInContents",
+    "InputByString",
+    "ListPresentation",
+    "ObjectPresentation",
+    "PredefinedDataUpdate",
+    "QuickChoice",
+    "SearchStringModeOnInputByString",
+    "UpdateDataHistoryImmediatelyAfterWrite",
+    "UseStandardCommands"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "UseStandardCommands": 1,
+    "CodeLength": 1,
+    "DescriptionLength": 1,
+    "CodeType": 1,
+    "CodeAllowedLength": 1,
+    "DefaultPresentation": 1,
+    "EditType": 1,
+    "QuickChoice": 1,
+    "ChoiceMode": 1,
+    "InputByString": 1,
+    "SearchStringModeOnInputByString": 1,
+    "FullTextSearchOnInputByString": 1,
+    "ChoiceDataGetModeOnInputByString": 1,
+    "CreateOnInput": 1,
+    "ChoiceHistoryOnInput": 1,
+    "DependenceOnCalculationTypes": 1,
+    "ActionPeriodUse": 1,
+    "PredefinedDataUpdate": 1,
+    "IncludeHelpInContents": 1,
+    "DataLockControlMode": 1,
+    "FullTextSearch": 1,
+    "DataHistory": 1,
+    "UpdateDataHistoryImmediatelyAfterWrite": 1,
+    "ExecuteAfterWriteDataHistoryVersionProcessing": 1
+   },
+   "filled_false": {
+    "Synonym": 1,
+    "Comment": 1,
+    "DefaultObjectForm": 1,
+    "DefaultListForm": 1,
+    "DefaultChoiceForm": 1,
+    "AuxiliaryObjectForm": 1,
+    "AuxiliaryListForm": 1,
+    "AuxiliaryChoiceForm": 1,
+    "BasedOn": 1,
+    "BaseCalculationTypes": 1,
+    "Characteristics": 1,
+    "DataLockFields": 1,
+    "ObjectPresentation": 1,
+    "ExtendedObjectPresentation": 1,
+    "ListPresentation": 1,
+    "ExtendedListPresentation": 1,
+    "Explanation": 1
+   },
+   "child_tags": {}
+  },
+  "ChartsOfCharacteristicTypes": {
+   "objects": 1,
+   "kind_tags": {
+    "ChartOfCharacteristicTypes": 1
+   },
+   "props_total": 49,
+   "props_not_common": [
+    "Autonumbering",
+    "AuxiliaryChoiceForm",
+    "AuxiliaryFolderChoiceForm",
+    "AuxiliaryFolderForm",
+    "AuxiliaryListForm",
+    "AuxiliaryObjectForm",
+    "BasedOn",
+    "CharacteristicExtValues",
+    "Characteristics",
+    "CheckUnique",
+    "ChoiceDataGetModeOnInputByString",
+    "ChoiceHistoryOnInput",
+    "ChoiceMode",
+    "CodeAllowedLength",
+    "CodeLength",
+    "CodeSeries",
+    "CreateOnInput",
+    "DataHistory",
+    "DataLockControlMode",
+    "DataLockFields",
+    "DefaultChoiceForm",
+    "DefaultFolderChoiceForm",
+    "DefaultFolderForm",
+    "DefaultListForm",
+    "DefaultObjectForm",
+    "DefaultPresentation",
+    "DescriptionLength",
+    "EditType",
+    "ExecuteAfterWriteDataHistoryVersionProcessing",
+    "Explanation",
+    "ExtendedListPresentation",
+    "ExtendedObjectPresentation",
+    "FoldersOnTop",
+    "FullTextSearch",
+    "FullTextSearchOnInputByString",
+    "Hierarchical",
+    "IncludeHelpInContents",
+    "InputByString",
+    "ListPresentation",
+    "ObjectPresentation",
+    "PredefinedDataUpdate",
+    "QuickChoice",
+    "SearchStringModeOnInputByString",
+    "Type",
+    "UpdateDataHistoryImmediatelyAfterWrite",
+    "UseStandardCommands"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "UseStandardCommands": 1,
+    "IncludeHelpInContents": 1,
+    "Type": 1,
+    "Hierarchical": 1,
+    "FoldersOnTop": 1,
+    "CodeLength": 1,
+    "CodeAllowedLength": 1,
+    "DescriptionLength": 1,
+    "CodeSeries": 1,
+    "CheckUnique": 1,
+    "Autonumbering": 1,
+    "DefaultPresentation": 1,
+    "PredefinedDataUpdate": 1,
+    "EditType": 1,
+    "QuickChoice": 1,
+    "ChoiceMode": 1,
+    "InputByString": 1,
+    "CreateOnInput": 1,
+    "SearchStringModeOnInputByString": 1,
+    "ChoiceDataGetModeOnInputByString": 1,
+    "FullTextSearchOnInputByString": 1,
+    "ChoiceHistoryOnInput": 1,
+    "DataLockControlMode": 1,
+    "FullTextSearch": 1,
+    "DataHistory": 1,
+    "UpdateDataHistoryImmediatelyAfterWrite": 1,
+    "ExecuteAfterWriteDataHistoryVersionProcessing": 1
+   },
+   "filled_false": {
+    "Synonym": 1,
+    "Comment": 1,
+    "CharacteristicExtValues": 1,
+    "Characteristics": 1,
+    "DefaultObjectForm": 1,
+    "DefaultFolderForm": 1,
+    "DefaultListForm": 1,
+    "DefaultChoiceForm": 1,
+    "DefaultFolderChoiceForm": 1,
+    "AuxiliaryObjectForm": 1,
+    "AuxiliaryFolderForm": 1,
+    "AuxiliaryListForm": 1,
+    "AuxiliaryChoiceForm": 1,
+    "AuxiliaryFolderChoiceForm": 1,
+    "BasedOn": 1,
+    "DataLockFields": 1,
+    "ObjectPresentation": 1,
+    "ExtendedObjectPresentation": 1,
+    "ListPresentation": 1,
+    "ExtendedListPresentation": 1,
+    "Explanation": 1
+   },
+   "child_tags": {}
+  },
+  "CommandGroups": {
+   "objects": 1,
+   "kind_tags": {
+    "CommandGroup": 1
+   },
+   "props_total": 7,
+   "props_not_common": [
+    "Category",
+    "Picture",
+    "Representation",
+    "ToolTip"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Representation": 1,
+    "Category": 1
+   },
+   "filled_false": {
+    "Synonym": 1,
+    "Comment": 1,
+    "ToolTip": 1,
+    "Picture": 1
+   },
+   "child_tags": {}
+  },
+  "CommonAttributes": {
+   "objects": 1,
+   "kind_tags": {
+    "CommonAttribute": 1
+   },
+   "props_total": 38,
+   "props_not_common": [
+    "AuthenticationSeparation",
+    "AutoUse",
+    "ChoiceFoldersAndItems",
+    "ChoiceForm",
+    "ChoiceHistoryOnInput",
+    "ChoiceParameterLinks",
+    "ChoiceParameters",
+    "ConditionalSeparation",
+    "ConfigurationExtensionsSeparation",
+    "Content",
+    "CreateOnInput",
+    "DataHistory",
+    "DataSeparation",
+    "DataSeparationUse",
+    "DataSeparationValue",
+    "EditFormat",
+    "ExtendedEdit",
+    "FillChecking",
+    "FillFromFillingValue",
+    "FillValue",
+    "Format",
+    "FullTextSearch",
+    "Indexing",
+    "LinkByType",
+    "MarkNegatives",
+    "Mask",
+    "MaxValue",
+    "MinValue",
+    "MultiLine",
+    "PasswordMode",
+    "QuickChoice",
+    "SeparatedDataUse",
+    "ToolTip",
+    "Type",
+    "UsersSeparation"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Type": 1,
+    "PasswordMode": 1,
+    "MarkNegatives": 1,
+    "MultiLine": 1,
+    "ExtendedEdit": 1,
+    "FillFromFillingValue": 1,
+    "FillChecking": 1,
+    "ChoiceFoldersAndItems": 1,
+    "QuickChoice": 1,
+    "CreateOnInput": 1,
+    "ChoiceHistoryOnInput": 1,
+    "AutoUse": 1,
+    "DataSeparation": 1,
+    "SeparatedDataUse": 1,
+    "UsersSeparation": 1,
+    "AuthenticationSeparation": 1,
+    "ConfigurationExtensionsSeparation": 1,
+    "Indexing": 1,
+    "FullTextSearch": 1,
+    "DataHistory": 1
+   },
+   "filled_false": {
+    "Synonym": 1,
+    "Comment": 1,
+    "Format": 1,
+    "EditFormat": 1,
+    "ToolTip": 1,
+    "Mask": 1,
+    "MinValue": 1,
+    "MaxValue": 1,
+    "FillValue": 1,
+    "ChoiceParameterLinks": 1,
+    "ChoiceParameters": 1,
+    "ChoiceForm": 1,
+    "LinkByType": 1,
+    "Content": 1,
+    "DataSeparationValue": 1,
+    "DataSeparationUse": 1,
+    "ConditionalSeparation": 1
+   },
+   "child_tags": {}
+  },
+  "CommonCommands": {
+   "objects": 1,
+   "kind_tags": {
+    "CommonCommand": 1
+   },
+   "props_total": 13,
+   "props_not_common": [
+    "CommandParameterType",
+    "Group",
+    "IncludeHelpInContents",
+    "ModifiesData",
+    "OnMainServerUnavalableBehavior",
+    "ParameterUseMode",
+    "Picture",
+    "Representation",
+    "Shortcut",
+    "ToolTip"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Group": 1,
+    "Representation": 1,
+    "IncludeHelpInContents": 1,
+    "ParameterUseMode": 1,
+    "ModifiesData": 1,
+    "OnMainServerUnavalableBehavior": 1
+   },
+   "filled_false": {
+    "Synonym": 1,
+    "Comment": 1,
+    "ToolTip": 1,
+    "Picture": 1,
+    "Shortcut": 1,
+    "CommandParameterType": 1
+   },
+   "child_tags": {}
+  },
+  "CommonForms": {
+   "objects": 9,
+   "kind_tags": {
+    "CommonForm": 9
+   },
+   "props_total": 9,
+   "props_not_common": [
+    "Explanation",
+    "ExtendedPresentation",
+    "FormType",
+    "IncludeHelpInContents",
+    "UsePurposes",
+    "UseStandardCommands"
+   ],
+   "filled_true": {
+    "Name": 9,
+    "Synonym": 9,
+    "FormType": 9,
+    "IncludeHelpInContents": 9,
+    "UsePurposes": 9,
+    "UseStandardCommands": 9
+   },
+   "filled_false": {
+    "Comment": 9,
+    "ExtendedPresentation": 9,
+    "Explanation": 9
+   },
+   "child_tags": {}
+  },
+  "CommonModules": {
+   "objects": 1,
+   "kind_tags": {
+    "CommonModule": 1
+   },
+   "props_total": 11,
+   "props_not_common": [
+    "ClientManagedApplication",
+    "ClientOrdinaryApplication",
+    "ExternalConnection",
+    "Global",
+    "Privileged",
+    "ReturnValuesReuse",
+    "Server",
+    "ServerCall"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Synonym": 1,
+    "Global": 1,
+    "ClientManagedApplication": 1,
+    "Server": 1,
+    "ExternalConnection": 1,
+    "ClientOrdinaryApplication": 1,
+    "ServerCall": 1,
+    "Privileged": 1,
+    "ReturnValuesReuse": 1
+   },
+   "filled_false": {
+    "Comment": 1
+   },
+   "child_tags": {}
+  },
+  "CommonPictures": {
+   "objects": 1,
+   "kind_tags": {
+    "CommonPicture": 1
+   },
+   "props_total": 5,
+   "props_not_common": [
+    "AvailabilityForAppearance",
+    "AvailabilityForChoice"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "AvailabilityForChoice": 1,
+    "AvailabilityForAppearance": 1
+   },
+   "filled_false": {
+    "Synonym": 1,
+    "Comment": 1
+   },
+   "child_tags": {}
+  },
+  "CommonTemplates": {
+   "objects": 1,
+   "kind_tags": {
+    "CommonTemplate": 1
+   },
+   "props_total": 4,
+   "props_not_common": [
+    "TemplateType"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Synonym": 1,
+    "TemplateType": 1
+   },
+   "filled_false": {
+    "Comment": 1
+   },
+   "child_tags": {}
+  },
+  "Constants": {
+   "objects": 2,
+   "kind_tags": {
+    "Constant": 2
+   },
+   "props_total": 30,
+   "props_not_common": [
+    "ChoiceFoldersAndItems",
+    "ChoiceForm",
+    "ChoiceHistoryOnInput",
+    "ChoiceParameterLinks",
+    "ChoiceParameters",
+    "DataHistory",
+    "DataLockControlMode",
+    "DefaultForm",
+    "EditFormat",
+    "ExecuteAfterWriteDataHistoryVersionProcessing",
+    "Explanation",
+    "ExtendedEdit",
+    "ExtendedPresentation",
+    "FillChecking",
+    "Format",
+    "LinkByType",
+    "MarkNegatives",
+    "Mask",
+    "MaxValue",
+    "MinValue",
+    "MultiLine",
+    "PasswordMode",
+    "QuickChoice",
+    "ToolTip",
+    "Type",
+    "UpdateDataHistoryImmediatelyAfterWrite",
+    "UseStandardCommands"
+   ],
+   "filled_true": {
+    "Name": 2,
+    "Type": 2,
+    "UseStandardCommands": 2,
+    "PasswordMode": 2,
+    "MarkNegatives": 2,
+    "MultiLine": 2,
+    "ExtendedEdit": 2,
+    "FillChecking": 2,
+    "ChoiceFoldersAndItems": 2,
+    "QuickChoice": 2,
+    "ChoiceHistoryOnInput": 2,
+    "DataLockControlMode": 2,
+    "DataHistory": 2,
+    "UpdateDataHistoryImmediatelyAfterWrite": 2,
+    "ExecuteAfterWriteDataHistoryVersionProcessing": 2
+   },
+   "filled_false": {
+    "Synonym": 2,
+    "Comment": 2,
+    "DefaultForm": 2,
+    "ExtendedPresentation": 2,
+    "Explanation": 2,
+    "Format": 2,
+    "EditFormat": 2,
+    "ToolTip": 2,
+    "Mask": 2,
+    "MinValue": 2,
+    "MaxValue": 2,
+    "ChoiceParameterLinks": 2,
+    "ChoiceParameters": 2,
+    "ChoiceForm": 2,
+    "LinkByType": 2
+   },
+   "child_tags": {}
+  },
+  "DataProcessors": {
+   "objects": 1,
+   "kind_tags": {
+    "DataProcessor": 1
+   },
+   "props_total": 9,
+   "props_not_common": [
+    "AuxiliaryForm",
+    "DefaultForm",
+    "Explanation",
+    "ExtendedPresentation",
+    "IncludeHelpInContents",
+    "UseStandardCommands"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Synonym": 1,
+    "UseStandardCommands": 1,
+    "DefaultForm": 1,
+    "IncludeHelpInContents": 1
+   },
+   "filled_false": {
+    "Comment": 1,
+    "AuxiliaryForm": 1,
+    "ExtendedPresentation": 1,
+    "Explanation": 1
+   },
+   "child_tags": {
+    "Attribute": 2,
+    "TabularSection": 1,
+    "Form": 1,
+    "Template": 1
+   }
+  },
+  "DefinedTypes": {
+   "objects": 1,
+   "kind_tags": {
+    "DefinedType": 1
+   },
+   "props_total": 4,
+   "props_not_common": [
+    "Type"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Type": 1
+   },
+   "filled_false": {
+    "Synonym": 1,
+    "Comment": 1
+   },
+   "child_tags": {}
+  },
+  "DocumentJournals": {
+   "objects": 1,
+   "kind_tags": {
+    "DocumentJournal": 1
+   },
+   "props_total": 11,
+   "props_not_common": [
+    "AuxiliaryForm",
+    "DefaultForm",
+    "Explanation",
+    "ExtendedListPresentation",
+    "IncludeHelpInContents",
+    "ListPresentation",
+    "RegisteredDocuments",
+    "UseStandardCommands"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "UseStandardCommands": 1,
+    "RegisteredDocuments": 1,
+    "IncludeHelpInContents": 1
+   },
+   "filled_false": {
+    "Synonym": 1,
+    "Comment": 1,
+    "DefaultForm": 1,
+    "AuxiliaryForm": 1,
+    "ListPresentation": 1,
+    "ExtendedListPresentation": 1,
+    "Explanation": 1
+   },
+   "child_tags": {}
+  },
+  "Documents": {
+   "objects": 1,
+   "kind_tags": {
+    "Document": 1
+   },
+   "props_total": 45,
+   "props_not_common": [
+    "Autonumbering",
+    "AuxiliaryChoiceForm",
+    "AuxiliaryListForm",
+    "AuxiliaryObjectForm",
+    "BasedOn",
+    "Characteristics",
+    "CheckUnique",
+    "ChoiceDataGetModeOnInputByString",
+    "ChoiceHistoryOnInput",
+    "CreateOnInput",
+    "DataHistory",
+    "DataLockControlMode",
+    "DataLockFields",
+    "DefaultChoiceForm",
+    "DefaultListForm",
+    "DefaultObjectForm",
+    "ExecuteAfterWriteDataHistoryVersionProcessing",
+    "Explanation",
+    "ExtendedListPresentation",
+    "ExtendedObjectPresentation",
+    "FullTextSearch",
+    "FullTextSearchOnInputByString",
+    "IncludeHelpInContents",
+    "InputByString",
+    "ListPresentation",
+    "NumberAllowedLength",
+    "NumberLength",
+    "NumberPeriodicity",
+    "NumberType",
+    "Numerator",
+    "ObjectPresentation",
+    "PostInPrivilegedMode",
+    "Posting",
+    "RealTimePosting",
+    "RegisterRecords",
+    "RegisterRecordsDeletion",
+    "RegisterRecordsWritingOnPost",
+    "SearchStringModeOnInputByString",
+    "SequenceFilling",
+    "UnpostInPrivilegedMode",
+    "UpdateDataHistoryImmediatelyAfterWrite",
+    "UseStandardCommands"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "UseStandardCommands": 1,
+    "NumberType": 1,
+    "NumberLength": 1,
+    "NumberAllowedLength": 1,
+    "NumberPeriodicity": 1,
+    "CheckUnique": 1,
+    "Autonumbering": 1,
+    "InputByString": 1,
+    "CreateOnInput": 1,
+    "SearchStringModeOnInputByString": 1,
+    "FullTextSearchOnInputByString": 1,
+    "ChoiceDataGetModeOnInputByString": 1,
+    "Posting": 1,
+    "RealTimePosting": 1,
+    "RegisterRecordsDeletion": 1,
+    "RegisterRecordsWritingOnPost": 1,
+    "SequenceFilling": 1,
+    "RegisterRecords": 1,
+    "PostInPrivilegedMode": 1,
+    "UnpostInPrivilegedMode": 1,
+    "IncludeHelpInContents": 1,
+    "DataLockControlMode": 1,
+    "FullTextSearch": 1,
+    "ChoiceHistoryOnInput": 1,
+    "DataHistory": 1,
+    "UpdateDataHistoryImmediatelyAfterWrite": 1,
+    "ExecuteAfterWriteDataHistoryVersionProcessing": 1
+   },
+   "filled_false": {
+    "Synonym": 1,
+    "Comment": 1,
+    "Numerator": 1,
+    "Characteristics": 1,
+    "BasedOn": 1,
+    "DefaultObjectForm": 1,
+    "DefaultListForm": 1,
+    "DefaultChoiceForm": 1,
+    "AuxiliaryObjectForm": 1,
+    "AuxiliaryListForm": 1,
+    "AuxiliaryChoiceForm": 1,
+    "DataLockFields": 1,
+    "ObjectPresentation": 1,
+    "ExtendedObjectPresentation": 1,
+    "ListPresentation": 1,
+    "ExtendedListPresentation": 1,
+    "Explanation": 1
+   },
+   "child_tags": {}
+  },
+  "Enums": {
+   "objects": 1,
+   "kind_tags": {
+    "Enum": 1
+   },
+   "props_total": 15,
+   "props_not_common": [
+    "AuxiliaryChoiceForm",
+    "AuxiliaryListForm",
+    "Characteristics",
+    "ChoiceHistoryOnInput",
+    "ChoiceMode",
+    "DefaultChoiceForm",
+    "DefaultListForm",
+    "Explanation",
+    "ExtendedListPresentation",
+    "ListPresentation",
+    "QuickChoice",
+    "UseStandardCommands"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Synonym": 1,
+    "UseStandardCommands": 1,
+    "QuickChoice": 1,
+    "ChoiceMode": 1,
+    "ChoiceHistoryOnInput": 1
+   },
+   "filled_false": {
+    "Comment": 1,
+    "Characteristics": 1,
+    "DefaultListForm": 1,
+    "DefaultChoiceForm": 1,
+    "AuxiliaryListForm": 1,
+    "AuxiliaryChoiceForm": 1,
+    "ListPresentation": 1,
+    "ExtendedListPresentation": 1,
+    "Explanation": 1
+   },
+   "child_tags": {
+    "EnumValue": 2
+   }
+  },
+  "EventSubscriptions": {
+   "objects": 1,
+   "kind_tags": {
+    "EventSubscription": 1
+   },
+   "props_total": 6,
+   "props_not_common": [
+    "Event",
+    "Handler",
+    "Source"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Source": 1,
+    "Event": 1,
+    "Handler": 1
+   },
+   "filled_false": {
+    "Synonym": 1,
+    "Comment": 1
+   },
+   "child_tags": {}
+  },
+  "ExchangePlans": {
+   "objects": 1,
+   "kind_tags": {
+    "ExchangePlan": 1
+   },
+   "props_total": 40,
+   "props_not_common": [
+    "AuxiliaryChoiceForm",
+    "AuxiliaryListForm",
+    "AuxiliaryObjectForm",
+    "BasedOn",
+    "Characteristics",
+    "ChoiceDataGetModeOnInputByString",
+    "ChoiceHistoryOnInput",
+    "ChoiceMode",
+    "CodeAllowedLength",
+    "CodeLength",
+    "CreateOnInput",
+    "DataHistory",
+    "DataLockControlMode",
+    "DataLockFields",
+    "DefaultChoiceForm",
+    "DefaultListForm",
+    "DefaultObjectForm",
+    "DefaultPresentation",
+    "DescriptionLength",
+    "DistributedInfoBase",
+    "EditType",
+    "ExecuteAfterWriteDataHistoryVersionProcessing",
+    "Explanation",
+    "ExtendedListPresentation",
+    "ExtendedObjectPresentation",
+    "FullTextSearch",
+    "FullTextSearchOnInputByString",
+    "IncludeConfigurationExtensions",
+    "IncludeHelpInContents",
+    "InputByString",
+    "ListPresentation",
+    "ObjectPresentation",
+    "QuickChoice",
+    "SearchStringModeOnInputByString",
+    "StandardAttributes",
+    "UpdateDataHistoryImmediatelyAfterWrite",
+    "UseStandardCommands"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Synonym": 1,
+    "UseStandardCommands": 1,
+    "CodeLength": 1,
+    "CodeAllowedLength": 1,
+    "DescriptionLength": 1,
+    "DefaultPresentation": 1,
+    "EditType": 1,
+    "QuickChoice": 1,
+    "ChoiceMode": 1,
+    "InputByString": 1,
+    "SearchStringModeOnInputByString": 1,
+    "FullTextSearchOnInputByString": 1,
+    "ChoiceDataGetModeOnInputByString": 1,
+    "DefaultObjectForm": 1,
+    "StandardAttributes": 1,
+    "DistributedInfoBase": 1,
+    "IncludeConfigurationExtensions": 1,
+    "CreateOnInput": 1,
+    "ChoiceHistoryOnInput": 1,
+    "IncludeHelpInContents": 1,
+    "DataLockControlMode": 1,
+    "FullTextSearch": 1,
+    "DataHistory": 1,
+    "UpdateDataHistoryImmediatelyAfterWrite": 1,
+    "ExecuteAfterWriteDataHistoryVersionProcessing": 1
+   },
+   "filled_false": {
+    "Comment": 1,
+    "DefaultListForm": 1,
+    "DefaultChoiceForm": 1,
+    "AuxiliaryObjectForm": 1,
+    "AuxiliaryListForm": 1,
+    "AuxiliaryChoiceForm": 1,
+    "Characteristics": 1,
+    "BasedOn": 1,
+    "DataLockFields": 1,
+    "ObjectPresentation": 1,
+    "ExtendedObjectPresentation": 1,
+    "ListPresentation": 1,
+    "ExtendedListPresentation": 1,
+    "Explanation": 1
+   },
+   "child_tags": {
+    "Attribute": 3,
+    "TabularSection": 1,
+    "Form": 2,
+    "Template": 1
+   }
+  },
+  "ExternalDataSources": {
+   "objects": 1,
+   "kind_tags": {
+    "ExternalDataSource": 1
+   },
+   "props_total": 4,
+   "props_not_common": [
+    "DataLockControlMode"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "DataLockControlMode": 1
+   },
+   "filled_false": {
+    "Synonym": 1,
+    "Comment": 1
+   },
+   "child_tags": {}
+  },
+  "FilterCriteria": {
+   "objects": 1,
+   "kind_tags": {
+    "FilterCriterion": 1
+   },
+   "props_total": 11,
+   "props_not_common": [
+    "AuxiliaryForm",
+    "Content",
+    "DefaultForm",
+    "Explanation",
+    "ExtendedListPresentation",
+    "ListPresentation",
+    "Type",
+    "UseStandardCommands"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Synonym": 1,
+    "Type": 1,
+    "UseStandardCommands": 1
+   },
+   "filled_false": {
+    "Comment": 1,
+    "Content": 1,
+    "DefaultForm": 1,
+    "AuxiliaryForm": 1,
+    "ListPresentation": 1,
+    "ExtendedListPresentation": 1,
+    "Explanation": 1
+   },
+   "child_tags": {}
+  },
+  "FunctionalOptions": {
+   "objects": 1,
+   "kind_tags": {
+    "FunctionalOption": 1
+   },
+   "props_total": 6,
+   "props_not_common": [
+    "Content",
+    "Location",
+    "PrivilegedGetMode"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Location": 1,
+    "PrivilegedGetMode": 1
+   },
+   "filled_false": {
+    "Synonym": 1,
+    "Comment": 1,
+    "Content": 1
+   },
+   "child_tags": {}
+  },
+  "FunctionalOptionsParameters": {
+   "objects": 1,
+   "kind_tags": {
+    "FunctionalOptionsParameter": 1
+   },
+   "props_total": 4,
+   "props_not_common": [
+    "Use"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Use": 1
+   },
+   "filled_false": {
+    "Synonym": 1,
+    "Comment": 1
+   },
+   "child_tags": {}
+  },
+  "HTTPServices": {
+   "objects": 1,
+   "kind_tags": {
+    "HTTPService": 1
+   },
+   "props_total": 6,
+   "props_not_common": [
+    "ReuseSessions",
+    "RootURL",
+    "SessionMaxAge"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Synonym": 1,
+    "RootURL": 1,
+    "ReuseSessions": 1,
+    "SessionMaxAge": 1
+   },
+   "filled_false": {
+    "Comment": 1
+   },
+   "child_tags": {
+    "URLTemplate": 13
+   }
+  },
+  "InformationRegisters": {
+   "objects": 1,
+   "kind_tags": {
+    "InformationRegister": 1
+   },
+   "props_total": 25,
+   "props_not_common": [
+    "AuxiliaryListForm",
+    "AuxiliaryRecordForm",
+    "DataHistory",
+    "DataLockControlMode",
+    "DefaultListForm",
+    "DefaultRecordForm",
+    "EditType",
+    "EnableTotalsSliceFirst",
+    "EnableTotalsSliceLast",
+    "ExecuteAfterWriteDataHistoryVersionProcessing",
+    "Explanation",
+    "ExtendedListPresentation",
+    "ExtendedRecordPresentation",
+    "FullTextSearch",
+    "IncludeHelpInContents",
+    "InformationRegisterPeriodicity",
+    "ListPresentation",
+    "MainFilterOnPeriod",
+    "RecordPresentation",
+    "UpdateDataHistoryImmediatelyAfterWrite",
+    "UseStandardCommands",
+    "WriteMode"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Synonym": 1,
+    "UseStandardCommands": 1,
+    "EditType": 1,
+    "InformationRegisterPeriodicity": 1,
+    "WriteMode": 1,
+    "MainFilterOnPeriod": 1,
+    "IncludeHelpInContents": 1,
+    "DataLockControlMode": 1,
+    "FullTextSearch": 1,
+    "EnableTotalsSliceFirst": 1,
+    "EnableTotalsSliceLast": 1,
+    "DataHistory": 1,
+    "UpdateDataHistoryImmediatelyAfterWrite": 1,
+    "ExecuteAfterWriteDataHistoryVersionProcessing": 1
+   },
+   "filled_false": {
+    "Comment": 1,
+    "DefaultRecordForm": 1,
+    "DefaultListForm": 1,
+    "AuxiliaryRecordForm": 1,
+    "AuxiliaryListForm": 1,
+    "RecordPresentation": 1,
+    "ExtendedRecordPresentation": 1,
+    "ListPresentation": 1,
+    "ExtendedListPresentation": 1,
+    "Explanation": 1
+   },
+   "child_tags": {
+    "Resource": 1,
+    "Dimension": 1
+   }
+  },
+  "IntegrationServices": {
+   "objects": 1,
+   "kind_tags": {
+    "IntegrationService": 1
+   },
+   "props_total": 4,
+   "props_not_common": [
+    "ExternalIntegrationServiceAddress"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Synonym": 1
+   },
+   "filled_false": {
+    "Comment": 1,
+    "ExternalIntegrationServiceAddress": 1
+   },
+   "child_tags": {
+    "IntegrationServiceChannel": 4
+   }
+  },
+  "Interfaces": {
+   "objects": 1,
+   "kind_tags": {
+    "Interface": 1
+   },
+   "props_total": 4,
+   "props_not_common": [
+    "Switchable"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Switchable": 1
+   },
+   "filled_false": {
+    "Synonym": 1,
+    "Comment": 1
+   },
+   "child_tags": {}
+  },
+  "Languages": {
+   "objects": 1,
+   "kind_tags": {
+    "Language": 1
+   },
+   "props_total": 4,
+   "props_not_common": [
+    "LanguageCode"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Synonym": 1,
+    "LanguageCode": 1
+   },
+   "filled_false": {
+    "Comment": 1
+   },
+   "child_tags": {}
+  },
+  "Reports": {
+   "objects": 1,
+   "kind_tags": {
+    "Report": 1
+   },
+   "props_total": 15,
+   "props_not_common": [
+    "AuxiliaryForm",
+    "AuxiliarySettingsForm",
+    "DefaultForm",
+    "DefaultSettingsForm",
+    "DefaultVariantForm",
+    "Explanation",
+    "ExtendedPresentation",
+    "IncludeHelpInContents",
+    "MainDataCompositionSchema",
+    "SettingsStorage",
+    "UseStandardCommands",
+    "VariantsStorage"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Synonym": 1,
+    "UseStandardCommands": 1,
+    "DefaultForm": 1,
+    "MainDataCompositionSchema": 1,
+    "IncludeHelpInContents": 1
+   },
+   "filled_false": {
+    "Comment": 1,
+    "AuxiliaryForm": 1,
+    "DefaultSettingsForm": 1,
+    "AuxiliarySettingsForm": 1,
+    "DefaultVariantForm": 1,
+    "VariantsStorage": 1,
+    "SettingsStorage": 1,
+    "ExtendedPresentation": 1,
+    "Explanation": 1
+   },
+   "child_tags": {
+    "Attribute": 1,
+    "Form": 1,
+    "Template": 1
+   }
+  },
+  "Roles": {
+   "objects": 1,
+   "kind_tags": {
+    "Role": 1
+   },
+   "props_total": 3,
+   "props_not_common": [],
+   "filled_true": {
+    "Name": 1
+   },
+   "filled_false": {
+    "Synonym": 1,
+    "Comment": 1
+   },
+   "child_tags": {}
+  },
+  "ScheduledJobs": {
+   "objects": 1,
+   "kind_tags": {
+    "ScheduledJob": 1
+   },
+   "props_total": 10,
+   "props_not_common": [
+    "Description",
+    "Key",
+    "MethodName",
+    "Predefined",
+    "RestartCountOnFailure",
+    "RestartIntervalOnFailure",
+    "Use"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "MethodName": 1,
+    "Description": 1,
+    "Key": 1,
+    "Use": 1,
+    "Predefined": 1,
+    "RestartCountOnFailure": 1,
+    "RestartIntervalOnFailure": 1
+   },
+   "filled_false": {
+    "Synonym": 1,
+    "Comment": 1
+   },
+   "child_tags": {}
+  },
+  "SessionParameters": {
+   "objects": 1,
+   "kind_tags": {
+    "SessionParameter": 1
+   },
+   "props_total": 4,
+   "props_not_common": [
+    "Type"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Type": 1
+   },
+   "filled_false": {
+    "Synonym": 1,
+    "Comment": 1
+   },
+   "child_tags": {}
+  },
+  "SettingsStorages": {
+   "objects": 1,
+   "kind_tags": {
+    "SettingsStorage": 1
+   },
+   "props_total": 7,
+   "props_not_common": [
+    "AuxiliaryLoadForm",
+    "AuxiliarySaveForm",
+    "DefaultLoadForm",
+    "DefaultSaveForm"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Synonym": 1,
+    "DefaultSaveForm": 1,
+    "DefaultLoadForm": 1
+   },
+   "filled_false": {
+    "Comment": 1,
+    "AuxiliarySaveForm": 1,
+    "AuxiliaryLoadForm": 1
+   },
+   "child_tags": {
+    "Form": 13
+   }
+  },
+  "StyleItems": {
+   "objects": 1,
+   "kind_tags": {
+    "StyleItem": 1
+   },
+   "props_total": 5,
+   "props_not_common": [
+    "Type",
+    "Value"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Synonym": 1,
+    "Type": 1,
+    "Value": 1
+   },
+   "filled_false": {
+    "Comment": 1
+   },
+   "child_tags": {}
+  },
+  "Styles": {
+   "objects": 1,
+   "kind_tags": {
+    "Style": 1
+   },
+   "props_total": 3,
+   "props_not_common": [],
+   "filled_true": {
+    "Name": 1
+   },
+   "filled_false": {
+    "Synonym": 1,
+    "Comment": 1
+   },
+   "child_tags": {}
+  },
+  "Subsystems": {
+   "objects": 1,
+   "kind_tags": {
+    "Subsystem": 1
+   },
+   "props_total": 9,
+   "props_not_common": [
+    "Content",
+    "Explanation",
+    "IncludeHelpInContents",
+    "IncludeInCommandInterface",
+    "Picture",
+    "UseOneCommand"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "IncludeHelpInContents": 1,
+    "IncludeInCommandInterface": 1,
+    "UseOneCommand": 1,
+    "Content": 1
+   },
+   "filled_false": {
+    "Synonym": 1,
+    "Comment": 1,
+    "Explanation": 1,
+    "Picture": 1
+   },
+   "child_tags": {}
+  },
+  "Tasks": {
+   "objects": 1,
+   "kind_tags": {
+    "Task": 1
+   },
+   "props_total": 42,
+   "props_not_common": [
+    "Addressing",
+    "Autonumbering",
+    "AuxiliaryChoiceForm",
+    "AuxiliaryListForm",
+    "AuxiliaryObjectForm",
+    "BasedOn",
+    "Characteristics",
+    "CheckUnique",
+    "ChoiceDataGetModeOnInputByString",
+    "ChoiceHistoryOnInput",
+    "CreateOnInput",
+    "CurrentPerformer",
+    "DataHistory",
+    "DataLockControlMode",
+    "DataLockFields",
+    "DefaultChoiceForm",
+    "DefaultListForm",
+    "DefaultObjectForm",
+    "DefaultPresentation",
+    "DescriptionLength",
+    "EditType",
+    "ExecuteAfterWriteDataHistoryVersionProcessing",
+    "Explanation",
+    "ExtendedListPresentation",
+    "ExtendedObjectPresentation",
+    "FullTextSearch",
+    "FullTextSearchOnInputByString",
+    "IncludeHelpInContents",
+    "InputByString",
+    "ListPresentation",
+    "MainAddressingAttribute",
+    "NumberAllowedLength",
+    "NumberLength",
+    "NumberType",
+    "ObjectPresentation",
+    "SearchStringModeOnInputByString",
+    "TaskNumberAutoPrefix",
+    "UpdateDataHistoryImmediatelyAfterWrite",
+    "UseStandardCommands"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "UseStandardCommands": 1,
+    "NumberType": 1,
+    "NumberLength": 1,
+    "NumberAllowedLength": 1,
+    "CheckUnique": 1,
+    "Autonumbering": 1,
+    "TaskNumberAutoPrefix": 1,
+    "DescriptionLength": 1,
+    "DefaultPresentation": 1,
+    "EditType": 1,
+    "InputByString": 1,
+    "SearchStringModeOnInputByString": 1,
+    "FullTextSearchOnInputByString": 1,
+    "ChoiceDataGetModeOnInputByString": 1,
+    "CreateOnInput": 1,
+    "ChoiceHistoryOnInput": 1,
+    "IncludeHelpInContents": 1,
+    "DataLockControlMode": 1,
+    "FullTextSearch": 1,
+    "DataHistory": 1,
+    "UpdateDataHistoryImmediatelyAfterWrite": 1,
+    "ExecuteAfterWriteDataHistoryVersionProcessing": 1
+   },
+   "filled_false": {
+    "Synonym": 1,
+    "Comment": 1,
+    "Addressing": 1,
+    "MainAddressingAttribute": 1,
+    "CurrentPerformer": 1,
+    "BasedOn": 1,
+    "Characteristics": 1,
+    "DefaultObjectForm": 1,
+    "DefaultListForm": 1,
+    "DefaultChoiceForm": 1,
+    "AuxiliaryObjectForm": 1,
+    "AuxiliaryListForm": 1,
+    "AuxiliaryChoiceForm": 1,
+    "DataLockFields": 1,
+    "ObjectPresentation": 1,
+    "ExtendedObjectPresentation": 1,
+    "ListPresentation": 1,
+    "ExtendedListPresentation": 1,
+    "Explanation": 1
+   },
+   "child_tags": {}
+  },
+  "WebServices": {
+   "objects": 1,
+   "kind_tags": {
+    "WebService": 1
+   },
+   "props_total": 8,
+   "props_not_common": [
+    "DescriptorFileName",
+    "Namespace",
+    "ReuseSessions",
+    "SessionMaxAge",
+    "XDTOPackages"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Synonym": 1,
+    "Namespace": 1,
+    "XDTOPackages": 1,
+    "DescriptorFileName": 1,
+    "ReuseSessions": 1,
+    "SessionMaxAge": 1
+   },
+   "filled_false": {
+    "Comment": 1
+   },
+   "child_tags": {
+    "Operation": 9
+   }
+  },
+  "WebSocketClients": {
+   "objects": 1,
+   "kind_tags": {
+    "WebSocketClient": 1
+   },
+   "props_total": 12,
+   "props_not_common": [
+    "AutoConnect",
+    "Headers",
+    "Password",
+    "Predefined",
+    "ServerURL",
+    "Timeout",
+    "UseOSAuthentication",
+    "UseOSProxy",
+    "User"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Predefined": 1,
+    "AutoConnect": 1,
+    "UseOSProxy": 1,
+    "UseOSAuthentication": 1,
+    "Timeout": 1
+   },
+   "filled_false": {
+    "Synonym": 1,
+    "Comment": 1,
+    "ServerURL": 1,
+    "User": 1,
+    "Password": 1,
+    "Headers": 1
+   },
+   "child_tags": {}
+  },
+  "WSReferences": {
+   "objects": 1,
+   "kind_tags": {
+    "WSReference": 1
+   },
+   "props_total": 4,
+   "props_not_common": [
+    "LocationURL"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Synonym": 1,
+    "LocationURL": 1
+   },
+   "filled_false": {
+    "Comment": 1
+   },
+   "child_tags": {}
+  },
+  "XDTOPackages": {
+   "objects": 1,
+   "kind_tags": {
+    "XDTOPackage": 1
+   },
+   "props_total": 4,
+   "props_not_common": [
+    "Namespace"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Synonym": 1,
+    "Namespace": 1
+   },
+   "filled_false": {
+    "Comment": 1
+   },
+   "child_tags": {}
+  }
+ },
+ "child_uuid_collisions": {},
+ "meta_uuid_duplicates": {},
+ "index": {
+  "success": true,
+  "rows": 264,
+  "segments": {
+   "Resource": 3,
+   "Attribute": 7,
+   "TabularSection": 5,
+   "Form": 49,
+   "Template": 6,
+   "EnumValue": 2,
+   "URLTemplate": 26,
+   "Dimension": 1,
+   "IntegrationServiceChannel": 4,
+   "Operation": 36
+  },
+  "depth_hist": {
+   "0": 56,
+   "1": 130,
+   "2": 78
+  },
+  "counts": {
+   "entries_total": 264,
+   "metadata_direct": 180,
+   "metadata_nested": 84,
+   "root_entries": 56,
+   "child_entries": 208,
+   "max_depth": 2,
+   "depth_hist": {
+    "0": 56,
+    "1": 130,
+    "2": 78
+   },
+   "types": {
+    "AccountingRegister": 4,
+    "AccumulationRegister": 4,
+    "Bot": 2,
+    "BusinessProcess": 3,
+    "CalculationRegister": 3,
+    "Catalog": 4,
+    "ChartOfAccounts": 3,
+    "ChartOfCalculationTypes": 3,
+    "ChartOfCharacteristicTypes": 3,
+    "CommandGroup": 1,
+    "CommonAttribute": 1,
+    "CommonCommand": 2,
+    "CommonForm": 18,
+    "CommonModule": 2,
+    "CommonPicture": 2,
+    "CommonTemplate": 2,
+    "Configuration": 10,
+    "Constant": 4,
+    "DataProcessor": 12,
+    "DefinedType": 1,
+    "Document": 3,
+    "DocumentJournal": 2,
+    "Enum": 4,
+    "EventSubscription": 1,
+    "ExchangePlan": 19,
+    "ExternalDataSource": 1,
+    "FilterCriterion": 2,
+    "FunctionalOption": 1,
+    "FunctionalOptionsParameter": 1,
+    "HTTPService": 28,
+    "InformationRegister": 5,
+    "IntegrationService": 6,
+    "Interface": 2,
+    "Language": 1,
+    "Report": 8,
+    "Role": 2,
+    "ScheduledJob": 2,
+    "SessionParameter": 1,
+    "SettingsStorage": 41,
+    "Style": 1,
+    "StyleItem": 1,
+    "Subsystem": 1,
+    "Task": 3,
+    "WSReference": 2,
+    "WebService": 38,
+    "WebSocketClient": 2,
+    "XDTOPackage": 2
+   },
+   "id_forms": {
+    "uuid": 160,
+    "composite": 103,
+    "suffixed": 1
+   },
+   "id_suffixes": {
+    "N": 103,
+    "c": 1
+   },
+   "by_xml_parent": {
+    "ConfigVersions": {
+     "total": 180,
+     "with_config_version": 180,
+     "without_config_version": 0
+    },
+    "Metadata": {
+     "total": 84,
+     "with_config_version": 0,
+     "without_config_version": 84
+    }
+   },
+   "config_versions": 180,
+   "config_versions_missing": 84,
+   "config_versions_bad_form": 0,
+   "parent_unresolved": 0,
+   "unknown_attributes": {},
+   "unknown_elements": {}
+  }
+ }
+}

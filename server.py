@@ -466,24 +466,14 @@ def list_categories_tool():
         return f"Ошибка при получении категорий: {str(e)}"
 
 
-@mcp.tool()
-def get_load_rules_tool():
-    """Содержимое LOAD_RULES.md."""
-    try:
-        with open(Path(__file__).parent / 'LOAD_RULES.md', 'r', encoding='utf-8') as f:
-            return f.read()[:5000]
-    except Exception as e:
-        return f"Ошибка чтения файла: {str(e)}"
+# Правила поиска и загрузки больше этим сервером не читаются (узел RULE-LAYER, 24.10.2026).
+# Раньше здесь жили get_search_rules_tool() и get_load_rules_tool() — они отдавали целиком
+# SEARCH_RULES.md и LOAD_RULES.md. Оба текста перенесены в слой карточек того же local_doc
+# (категория `1c-knowledge-base`, адреса `kb-rules:...`) и читаются тем же двухфазным путём,
+# что и любое другое знание: search_docs_tool → get_snippet_tool. Инструмент «отдай весь файл»
+# обходит и категорию, и двухфазность, и потому противоречит организации правил — он снят,
+# а не переписан на новый путь. Состав регистра проверяет tools/check_mcp_tool_wiring.py.
 
-
-@mcp.tool()
-def get_search_rules_tool():
-    """Содержимое SEARCH_RULES.md."""
-    try:
-        with open(Path(__file__).parent / 'SEARCH_RULES.md', 'r', encoding='utf-8') as f:
-            return f.read()[:5000]
-    except Exception as e:
-        return f"Ошибка чтения файла: {str(e)}"
 
 
 # =====================================================================

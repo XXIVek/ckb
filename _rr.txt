@@ -1,0 +1,100 @@
+def by_alias(cur, alias):
+    """Карточки, объявившие алиас уровня (`rules:`, `rules:kb-rules:`).
+
+    Совпадение точное, как в алиасном шаге `search_docs_tool`: алиас носит каждая карточка
+    поддерева, поэтому один запрос отдаёт всё поддерево разом.
+    """
+    return _rows(
+        cur,
+        "SELECT DISTINCT s.id, s.question, s.answer, s.tags, s.source_url "
+        "FROM alias_targets a JOIN knowledge_snippets s ON s.id = a.snippets_id "
+        "WHERE LOWER(a.alias_name) = LOWER(%s) AND s.source_url LIKE %s",
+        (alias, RL.SOURCE_SCHEME + "%"),
+    )
+
+
+def by_marker(cur, marker):
+    """Карточки слоя по метке в заголовке (не по категории: категория меняется, адрес — нет).
+
+    Корневая карточка слоя — сама метка (`rules:`), а не `rules:<что-то>`, поэтому она попадает в
+    выборку отдельным условием: без него дамп дерева начинался бы со второй карточки.
+    """
+    return _rows(
+        cur,
+        "SELECT id, question, answer, tags, source_url FROM knowledge_snippets "
+        "WHERE (question = %s OR question = %s OR question LIKE %s) AND source_url LIKE %s",
+        (marker, marker + ":", marker + ":%", RL.SOURCE_SCHEME + "%"),
+    )
+
+
+def by_tag(cur, tag=LAYER_TAG):
+    """Всё дерево правил по тегу слоя — ответ, когда алиасов уровня в базе ещё нет."""
+
+
+def select_cards(cur, query):
+    """Запрос -> (карточки, как выбрали). Пустой выбор — отказ, а не пустой файл.
+
+    Очерёдность значимая и различает два написания одного корня:
+
+    • `rules:` (с двоеточием) — алиас уровня: выборка по нему отдаёт поддерево, когда алиасы
+      уровня есть у карточек дерева;
+    • `rules` (без двоеточия) — метка слоя: выборка по метке отдаёт слой целиком, включая саму
+      корневую карточку.
+
+    Перепутать их местами нельзя: алиас корня существует всегда, и он перехватывал бы запрос
+    слоя, оставляя от него одну карточку (так и было до правки 25.10.2026). Пустой файл
+    прочитался бы как «правил нет», а не как «я назвал не то».
+    """
+    text = normalize_query(query)
+    if not text:
+        return [], "пустой запрос: нужен алиас уровня (`rules:`), метка слоя или код MCP"
+
+    if text.endswith(":"):
+        rows = by_alias(cur, text)
+        if rows:
+            return rows, f"алиас {text}"
+    if text.rstrip(":") in RL.markers():
+        marker = text.rstrip(":")
+        return by_marker(cur, marker), f"метка слоя {marker}"
+    rows = by_alias(cur, text)
+    if rows:
+        return rows, f"алиас {text}"
+    for marker in RL.markers():
+        if text.startswith(marker + ":"):
+            return by_marker(cur, marker), f"метка слоя {marker} (по началу адреса)"
+    for marker in RL.markers():
+        for category in RL.categories_of(marker):
+            if text == category.lower() or category.lower().startswith(text):
+                return by_marker(cur, marker), f"код MCP {category} (слой {marker})"
+
+    rows = by_tag(cur)
+    if rows:
+        return rows, f"тег {LAYER_TAG!r} — всё дерево правил (алиасов уровня у карточек ещё нет)"
+    return [], (f"по запросу {query!r} не выбрано ни одной карточки; известные слои: "
+                f"{', '.join(RL.markers())}")
+
+
+# ------------------------------------------------------------------ порядок и заголовки
+
+def _segment_key(segment):
+    """Ключ сегмента: числовые имена (`ref:002`, `06`) сортируются числами, а не строками."""
+    return (0, int(segment)) if segment.isdigit() else (1, segment)
+
+
+def tree_key(address):
+    """Порядок дерева (pre-order): сначала родитель, потом дети по возрастанию имён."""
+    return tuple(_segment_key(p) for p in address.split(":") if p)
+
+
+def parents_with_children(rows):
+    """Родители, чьи дети есть в выборке: нужно, чтобы заголовок узла получил двоеточие."""
+    return {RL.parent_prefix(row["question"]) for row in rows
+            if RL.parent_prefix(row["question"])}
+
+
+def render_card(row, has_children):
+    """Одна карточка: заголовок своего уровня и содержимое дословно."""
+    address = row["question"]
+    level = RL.heading_level(address)
+    title = RL.node_marker(address) if has_children else address
+    lines = []

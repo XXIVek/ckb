@@ -1,0 +1,4 @@
+SELECT conrelid::regclass::text || ' :: ' || conname || ' ' || contype::text FROM pg_constraint WHERE conrelid::regclass::text LIKE 'bsl_modules!_%' ESCAPE '!' ORDER BY 1;
+SELECT tablename || ' :: ' || indexname FROM pg_indexes WHERE tablename LIKE 'bsl_modules!_%' ESCAPE '!' ORDER BY 1;
+SELECT 'CONFIG id=' || c.id || ' name=' || c.name || ' uuid=' || coalesce(c.uuid, '<NULL>') FROM configurations c ORDER BY c.id;
+SELECT 'INDEX cfg=' || coalesce(o.configuration_id::text,'NULL') || ' name=' || coalesce(c.name,'<нет заголовка>') || ' slot=' || o.child_type || ' obj=' || coalesce(o.object_id,'NULL') FROM configuration_objects o LEFT JOIN configurations c ON c.id = o.configuration_id WHERE o.child_type = ANY (ARRAY['SessionModule','ManagedApplicationModule','OrdinaryApplicationModule','ExternalConnectionModule']) ORDER BY 1;

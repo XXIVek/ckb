@@ -1,20 +1,27 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""MCP-сервер 1c-configurations-core — РОВНО пять инструментов контракта загрузки.
+"""MCP-сервер 1c-configurations-core — РОВНО четыре инструмента контракта загрузки.
 
 Норматив поведения: docs/config-scenarios/FLOWCHART_1c-configurations-core.md.
 
-  1. get_load_config_rules_tool()                    - правила загрузки (шаг 0);
-  2. load_1c_catalog_tool(source_path, force=False)  - единая точка входа загрузки каталога;
-  3. load_external_object_file_tool(file_path, ...)  - загрузка бинарного .erf/.epf (узел V25):
-     разбор в каталог выгрузки утилитой ibcmd и повтор той же точки входа (2);
-  4. delete_external_report_tool(...)                - удаление внешнего объекта;
-  5. load_configuration_root_modules_tool(source_path, configuration_uuid=None)
+  1. load_1c_catalog_tool(source_path, force=False)  - единая точка входа загрузки каталога;
+  2. load_external_object_file_tool(file_path, ...)  - загрузка бинарного .erf/.epf (узел V25):
+     разбор в каталог выгрузки утилитой ibcmd и повтор той же точки входа (1);
+  3. delete_external_report_tool(...)                - удаление внешнего объекта;
+  4. load_configuration_root_modules_tool(source_path, configuration_uuid=None)
                                        - загрузка четырёх модулей предопределённых программ
                                          корня конфигурации (узел V44): SessionModule,
                                          OrdinaryApplicationModule, ExternalConnectionModule,
                                          ManagedApplicationModule — по файлам Ext/*.bsl с
                                          подтверждением записью индекса состава (словарь V40).
+
+Правила загрузки (бывший шаг 0, get_load_config_rules_tool) из регистра сняты узлом
+RULE-LAYER (24.10.2026): они читаются слоем карточек `core-rules:` категории
+`1c-configurations-core` — адресно, той же двухфазной читкой, что и остальное знание
+(`core-rules:index` → `core-rules:ref:12` правило R1 → `core-rules:ref:14` четыре исхода).
+LOAD_RULES_Config.md остаётся нормативом-источником этих карточек
+(docs/rules/LOAD_RULES_Config.md), но инструмента, отдающего весь файл одним вызовом, у
+сервера больше нет.
 
 Почему пятый инструмент отделён от точки входа (2), а не шаг внутри неё — решение оператора:
 заголовок и индекс состава читают XML, а этот слой читает ФАЙЛЫ каталога; объединение шагов
@@ -75,22 +82,17 @@ mcp = FastMCP("1c-configurations-core")
 
 
 # =====================================================
-# 1. ПРАВИЛА ЗАГРУЗКИ (шаг 0)
+# 1. ПРАВИЛА ЗАГРУЗКИ — их больше нет в регистре (узел RULE-LAYER, 24.10.2026)
 # =====================================================
+# Прежний шаг 0, get_load_config_rules_tool(), возвращал целиком LOAD_RULES_Config.md.
+# Правила загрузки живут слоем карточек `core-rules:` в local_doc (категория
+# `1c-configurations-core`) и читаются адресно: `core-rules:index` → `core-rules:ref:12`
+# (правило R1) → `core-rules:ref:14` (четыре исхода). LOAD_RULES_Config.md остаётся
+# нормативом-источником этих карточек (docs/rules/LOAD_RULES_Config.md), но инструмента
+# чтения у сервера больше нет: вызов, который отдаёт весь файл сразу, обходит и категорию,
+# и двухфазность чтения. Контракт сервера — четыре инструмента; состав сторожит
+# tools/check_mcp_tool_wiring.py.
 
-@mcp.tool()
-def get_load_config_rules_tool():
-    """Содержимое LOAD_RULES_Config.md — компактные правила загрузки каталогов 1С.
-
-    Шаг 0 перед любой загрузкой. Описывает контракт (три инструмента), правило R1 определения
-    варианта по файлам корневого каталога, четыре исхода load_1c_catalog_tool, поведение при
-    дубликате UUID и пустом UUID, и ссылку на норматив с блок-схемами (FLOWCHART_...md).
-    """
-    try:
-        with open(Path(__file__).parent / 'LOAD_RULES_Config.md', 'r', encoding='utf-8') as f:
-            return f.read()[:10000]
-    except Exception as e:
-        return f"Ошибка чтения файла LOAD_RULES_Config.md: {str(e)}"
 
 
 # =====================================================

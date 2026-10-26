@@ -1,0 +1,31 @@
+=== SEARCH_RULES.md ===
+маркеров проверено 14, отсутствует 0
+утверждений вопреки коду: 0
+
+=== РЕГИСТРАЦИЯ ИНСТРУМЕНТОВ ===
+  server.py: 17
+  server_configurations_core.py: 5
+  server_configurations_enrichment.py: 21
+  server_configurations_export.py: 1
+
+=== КОНТРАКТ ИНСТРУМЕНТОВ В ПРАВИЛАХ ===
+  .clinerules/1C_Rule.md: исторических имён 33 (разрешены как история), неизвестных 0
+  .clinerules/1C_Rule.md ↔ server_configurations_core.py: названо 5/5
+  .clinerules/1C_Rule.md ↔ server_configurations_enrichment.py: названо 21/21
+  .clinerules/1C_Rule.md ↔ server_configurations_export.py: названо 1/1
+  .clinerules/1c-configurations-core_Rule.md: исторических имён 18 (разрешены как история), неизвестных 0
+  .clinerules/1c-configurations-core_Rule.md ↔ server_configurations_core.py: названо 5/5
+  .clinerules/1c-configurations-enrichment_Rule.md: исторических имён 0 (разрешены как история), неизвестных 0
+  .clinerules/1c-configurations-enrichment_Rule.md ↔ server_configurations_enrichment.py: названо 21/21
+  .clinerules/1c-configurations-export_Rule.md: исторических имён 6 (разрешены как история), неизвестных 0
+  .clinerules/1c-configurations-export_Rule.md ↔ server_configurations_export.py: названо 1/1
+  .clinerules/1c-knowledge-base_Rule.md: снятых имён нет, неизвестных 0
+  LOAD_RULES_Config.md: исторических имён 2 (разрешены как история), неизвестных 0
+  LOAD_RULES_Config.md ↔ server_configurations_core.py: названо 5/5
+  SEARCH_RULES.md: снятых имён нет, неизвестных 0
+
+=== 1c-knowledge-base_Rule.md ===
+расхождений с кодом поиска: 0
+
+=== ИТОГ ===
+расхождений нет: тексты правил соответствуют коду поиска и контрактам инструментов

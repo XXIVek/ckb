@@ -19,6 +19,14 @@
 Порядок чтения слоя: сначала эта карточка, затем нужный адрес из таблицы ниже
 (`search_docs_tool` точным заголовком → `get_snippet_tool` по id из выдачи).
 
+Ручные алиасы карточки — термины, которых нет в адресе (решение оператора 24.10.2026): по ним
+правило находится обычным запросом, адрес при этом остаётся границей слоя.
+
+===ALIASES===
+- правила загрузки конфигураций
+- правила выгрузки
+- правила контракта загрузки
+
 Журнал позиций (разбор конкретных дефектов и принятых решений) — не в этом слое, а в прежних
 карточках той же категории `1c-configurations-core`: они адресуются служебной меткой и исходным
 заголовком раздела, например `core-rules: п. 19`, `core-rules: узел V43 ч. 1`. Запрос с меткой
@@ -30,37 +38,37 @@
 
 | Адрес | Исходник | Раздел исходника |
 |---|---|---|
-| `core-rules:ref:01` | `.clinerules/1c-configurations-core_Rule.md` | 📋 Назначение сервера |
-| `core-rules:ref:02` | `.clinerules/1c-configurations-core_Rule.md` | 🎯 Контракт загрузки — пять инструментов (три утверждены 12.10.2026, четвёртый добавлен узлом V25 15.10.2026, пятый — узлом V44 22.10.2026) — частей 2 |
-| `core-rules:ref:02:2` | `.clinerules/1c-configurations-core_Rule.md` | 🎯 Контракт загрузки — пять инструментов (три утверждены 12.10.2026, четвёртый добавлен узлом V25 15.10.2026, пятый — узлом V44 22.10.2026) — частей 2 |
-| `core-rules:ref:03` | `.clinerules/1c-configurations-core_Rule.md` | 🏗️ Архитектура — частей 5 |
-| `core-rules:ref:03:2` | `.clinerules/1c-configurations-core_Rule.md` | 🏗️ Архитектура — частей 5 |
-| `core-rules:ref:03:3` | `.clinerules/1c-configurations-core_Rule.md` | 🏗️ Архитектура — частей 5 |
-| `core-rules:ref:03:4` | `.clinerules/1c-configurations-core_Rule.md` | 🏗️ Архитектура — частей 5 |
-| `core-rules:ref:03:5` | `.clinerules/1c-configurations-core_Rule.md` | 🏗️ Архитектура — частей 5 |
-| `core-rules:ref:04` | `.clinerules/1c-configurations-core_Rule.md` | 🔁 Версионность состояний внешнего объекта (узел V19, 18.10.2026) — частей 3 |
-| `core-rules:ref:04:2` | `.clinerules/1c-configurations-core_Rule.md` | 🔁 Версионность состояний внешнего объекта (узел V19, 18.10.2026) — частей 3 |
-| `core-rules:ref:04:3` | `.clinerules/1c-configurations-core_Rule.md` | 🔁 Версионность состояний внешнего объекта (узел V19, 18.10.2026) — частей 3 |
-| `core-rules:ref:05` | `.clinerules/1c-configurations-core_Rule.md` | 📊 Структура базы данных `ckb_1c_configurations` (живая схема) — частей 3 |
-| `core-rules:ref:05:2` | `.clinerules/1c-configurations-core_Rule.md` | 📊 Структура базы данных `ckb_1c_configurations` (живая схема) — частей 3 |
-| `core-rules:ref:05:3` | `.clinerules/1c-configurations-core_Rule.md` | 📊 Структура базы данных `ckb_1c_configurations` (живая схема) — частей 3 |
-| `core-rules:ref:06` | `.clinerules/1c-configurations-core_Rule.md` | 🔄 Алгоритм работы (контракт) — частей 3 |
-| `core-rules:ref:06:2` | `.clinerules/1c-configurations-core_Rule.md` | 🔄 Алгоритм работы (контракт) — частей 3 |
-| `core-rules:ref:06:3` | `.clinerules/1c-configurations-core_Rule.md` | 🔄 Алгоритм работы (контракт) — частей 3 |
-| `core-rules:ref:07` | `.clinerules/1c-configurations-core_Rule.md` | ⚠️ Критические правила и ограничения |
-| `core-rules:ref:08` | `.clinerules/1c-configurations-core_Rule.md` | 📁 Путь к источникам конфигураций |
-| `core-rules:ref:09` | `.clinerules/1c-configurations-core_Rule.md` | 📖 Ссылки на документацию |
-| `core-rules:ref:10` | `.clinerules/1c-configurations-core_Rule.md` | 📒 Позиции журнала — слой знаний, а не этот файл |
-| `core-rules:ref:11` | `LOAD_RULES_Config.md` | Контракт MCP `1c-configurations-core` — пять инструментов |
-| `core-rules:ref:12` | `LOAD_RULES_Config.md` | Как сервер сам определяет, что грузить (правило R1) |
-| `core-rules:ref:13` | `LOAD_RULES_Config.md` | Двоичный файл внешнего объекта (узел V25, правила R13–R14) |
-| `core-rules:ref:14` | `LOAD_RULES_Config.md` | Четыре и только четыре исхода `load_1c_catalog_tool` |
-| `core-rules:ref:15` | `LOAD_RULES_Config.md` | Что сохраняется |
-| `core-rules:ref:16` | `LOAD_RULES_Config.md` | Предупреждения |
-| `core-rules:ref:17` | `LOAD_RULES_Config.md` | Исходники выгрузок и тестовые каталоги |
-| `core-rules:ref:18` | `LOAD_RULES_Config.md` | Детальные документы сценариев |
-| `core-rules:ref:19` | `LOAD_RULES_Config.md` | Метрики качества загрузки |
-| `core-rules:ref:20` | `LOAD_RULES_Config.md` | Провенанс строки внешнего объекта (узел V31) |
+| `core-rules:ref:01` | `docs/rules/1c-configurations-core_Rule.md` | 📋 Назначение сервера |
+| `core-rules:ref:02` | `docs/rules/1c-configurations-core_Rule.md` | 🎯 Контракт загрузки — четыре инструмента (три утверждены 12.10.2026, четвёртый добавлен узлом V25 15.10.2026, пятый — узлом V44 22.10.2026; узел RULE-LAYER 24.10.2026 снял инструмент чтения правил, и контракт снова четыре) — частей 2 |
+| `core-rules:ref:02:2` | `docs/rules/1c-configurations-core_Rule.md` | 🎯 Контракт загрузки — четыре инструмента (три утверждены 12.10.2026, четвёртый добавлен узлом V25 15.10.2026, пятый — узлом V44 22.10.2026; узел RULE-LAYER 24.10.2026 снял инструмент чтения правил, и контракт снова четыре) — частей 2 |
+| `core-rules:ref:03` | `docs/rules/1c-configurations-core_Rule.md` | 🏗️ Архитектура — частей 5 |
+| `core-rules:ref:03:2` | `docs/rules/1c-configurations-core_Rule.md` | 🏗️ Архитектура — частей 5 |
+| `core-rules:ref:03:3` | `docs/rules/1c-configurations-core_Rule.md` | 🏗️ Архитектура — частей 5 |
+| `core-rules:ref:03:4` | `docs/rules/1c-configurations-core_Rule.md` | 🏗️ Архитектура — частей 5 |
+| `core-rules:ref:03:5` | `docs/rules/1c-configurations-core_Rule.md` | 🏗️ Архитектура — частей 5 |
+| `core-rules:ref:04` | `docs/rules/1c-configurations-core_Rule.md` | 🔁 Версионность состояний внешнего объекта (узел V19, 18.10.2026) — частей 3 |
+| `core-rules:ref:04:2` | `docs/rules/1c-configurations-core_Rule.md` | 🔁 Версионность состояний внешнего объекта (узел V19, 18.10.2026) — частей 3 |
+| `core-rules:ref:04:3` | `docs/rules/1c-configurations-core_Rule.md` | 🔁 Версионность состояний внешнего объекта (узел V19, 18.10.2026) — частей 3 |
+| `core-rules:ref:05` | `docs/rules/1c-configurations-core_Rule.md` | 📊 Структура базы данных `ckb_1c_configurations` (живая схема) — частей 3 |
+| `core-rules:ref:05:2` | `docs/rules/1c-configurations-core_Rule.md` | 📊 Структура базы данных `ckb_1c_configurations` (живая схема) — частей 3 |
+| `core-rules:ref:05:3` | `docs/rules/1c-configurations-core_Rule.md` | 📊 Структура базы данных `ckb_1c_configurations` (живая схема) — частей 3 |
+| `core-rules:ref:06` | `docs/rules/1c-configurations-core_Rule.md` | 🔄 Алгоритм работы (контракт) — частей 3 |
+| `core-rules:ref:06:2` | `docs/rules/1c-configurations-core_Rule.md` | 🔄 Алгоритм работы (контракт) — частей 3 |
+| `core-rules:ref:06:3` | `docs/rules/1c-configurations-core_Rule.md` | 🔄 Алгоритм работы (контракт) — частей 3 |
+| `core-rules:ref:07` | `docs/rules/1c-configurations-core_Rule.md` | ⚠️ Критические правила и ограничения |
+| `core-rules:ref:08` | `docs/rules/1c-configurations-core_Rule.md` | 📁 Путь к источникам конфигураций |
+| `core-rules:ref:09` | `docs/rules/1c-configurations-core_Rule.md` | 📖 Ссылки на документацию |
+| `core-rules:ref:10` | `docs/rules/1c-configurations-core_Rule.md` | 📒 Позиции журнала — слой знаний, а не этот файл |
+| `core-rules:ref:11` | `docs/rules/LOAD_RULES_Config.md` | Контракт MCP `1c-configurations-core` — четыре инструмента |
+| `core-rules:ref:12` | `docs/rules/LOAD_RULES_Config.md` | Как сервер сам определяет, что грузить (правило R1) |
+| `core-rules:ref:13` | `docs/rules/LOAD_RULES_Config.md` | Двоичный файл внешнего объекта (узел V25, правила R13–R14) |
+| `core-rules:ref:14` | `docs/rules/LOAD_RULES_Config.md` | Четыре и только четыре исхода `load_1c_catalog_tool` |
+| `core-rules:ref:15` | `docs/rules/LOAD_RULES_Config.md` | Что сохраняется |
+| `core-rules:ref:16` | `docs/rules/LOAD_RULES_Config.md` | Предупреждения |
+| `core-rules:ref:17` | `docs/rules/LOAD_RULES_Config.md` | Исходники выгрузок и тестовые каталоги |
+| `core-rules:ref:18` | `docs/rules/LOAD_RULES_Config.md` | Детальные документы сценариев |
+| `core-rules:ref:19` | `docs/rules/LOAD_RULES_Config.md` | Метрики качества загрузки |
+| `core-rules:ref:20` | `docs/rules/LOAD_RULES_Config.md` | Провенанс строки внешнего объекта (узел V31) |
 
 ## core-rules:ref:01
 
@@ -70,14 +78,13 @@ MCP сервер `1c-configurations-core` (server_configurations_core.py) — э
 
 ## core-rules:ref:02
 
-### 🎯 Контракт загрузки — пять инструментов (три утверждены 12.10.2026, четвёртый добавлен узлом V25 15.10.2026, пятый — узлом V44 22.10.2026)
+### 🎯 Контракт загрузки — четыре инструмента (три утверждены 12.10.2026, четвёртый добавлен узлом V25 15.10.2026, пятый — узлом V44 22.10.2026; узел RULE-LAYER 24.10.2026 снял инструмент чтения правил, и контракт снова четыре)
 > **Норматив поведения:** [docs/config-scenarios/FLOWCHART_1c-configurations-core.md](../docs/config-scenarios/FLOWCHART_1c-configurations-core.md) —
 > блок-схема 0 (узлы T1–T6), шаблон загрузчика (G0–G8), вариант-схема внешнего отчёта (V1–V12),
 > правила R1–R17, матрица «узел → код». Код и правила обязаны этому документу.
 
 | Инструмент | Сигнатура | Назначение |
 |---|---|---|
-| `get_load_config_rules_tool` | `()` | Шаг 0: компактные правила загрузки (`LOAD_RULES_Config.md`) |
 | `load_1c_catalog_tool` | `(source_path: str, force: bool = False)` | **Точка входа загрузки каталога.** Сама определяет вариант по файлам корневого каталога и грузит. Заменила `register_external_report_tool` и забрала внутрь анализ из `analyze_config_load_tool` |
 | `load_external_object_file_tool` (узел V25) | `(file_path: str, config_file: str = "", db_path: str = "", work_dir: str = "", force: bool = False, keep_layout: bool = False)` | **Точка входа загрузки двоичного файла** внешнего отчёта/обработки (`.erf`, `.epf`): `ibcmd` конвертирует файл в каталог разбора, дальше работает тот же `load_catalog`. Пути обязан быть абсолютным (`ibcmd` рвёт относительный по рабочему каталогу процесса). `config_file` — `.cf` для загрузки в ИБ (без него имена `cfg:` не разрешатся — предупреждение); `db_path`/`work_dir` — каталоги ИБ и разбора (по умолчанию `_ibcmd_work/ib`, `_ibcmd_work/conv/<отпечаток файла>`); `keep_layout` — не удалять каталог разбора после успеха. **Имена параметров — как в коде** (`file_path` ↔ `binary_path` в мосте, `db_path` ↔ флаг `--db-path`); придумывать `source_file`/`ib_path` нельзя |
 | `delete_external_report_tool` | `(source_path \| uuid \| report_id, object_type)` | Удаление внешнего объекта и его BSL-модулей |
@@ -104,7 +111,7 @@ MCP сервер `1c-configurations-core` (server_configurations_core.py) — э
 
 ## core-rules:ref:02:2
 
-### 🎯 Контракт загрузки — пять инструментов (три утверждены 12.10.2026, четвёртый добавлен узлом V25 15.10.2026, пятый — узлом V44 22.10.2026) — часть 2 из 2
+### 🎯 Контракт загрузки — четыре инструмента (три утверждены 12.10.2026, четвёртый добавлен узлом V25 15.10.2026, пятый — узлом V44 22.10.2026; узел RULE-LAYER 24.10.2026 снял инструмент чтения правил, и контракт снова четыре) — часть 2 из 2
 (раздел длинный, читать части по порядку)
 
 | Модуль | Назначение |
@@ -652,14 +659,19 @@ python tools/_v19_read_sites.py --guard
 
 Индексация BSL-модулей конфигураций (`configuration_id`) не используется: вариантов 1, 2 нет.
 
-### Загрузка правил (КРИТИЧНО!)
+### Чтение правил слоя (КРИТИЧНО!)
 
-> ⚠️ **ВАЖНО:** Перед началом работы с конфигурацией **ВСЕГДА** загружайте правила через `get_load_config_rules_tool()`. Это обязательный первый шаг!
+> ⚠️ **ВАЖНО:** Перед началом работы с конфигурацией **ВСЕГДА** читайте индекс слоя правил:
+> `search_docs_tool(query="core-rules:index", category="1c-configurations-core")`, затем
+> `get_snippet_tool(snippet_id)` по id из выдачи. Это инструменты `1c-knowledge-base`, не
+> core-MCP: правила читаются там, а отдельного инструмента «отдай файл правил целиком» в
+> контракте больше нет (узел RULE-LAYER, 24.10.2026) — он возвращал сплошной текст и обходил
+> категорию, то есть подмешивал чужие строки.
 
-| Инструмент | Параметры | Назначение |
-|-----------|-----------|------------|
-| `get_load_config_rules_tool()` (core-MCP) | — | Загрузить `LOAD_RULES_Config.md` — компактные правила загрузки каталогов. **Всегда вызывайте перед началом работы с конфигурациями!** |
-| `get_search_rules_tool()` (**1c-knowledge-base**, не core) | — | Правила поиска по `local_doc`; в core-MCP этого инструмента нет |
+| Что читать | Чем | Зачем |
+|---|---|---|
+| `core-rules:index` | `search_docs_tool` + `get_snippet_tool` | оглавление слоя: адрес нужного раздела |
+| `core-rules:ref:11` | те же | compact-правила загрузки (прежний `LOAD_RULES_Config.md`, теперь архив) |
 
 ### Прочие инструменты core-MCP — удалены 14.10.2026
 
@@ -719,8 +731,9 @@ python tools/_v19_read_sites.py --guard
 ### 🔄 Алгоритм работы (контракт)
 
 ```python
-# Шаг 0 (обязательный): правила загрузки
-get_load_config_rules_tool()
+# Шаг 0 (обязательный): прочитать индекс слоя правил (это НЕ инструмент core-MCP):
+#   search_docs_tool(query="core-rules:index", category="1c-configurations-core")
+#   затем get_snippet_tool(snippet_id) по id из выдачи
 
 # Шаг 1: загрузка одной точкой входа - отдельный анализ не нужен
 load_1c_catalog_tool(source_path=r"C:\1C_LLM\LoadDoc\Test1_Otchet")
@@ -791,8 +804,6 @@ delete_external_report_tool(source_path=...)  # или uuid=..., или report_i
 #                                       #   4 подписи / 1 событие [V15], 19 = скаляры V14.1)
 #   check_external_report_search.sql    # поиск, варианты «ПОИСК 1-16» (разделы 10-31 файла):
 #                                       # 12-16 = элементы формы, подписи, источники данных,
-#                                       # имена обработчиков событий, FTS по составу элементов —
-#                                       # после V15 работают и для ordinary-форм (через витрины)
 ```
 <!-- граница части примера: продолжение в следующей карточке этого правила -->
 
@@ -804,6 +815,8 @@ delete_external_report_tool(source_path=...)  # или uuid=..., или report_i
 
 ```
 <!-- продолжение примера из предыдущей части того же правила -->
+#                                       # имена обработчиков событий, FTS по составу элементов —
+#                                       # после V15 работают и для ordinary-форм (через витрины)
 #   check_external_report_inventory.sql # инвентарь «что видно из БД», разделы 0-14
 #                                       # (7 = состояние ordinary-формы: ожидаем OK + счётчики V15,
 #                                       # 9c-9e = типы реквизитов и стандартные реквизиты ТЧ,
@@ -894,7 +907,9 @@ delete_external_report_tool(source_path=...)  # или uuid=..., или report_i
 ### ⚠️ Критические правила и ограничения
 ### Обязательные шаги перед работой
 
-1. **ВСЕГДА загружайте правила через `get_load_config_rules_tool()`** перед началом работы.
+1. **ВСЕГДА читайте индекс слоя правил `core-rules:index`** перед началом работы: правила больше
+   не отдаются отдельным инструментом (узел RULE-LAYER, 24.10.2026), а сплошной файл правил
+   обходил категорию и подмешивал чужие строки.
 2. **Загружайте каталог только через `load_1c_catalog_tool(source_path, force=False)`** —
    отдельный анализ перед загрузкой не нужен и не выполняется.
 3. Если `uuid` в XML пустой — это **ошибка загрузки** (R3), а не попытка вставки.
@@ -1079,12 +1094,11 @@ get_snippet_tool(id)   # полный текст позиции (длинный 
 
 ## core-rules:ref:11
 
-### Контракт MCP `1c-configurations-core` — пять инструментов
-(три утверждены 12.10.2026, четвёртый добавлен узлом V25 15.10.2026, пятый — узлом V44 22.10.2026)
+### Контракт MCP `1c-configurations-core` — четыре инструмента
+(три утверждены 12.10.2026, четвёртый добавлен узлом V25 15.10.2026, пятый — узлом V44 22.10.2026; узел RULE-LAYER 24.10.2026 снял инструмент чтения правил, и контракт снова четыре)
 
 | Инструмент | Когда вызывать |
 |---|---|
-| `get_load_config_rules_tool()` | Шаг 0, перед любой загрузкой |
 | `load_1c_catalog_tool(source_path, force=False)` | **точка входа загрузки каталога** |
 | `load_configuration_root_modules_tool(source_path, configuration_uuid=None)` | **второй слой загрузки конфигурации** (узел V44): четыре модуля предопределённых программ корня (`Ext/SessionModule.bsl`, `OrdinaryApplicationModule.bsl`, `ExternalConnectionModule.bsl`, `ManagedApplicationModule.bsl`) и содержимое их форм. Конфигурация обязана быть загружена точкой входа; состояния кода `empty` / `indexed_no_file` / `file_not_indexed` / `absent` — это состояния, а не ошибки; модули объектов и общие модули этим инструментом не грузятся |
 | `load_external_object_file_tool(file_path, config_file="", db_path="", work_dir="", force=False, keep_layout=False)` | **точка входа загрузки двоичного файла** `.erf` / `.epf` (узел V25): `ibcmd config --db-path <ИБ> export --file=<файл> <база>` → тот же `load_catalog`. Пути обязаны быть абсолютными |

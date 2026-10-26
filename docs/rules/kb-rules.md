@@ -43,7 +43,7 @@ MCP — в слоях `core-rules`, `enrich-rules`, `export-rules`; формат
 | адрес | что закрывает | чем проверяется |
 |---|---|---|
 | `kb-rules:always:index` | индекс always-правил | `check_rules_layer.py` |
-| `kb-rules:always:search-first` | начинать с базы знаний; Шаг 0 — `get_search_rules_tool` | `check_search_rules_sync.py` |
+| `kb-rules:always:search-first` | начинать с базы знаний; перед первым запросом — индекс слоя | `check_search_rules_sync.py` |
 | `kb-rules:always:two-phase-reading` | выдача — id и превью; содержимое читается по id | `_p6_live_probe.py` |
 | `kb-rules:always:edit-in-db` | знание создают, правят и снимают строками БД | `_p6_live_probe.py` |
 
@@ -116,8 +116,10 @@ MCP — в слоях `core-rules`, `enrich-rules`, `export-rules`; формат
 ===MUST===
 1. Начинать с `search_docs_tool`; полный текст найденного читать второй фазой
    (`kb-rules:always:two-phase-reading`).
-2. Перед первым запросом в сессии — `get_search_rules_tool()`: механика поиска неочевидна
-   (алиасный шаг — только точное совпадение всем запросом, выдача — id и превью).
+2. Перед первым запросом в сессии читать индекс слоя: запрос `kb-rules:index` с категорией
+   `1c-knowledge-base-rules`, дальше — индекс нужного состояния (`kb-rules:always:index`).
+   Механика поиска неочевидна, и без индекса она описывается догадками: алиасный шаг — это
+   точное совпадение `LOWER(alias_name)` со всем запросом целиком, а выдача — id и превью.
 3. Указывать `category`, когда категория известна: фильтр изолирует слой знаний от общей
    документации, а пустая выдача с категорией — утверждение о категории, а не об отсутствии
    знания вообще.
@@ -129,15 +131,21 @@ MCP — в слоях `core-rules`, `enrich-rules`, `export-rules`; формат
 термина (`kb-rules:optional:alias-coverage`).
 
 ===TOOLS===
-get_search_rules_tool, get_load_rules_tool, search_docs_tool, get_doc_tool, get_snippet_tool
+search_docs_tool, get_doc_tool, get_snippet_tool, list_categories_tool
 
 ===CHECK===
-python tools/check_search_rules_sync.py — текст правил обязан совпадать с кодом `server.py` и
-`src/mcp_tools_api.py` (шаг 9 `validate_project.py`)
+python tools/check_search_rules_sync.py — тексты правил обязаны совпадать с регистрами инструментов
+серверов и с кодом `src/mcp_tools_api.py` (шаг 9 `validate_project.py`)
 python tools/check_rules_layer.py — слой правил достижим и непротиворечив
 
+===ALIASES===
+- правила поиска
+- шаг 0 поиска
+- начинать с базы знаний
+
 ===SOURCE===
-SEARCH_RULES.md, LOAD_RULES.md, src/mcp_tools_api.py
+src/mcp_tools_api.py (search_docs, TITLE_LAYER_MARKERS); прежний сплошной текст правил поиска —
+архив `docs/rules/SEARCH_RULES.md`, он больше не источник правки
 
 ## kb-rules:always:two-phase-reading
 
@@ -247,14 +255,14 @@ src/mcp_tools_api.py (`update_snippet`, `snippet_audit_log`), src/quarantine.py
 вместо авторитетного источника.
 
 ===TOOLS===
-search_docs_tool, get_search_rules_tool, list_categories_tool
+search_docs_tool, list_categories_tool
 
 ===CHECK===
 python tools/check_search_rules_sync.py — правила поиска против регистра инструментов и кода
 python tools/_p6_live_probe.py — ранжирование и двухфазное чтение на живой базе
 
 ===SOURCE===
-src/mcp_tools_api.py (`search_docs`, `TITLE_LAYER_MARKERS`), SEARCH_RULES.md
+src/mcp_tools_api.py (`search_docs`, `TITLE_LAYER_MARKERS`, порядок шагов ранжирования)
 
 ## kb-rules:optional:alias-coverage
 
@@ -346,14 +354,20 @@ src/quarantine.py, docs/CONFIGURATIONS_ENRICHMENT_PLAN.md раздел 14
 загрушать PDF без `--dry-run`.
 
 ===TOOLS===
-load_doc_tool, load_single_html_tool, load_bsl_tool, add_snippet_tool
+load_doc_tool, load_single_html_tool, load_bsl_tool, add_snippet_tool, detect_tags_tool
 
 ===CHECK===
 python validate_pdf_whole_file.py — режим «файл целиком», офлайн, в БД не пишет
 python tools/load_its_pdf.py --dry-run — состав разделов до записи
 
+===ALIASES===
+- правила загрузки документов
+- загрузка pdf
+- загрузка html
+
 ===SOURCE===
-LOAD_RULES.md, src/its_pdf_loader.py, _docx_extract.py
+src/its_pdf_loader.py, _docx_extract.py, src/mcp_tools_api.py (`detect_tags`); прежний сплошной
+текст правил загрузки — архив `docs/rules/LOAD_RULES.md`, он больше не источник правки
 
 ## kb-rules:optional:counters
 
@@ -436,32 +450,41 @@ src/mcp_tools_api.py (`LAYERS`), tools/check_xml_format_layer.py
 ## kb-rules:checks:search-sync
 
 ===WHEN===
-Правят `SEARCH_RULES.md`, тексты правил поиска (слой `kb-rules`, архивный файл правил) или код
+Правят тексты правил поиска (слой `kb-rules`, его исходник `docs/rules/kb-rules.md`) или код
 `src/mcp_tools_api.py` / `server.py`, от которого зависит ранжирование выдачи.
 
 ===MUST===
-1. `tools/check_search_rules_sync.py` существует и входит в `validate_project.py`; прогон обязан
-   быть зелёным после любой правки механики поиска.
-2. Сверка требует, чтобы маркеры текущей механики (`TITLE_LAYER_MARKERS`, `MAX_ANSWER_CHARS`) были
-   названы в `SEARCH_RULES.md`: текст правила описывает тот код, который исполняется.
-3. Число инструментов, названное в текстах правил, сверяется с `EXPECTED_TOOLS` скрипта
-   `tools/check_mcp_tool_wiring.py` — у правила и у регистрации серверов один источник чисел.
-4. Текст `.clinerules/1c-knowledge-base_Rule.md` не противоречит `SEARCH_RULES.md`: обе строки
-   обязаны описывать один и тот же шаг ранжирования, а не два разных.
+1. `tools/check_search_rules_sync.py` существует и входит в `validate_project.py` (шаг 9); прогон
+   обязан быть зелёным после любой правки механики поиска или текстов правил.
+2. Сверка сравнивает карточки исходников `docs/rules/<метка>.md` с регистрами `@mcp.tool` всех
+   четырёх серверов: каждый инструмент контракта обязан быть назван слоем, который его
+   документирует, и ни одна карточка не вправе называть инструмент вне контракта. Обратная
+   сторона проверяется намеренно: 23.10.2026 контракт стал пятиинструментным в коде, а правила
+   остались четырёхинструментными, потому что смотрели только одну.
+3. Карточки состояний `always` / `optional` / `checks` не называют снятые имена инструментов:
+   живое правило не учит пользоваться тем, чего нет. Снятое имя остаётся в журнале и в строках
+   истории — молча исчезнуть оно не должно.
+4. Формулировки текущей механики — точное совпадение `LOWER(alias_name)` со всем запросом,
+   `TITLE_LAYER_MARKERS`, `MAX_ANSWER_CHARS`, `mark-for-deletion` — обязаны быть в тексте слоя:
+   правило описывает тот код, который исполняется.
+5. Число инструментов, названное сводкой `.clinerules/1C_Rule.md` в форме «контракт — N
+   инструментов», сверяется с регистрацией серверов; строки истории (с `→`, «прежн», «удал»)
+   текущему состоянию равняться не обязаны.
 
 ===FORBID===
 Менять ранжирование в коде, не обновив тексты; глушить провал правкой ожидания вместо кода;
-писать в правиле число инструментов по памяти.
+писать в правиле число инструментов по памяти; возвращать снятый инструмент чтения правил, чтобы
+правило снова «работало», — вместо адресов слоя он вернёт сплошной текст и обойдёт категорию.
 
 ===TOOLS===
-get_search_rules_tool
+search_docs_tool, get_snippet_tool
 
 ===CHECK===
 python tools/check_search_rules_sync.py
 python validate_project.py
 
 ===SOURCE===
-tools/check_search_rules_sync.py (`SEARCH_CONTRACT_FILES`), src/mcp_tools_api.py
+tools/check_search_rules_sync.py (`LAYER_SERVERS`, `REQUIRED_FORMULAS`), src/mcp_tools_api.py
 
 ## kb-rules:checks:layer-availability
 

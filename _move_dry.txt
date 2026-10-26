@@ -1,0 +1,106 @@
+карта переноса: 103 | не размечено: 0 | коллизий: 0
+  • core-rules: п. 1 -> rules:core-rules:journal:pos:1
+  • core-rules: п. 10 -> rules:core-rules:journal:pos:10
+  • core-rules: п. 11 -> rules:core-rules:journal:pos:11
+  • core-rules: п. 12 -> rules:core-rules:journal:pos:12
+  • core-rules: п. 13 -> rules:core-rules:journal:pos:13
+  • core-rules: п. 14 -> rules:core-rules:journal:pos:14
+  • core-rules: п. 15 -> rules:core-rules:journal:pos:15
+  • core-rules: п. 16 -> rules:core-rules:journal:pos:16
+  • core-rules: п. 17 -> rules:core-rules:journal:pos:17
+  • core-rules: п. 18 -> rules:core-rules:journal:pos:18
+  • core-rules: п. 19 -> rules:core-rules:journal:pos:19
+  • core-rules: п. 2 -> rules:core-rules:journal:pos:2
+  • core-rules: п. 20 -> rules:core-rules:journal:pos:20
+  • core-rules: п. 21 -> rules:core-rules:journal:pos:21
+  • core-rules: п. 22 ч. 1 -> rules:core-rules:journal:pos:22:1
+  • core-rules: п. 22 ч. 2 -> rules:core-rules:journal:pos:22:2
+  • core-rules: п. 23 ч. 1 -> rules:core-rules:journal:pos:23:1
+  • core-rules: п. 23 ч. 2 -> rules:core-rules:journal:pos:23:2
+  • core-rules: п. 3 -> rules:core-rules:journal:pos:3
+  • core-rules: п. 30 (дополнение 21.10.2026) -> rules:core-rules:journal:pos:30:add2110
+  • core-rules: п. 30 ч. 1 -> rules:core-rules:journal:pos:30:1
+  • core-rules: п. 30 ч. 2 -> rules:core-rules:journal:pos:30:2
+  • core-rules: п. 32 -> rules:core-rules:journal:pos:32
+  • core-rules: п. 4 -> rules:core-rules:journal:pos:4
+  • core-rules: п. 5 -> rules:core-rules:journal:pos:5
+  • core-rules: п. 6 -> rules:core-rules:journal:pos:6
+  • core-rules: п. 7 -> rules:core-rules:journal:pos:7
+  • core-rules: п. 8 -> rules:core-rules:journal:pos:8
+  • core-rules: п. 9 -> rules:core-rules:journal:pos:9
+  • core-rules: узел V19 (дополнение 18.10.2026) -> rules:core-rules:journal:node:v19:add1810
+  • core-rules: узел V31 -> rules:core-rules:journal:node:v31
+  • core-rules: узел V32 -> rules:core-rules:journal:node:v32
+  • core-rules: узел V33 -> rules:core-rules:journal:node:v33
+  • core-rules: узел V38 -> rules:core-rules:journal:node:v38
+  • core-rules: узел V38 (дополнение 19.10.2026) -> rules:core-rules:journal:node:v38:add1910
+  • core-rules: узел V39 -> rules:core-rules:journal:node:v39
+  • core-rules: узел V39 (дополнение 21.10.2026) -> rules:core-rules:journal:node:v39:add2110
+  • core-rules: узел V40 -> rules:core-rules:journal:node:v40
+  • core-rules: узел V40 (дополнение 21.10.2026) -> rules:core-rules:journal:node:v40:add2110
+  • core-rules: узел V42 (дополнение 21.10.2026) -> rules:core-rules:journal:node:v42:add2110
+  • core-rules: узел V42 (дополнение 22.10.2026) -> rules:core-rules:journal:node:v42:add2210
+  • core-rules: узел V42 ч. 1 -> rules:core-rules:journal:node:v42:1
+  • core-rules: узел V42 ч. 2 -> rules:core-rules:journal:node:v42:2
+  • core-rules: узел V42 ч. 3 -> rules:core-rules:journal:node:v42:3
+  • core-rules: узел V43 (дополнение 22.10.2026) -> rules:core-rules:journal:node:v43:add2210
+  • core-rules: узел V43 ч. 1 -> rules:core-rules:journal:node:v43:1
+  • core-rules: узел V43 ч. 2 -> rules:core-rules:journal:node:v43:2
+  • core-rules:index -> rules:core-rules:journal:index
+  • core-rules:ref:01 -> rules:core-rules:journal:ref:01
+  • core-rules:ref:02 -> rules:core-rules:journal:ref:02
+  • core-rules:ref:02:2 -> rules:core-rules:journal:ref:02:2
+  • core-rules:ref:03 -> rules:core-rules:journal:ref:03
+  • core-rules:ref:03:2 -> rules:core-rules:journal:ref:03:2
+  • core-rules:ref:03:3 -> rules:core-rules:journal:ref:03:3
+  • core-rules:ref:03:4 -> rules:core-rules:journal:ref:03:4
+  • core-rules:ref:03:5 -> rules:core-rules:journal:ref:03:5
+  • core-rules:ref:04 -> rules:core-rules:journal:ref:04
+  • core-rules:ref:04:2 -> rules:core-rules:journal:ref:04:2
+  • core-rules:ref:04:3 -> rules:core-rules:journal:ref:04:3
+  • core-rules:ref:05 -> rules:core-rules:journal:ref:05
+  • core-rules:ref:05:2 -> rules:core-rules:journal:ref:05:2
+  • core-rules:ref:05:3 -> rules:core-rules:journal:ref:05:3
+  • core-rules:ref:06 -> rules:core-rules:journal:ref:06
+  • core-rules:ref:06:2 -> rules:core-rules:journal:ref:06:2
+  • core-rules:ref:06:3 -> rules:core-rules:journal:ref:06:3
+  • core-rules:ref:07 -> rules:core-rules:journal:ref:07
+  • core-rules:ref:08 -> rules:core-rules:journal:ref:08
+  • core-rules:ref:09 -> rules:core-rules:journal:ref:09
+  • core-rules:ref:10 -> rules:core-rules:journal:ref:10
+  • core-rules:ref:11 -> rules:core-rules:journal:ref:11
+  • core-rules:ref:12 -> rules:core-rules:journal:ref:12
+  • core-rules:ref:13 -> rules:core-rules:journal:ref:13
+  • core-rules:ref:14 -> rules:core-rules:journal:ref:14
+  • core-rules:ref:15 -> rules:core-rules:journal:ref:15
+  • core-rules:ref:16 -> rules:core-rules:journal:ref:16
+  • core-rules:ref:17 -> rules:core-rules:journal:ref:17
+  • core-rules:ref:18 -> rules:core-rules:journal:ref:18
+  • core-rules:ref:19 -> rules:core-rules:journal:ref:19
+  • core-rules:ref:20 -> rules:core-rules:journal:ref:20
+  • enrich-rules:index -> rules:enrich-rules:journal:index
+  • enrich-rules:ref:01 -> rules:enrich-rules:journal:ref:01
+  • enrich-rules:ref:02 -> rules:enrich-rules:journal:ref:02
+  • enrich-rules:ref:03 -> rules:enrich-rules:journal:ref:03
+  • enrich-rules:ref:04 -> rules:enrich-rules:journal:ref:04
+  • enrich-rules:ref:05 -> rules:enrich-rules:journal:ref:05
+  • enrich-rules:ref:06 -> rules:enrich-rules:journal:ref:06
+  • enrich-rules:ref:06:2 -> rules:enrich-rules:journal:ref:06:2
+  • enrich-rules:ref:07 -> rules:enrich-rules:journal:ref:07
+  • enrich-rules:ref:08 -> rules:enrich-rules:journal:ref:08
+  • enrich-rules:ref:08:2 -> rules:enrich-rules:journal:ref:08:2
+  • enrich-rules:ref:08:3 -> rules:enrich-rules:journal:ref:08:3
+  • enrich-rules:ref:09 -> rules:enrich-rules:journal:ref:09
+  • enrich-rules:ref:10 -> rules:enrich-rules:journal:ref:10
+  • enrich-rules:ref:10:2 -> rules:enrich-rules:journal:ref:10:2
+  • enrich-rules:ref:11 -> rules:enrich-rules:journal:ref:11
+  • export-rules:checks -> rules:export-rules:checks:index
+  • export-rules:contract -> rules:export-rules:functional:contract
+  • export-rules:edit -> rules:export-rules:functional:edit
+  • export-rules:index -> rules:export-rules:journal:index
+  • export-rules:needs -> rules:export-rules:functional:needs
+  • export-rules:removed -> rules:export-rules:functional:removed
+  • export-rules:status -> rules:export-rules:functional:status
+  • export-rules:workflow -> rules:export-rules:functional:workflow
+
+перенесено: 103 | отказов: 0 | ссылок переписано: 0

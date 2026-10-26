@@ -1,0 +1,8 @@
+core-rules:ref:06:2|{1c-configurations-core,core-rules,rules-layer,index}|rules-layer://core-rules:ref:06:2
+export-rules:index|{1c-configurations-export,export-rules,rules-layer,index}|rules-layer://export-rules:index
+kb-rules:always:search-first|{1c-knowledge-base-rules,kb-rules,rules-layer,always}|rules-layer://kb-rules:always:search-first
+kb-rules:journal:index|{1c-knowledge-base-rules,kb-rules,rules-layer,journal}|rules-layer://kb-rules:journal:index
+kb-rules:journal:ref:06:2|{1c-knowledge-base-rules,kb-rules,rules-layer,journal}|rules-layer://kb-rules:journal:ref:06:2
+kb-rules:optional:quarantine|{1c-knowledge-base-rules,kb-rules,rules-layer,optional}|rules-layer://kb-rules:optional:quarantine
+rules:always:authoring|{1c-rules-root,rules,rules-layer,always}|rules-layer://rules:always:authoring
+rules:index|{1c-rules-root,rules,rules-layer,index}|rules-layer://rules:index

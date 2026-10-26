@@ -34,6 +34,16 @@ import json
 import sys
 from pathlib import Path
 
+try:  # кириллица и служебные символы вывода (❌, ↔) не влазят в cp1251: без этого провал
+      # проверки печатается исключением UnicodeEncodeError вместо перечня расхождений —
+      # дефект оказывался незаметен (замер 27.10.2026). Приём тот же, что в
+      # tools/check_rules_layer.py и tools/check_search_rules_sync.py
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:  # сбой настройки потока не имеет права менять итог проверки
+    pass
+
+
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_TARGETS = [
     ROOT / "server.py",
@@ -62,9 +72,16 @@ DEFAULT_TARGETS = [
 # (файлы Ext/<вид>.bsl и запись индекса состава), и оба обязаны сходиться со строкой таблицы;
 # вызывать загрузчик приходится, не пересоздавая заголовок конфигурации force=True (M7 снимает
 # историю состояний, а id заголовка при этом меняется).
+# Узел RULE-LAYER (24.10.2026) снял get_load_config_rules_tool: core 5 → 4. Правила загрузки
+# читаются слоем `core-rules:` адресно, а не вызовом, который отдаёт LOAD_RULES_Config.md
+# целиком; снятое имя добавлено в DELETED_TOOLS, чтобы тексты правил называли его снятым,
+# а не живым. Тот же узел снял в knowledge-base get_load_rules_tool и get_search_rules_tool:
+# контракт 17 → 15 — держать их здесь нельзя, потому что проверка требовала бы инструмента,
+# который правила слоя называют снятым (замер 27.10.2026: сервер даёт 15, список требовал 17 —
+# провал «нет инструментов контракта: get_load_rules_tool, get_search_rules_tool»).
 EXPECTED_TOOLS = {
     "server_configurations_core.py": [
-        "delete_external_report_tool", "get_load_config_rules_tool", "load_1c_catalog_tool",
+        "delete_external_report_tool", "load_1c_catalog_tool",
         "load_configuration_root_modules_tool", "load_external_object_file_tool",
     ],
     "server_configurations_enrichment.py": [
@@ -81,19 +98,23 @@ EXPECTED_TOOLS = {
     ],
     "server_configurations_export.py": ["export_readiness_tool"],
     # Узел 20.10.2026: knowledge-base добавлен в сверку, потому что текст правил поиска
-    # (`SEARCH_RULES.md`, отдаётся инструментом `get_search_rules_tool`) перечислял инструменты,
+    # (`SEARCH_RULES.md`, который отдавал снятый `get_search_rules_tool`) перечислял инструменты,
     # которых в сервере нет, и молчал об тех, что есть (карантин узла Q1, инструменты правил).
     # Пока `server.py` не входил в EXPECTED_TOOLS, класс дефекта «правило обещает инструмент,
-    # которого нет» не ловился ничем. Состав — 15 инструментов регистра `server.py`.
+    # которого нет» не ловился ничем.
     # Узел P6 (20.10.2026) добавил get_snippet_tool и update_snippet_tool: 15 → 17. Причина
     # не в удобстве: содержимое сниппета по ID не читалось ни одним инструментом контракта
     # (вывод строился по превью в 200 символов), а «исправить знание» было можно только новой
     # строкой — в базе оставались два противоречащих знания, и поиск отдавал обе.
+    # Узел RULE-LAYER (24.10.2026) снял get_load_rules_tool и get_search_rules_tool: 17 → 15.
+    # Их имена — в DELETED_TOOLS ниже, поэтому в контракте их быть не может: список требовал
+    # инструмента, который правила слоя называют снятым (замер 27.10.2026 — провал «нет
+    # инструментов контракта»). Состав — 15 инструментов регистра `server.py`.
     "server.py": [
         "add_aliases_tool", "add_snippet_tool", "detect_tags_tool", "get_db_state_tool",
-        "get_doc_tool", "get_load_rules_tool", "get_search_rules_tool", "get_snippet_tool",
-        "list_categories_tool", "list_marked_snippets_tool", "load_bsl_tool", "load_doc_tool",
-        "load_single_html_tool", "mark_snippet_for_deletion_tool", "search_docs_tool",
+        "get_doc_tool", "get_snippet_tool", "list_categories_tool", "list_marked_snippets_tool",
+        "load_bsl_tool", "load_doc_tool", "load_single_html_tool",
+        "mark_snippet_for_deletion_tool", "search_docs_tool",
         "unmark_snippet_for_deletion_tool", "update_snippet_tool",
     ],
 }
@@ -104,7 +125,17 @@ EXPECTED_TOOLS = {
 # здесь, а не в tools/check_search_rules_sync.py: тексты правил обязаны называть снятый
 # инструмент как снятый (история), но не как живой, и для этого нужен один список на оба
 # скрипта. Возвращать эти имена в регистры нельзя — их отсутствие сторожит EXPECTED_TOOLS.
+# Узел RULE-LAYER (24.10.2026) добавил три имени чтения правил: get_load_rules_tool и
+# get_search_rules_tool (knowledge-base) и get_load_config_rules_tool (core). Причина удаления
+# не в том, что они падали (после переезда нормативов в docs/rules/ они как раз падали), а в
+# том, что вызов «отдай весь файл правил» обходит и категорию, и двухфазное чтение, то есть
+# противоречит организации правил слоем. Имена остались здесь намеренно: тексты правил обязаны
+# упоминать их как снятые (история), но живая карточка состояния always/optional/checks назвать
+# их не вправе — это сторожит tools/check_search_rules_sync.py.
 DELETED_TOOLS = [
+    "get_load_config_rules_tool",
+    "get_load_rules_tool",
+    "get_search_rules_tool",
     "clear_modified_flag_tool",
     "count_modified_objects_tool",
     "export_config_changes_tool",

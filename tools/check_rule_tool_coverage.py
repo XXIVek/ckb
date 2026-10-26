@@ -17,6 +17,15 @@
 
 Выход: 0, если часть B пуста. Часть A на код возврата не влияет намеренно: её читают люди,
 принимающие решение о правиле.
+
+Режим `--brief` печатает только отказы и счётчики, без строк покрытия. Появлен по замеру живого
+окна 26.10.2026 (`Reports/role_t1_vs_t1p_2026-10-26.txt`): полный перечень стоит 6 865 симв. за
+один вызов, и в повторном прогоне той же задачи служебные прогоны дали 8 772 симв. против
+5 640 симв. чтения правил — то есть проверка кладёт в окно больше, чем знание, которое ею
+подтверждают. Это тот же класс дефекта, что чтение исходного файла вместо `--help` или
+диапазона строк (`rules:always:reading`, MUST 6). Полным остаётся значение по умолчанию: на нём
+построены существующие разделы `CHECK`, и сломать их молча — значит оставить карточку,
+отправляющую читателя в вывод, которого инструмент больше не даёт.
 """
 import argparse
 import io
@@ -124,6 +133,9 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         description="покрытие инструментов карточками правил; ссылки карточек на файлы")
     parser.add_argument("--term", help="показывать только инструменты, содержащие подстроку")
+    parser.add_argument("--brief", action="store_true",
+                       help="не печатать строки покрытия: только не названные инструменты, "
+                            "битые ссылки и счётчики")
     args = parser.parse_args(argv)
 
     with get_cursor() as cur:
@@ -132,6 +144,7 @@ def main(argv=None):
         print("   (пустая строка покрытия = вопрос «повторяется ли действие», а не дефект)")
         print("=" * 74)
         uncovered = []
+        covered = 0
         for path in tool_files():
             if args.term and args.term.lower() not in path.name.lower():
                 continue
@@ -140,6 +153,9 @@ def main(argv=None):
             if not cards:
                 uncovered.append(rel)
                 print(f"  ⚠️  {rel:<48} не назван ни одной живой карточкой")
+                continue
+            covered += 1
+            if args.brief:
                 continue
             shown = ", ".join(cards[:3])
             more = f" +{len(cards) - 3}" if len(cards) > 3 else ""
@@ -162,6 +178,8 @@ def main(argv=None):
                 print(f"  ❌ {token:<48} назван карточкой, файла нет ← {where}")
 
     print()
+    if args.brief:
+        print(f"названо карточками: {covered}")
     print(f"не названо карточками: {len(uncovered)}; битых ссылок: {len(broken)}")
     return 1 if broken else 0
 

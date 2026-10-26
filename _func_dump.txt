@@ -1,0 +1,187 @@
+### id=6129 rules:kb-rules:write-knowledge
+===WHEN===
+Знание нужно создать, исправить или дополнить: найден конфликт двух строк, у строки неверный
+словарь значений, термин отсутствует, строка ошибочна. Вариативная карточка: при поиске без записи
+она не нужна.
+
+===MUST===
+1. Создать знание, которого не было, — `add_snippet_tool(question, answer, source_url, tags,
+   confidence, aliases)`; для не-BSL источников `groups_id` не передаётся; алиасы кладутся сразу
+   параметром `aliases`, а не отдельным шагом после.
+2. Исправить существующую строку — `update_snippet_tool(snippet_id, new_question, new_answer,
+   tags, aliases, reason)`: меняется та же строка, прежнее содержимое уходит в
+   `snippet_audit_log` (`action='fix'`); `reason` обязателен; алиасы дополняются аддитивно и не
+   удаляются.
+3. Дополнить алиасы уже найденной строки — `add_aliases_tool(aliases, groups_id, snippets_id)`;
+   заполняется хотя бы одно из двух: группа или сниппет.
+4. Теги не угадываются: `detect_tags_tool(text)` даёт словарь тегов контента (code, howto, syntax,
+   error, solution, api, command). Он ничего не пишет — теги передаются в `add_snippet_tool` или
+   `update_snippet_tool`.
+5. Снять ошибочное — `mark_snippet_for_deletion_tool` с причиной (`rules:kb-rules:quarantine`).
+6. После правки находимость проверяется `search_docs_tool` с категорией, а не памятью о тексте.
+
+===FORBID===
+Чинить противоречие второй строкой: в базе остаются два противоречащих знания, и поиск отдаёт обе
+(так появились две карточки одного свойства с разными словарями значений); удалять ошибочное без
+предварительной пометки; править текст правила файлом вместо строки БД; звать `detect_tags_tool`
+для строки, чьи теги уже известны.
+
+===TOOLS===
+add_snippet_tool, update_snippet_tool, add_aliases_tool, detect_tags_tool, search_docs_tool
+
+===CHECK===
+python tools/_p6_live_probe.py — правка той же строки и запись в `snippet_audit_log`
+python tools/check_quarantine_round_trip.py — пометка и снятие в обоих контурах
+
+===SOURCE===
+src/mcp_tools_api.py (`add_snippet`, `update_snippet`, `add_aliases`, `snippet_audit_log`,
+`detect_tags`); переработано из `kb-rules:always:edit-in-db`, дополнено инструментами контракта
+`add_aliases_tool` и `detect_tags_tool`, которых живые карточки слоя не называли
+
+
+### id=6130 rules:kb-rules:quarantine
+===WHEN===
+Строка ошибочна или противоречит авторитетной, но её снятие ещё не решено: ошибочное сначала
+помечают.
+
+===MUST===
+1. `mark_snippet_for_deletion_tool(snippet_id, reason)` кладёт теги `mark-for-deletion` и
+   `mark-for-deletion:reason=<текст>`; колонку состояния под это не заводят; операция
+   идемпотентна, алиасы сниппета не трогает.
+2. Причина обязательна: строка без причины скрыта, и почему её нельзя показывать — непонятно.
+3. Читающие инструменты скрывают помеченные по умолчанию; `include_marked=True` отдаёт их с явной
+   пометкой; `get_db_state_tool()` печатает `snippets_marked_for_deletion` отдельной строкой.
+4. Снять — `unmark_snippet_for_deletion_tool`; разобрать карантин перед чисткой —
+   `list_marked_snippets_tool`; физически снимает только `tools/purge_marked_snippets.py --apply`
+   (по умолчанию `--dry-run`), предварительно записывая шаг аудита.
+
+===FORBID===
+Удалять ошибочное сразу; заводить свой разбор причины или `split_part` (он зависит от порядка
+тегов) — словарь тегов и SQL-фрагменты даёт `src/quarantine.py` на оба контура; проставлять
+зарезервированный тег вручную (ручные строки очищаются от него).
+
+===TOOLS===
+mark_snippet_for_deletion_tool, unmark_snippet_for_deletion_tool, list_marked_snippets_tool,
+search_docs_tool, get_db_state_tool
+
+===CHECK===
+python tools/check_quarantine_round_trip.py — живой контракт карантина в `local_doc` и в
+`ckb_1c_configurations`
+
+===SOURCE===
+src/quarantine.py, docs/CONFIGURATIONS_ENRICHMENT_PLAN.md раздел 14
+перенесено без правок формулировок из `kb-rules:optional:quarantine` (узел RULE-TREE, 25.10.2026)
+
+
+### id=6131 rules:kb-rules:loading
+===WHEN===
+В базу загружают документ: HTML справки, PDF руководства, DOCX-статью, каталог файлов.
+
+===MUST===
+1. HTML — `load_doc_tool(path, category)`, `load_single_html_tool(filepath, category)` или
+   `load_bsl_tool(path)`; `load_doc_tool` берёт только `.html` — расхождение с LOAD_RULES
+   исправлено в LOAD_RULES 15.10.2026, читать нужно исправленный текст.
+2. PDF — только `tools/load_its_pdf.py`, и сначала `--dry-run`: он показывает найденные разделы и
+   их размеры; разделы короче 400 символов отбрасываются; повторный прогон не создаёт дублей —
+   идемпотентность идёт по `source_url`. Файлы без нумерованных заголовков покрываются режимом
+   «файл целиком» (отключение — `--no-whole-file`).
+3. Обход каталога не рекурсивен: `--dir` видит файлы только указанного каталога, поэтому для
+   одного файла штатный вызов — `--file <полный путь>`. «Повторный прогон дал 0 новых» при
+   нерекурсивном обходе не означает, что база покрыта.
+4. DOCX загрузка не читает: текст извлекают `python _docx_extract.py <файл.docx> <файл.txt>` и
+   раскладывают по темам через `add_snippet_tool` (сценарий B, `groups_id` не передаётся) с
+   алиасами.
+
+===FORBID===
+Звать `src/pdf_parser.py` или `src/pdf_loader.py` — они пишут в `docs`, `doc_fragments`,
+`search_aliases`, которых в живой схеме нет; считать загрузку каталога покрывающей подкаталоги;
+загрушать PDF без `--dry-run`.
+
+===TOOLS===
+load_doc_tool, load_single_html_tool, load_bsl_tool, add_snippet_tool, detect_tags_tool
+
+===CHECK===
+python validate_pdf_whole_file.py — режим «файл целиком», офлайн, в БД не пишет
+python tools/load_its_pdf.py --dry-run — состав разделов до записи
+
+===SOURCE===
+src/its_pdf_loader.py, _docx_extract.py, src/mcp_tools_api.py (`detect_tags`); прежний сплошной
+текст правил загрузки — архив `docs/rules/LOAD_RULES.md`, он больше не источник правки
+перенесено без правок формулировок из `kb-rules:optional:loading` (узел RULE-TREE, 25.10.2026)
+
+
+### id=6132 rules:kb-rules:state
+===WHEN===
+Нужны метаданные базы, а не знание: сколько строк какого вида, какие категории существуют, чем
+фильтровать поиск. Карточка вариативная: при каждой работе со слоем эти вызовы не делаются —
+числа, взятые «на всякий случай», читаются оператором как утверждение о покрытии базы.
+
+===MUST===
+1. `get_db_state_tool()` — состав и числа `local_doc`, отдельной строкой `snippets_marked_for_deletion`
+   (состав карантина). Любое число, попадающее в ответ оператору или в текст правила, обязано быть
+   взято из этого вызова, а не из памяти о прошлом прогоне.
+2. `list_categories_tool()` — перечень категорий. Существование категории проверяют этим вызовом
+   до фильтра `search_docs_tool(category=...)`: фильтр по несуществующей категории даёт пустую
+   выдачу, которую легко прочесть как «знания нет», тогда как правило написано про категорию.
+3. Числа состава правил слоя (сколько карточек, сколько символов на состояние) считает
+   `tools/count_snippet_breakdown.py`, а не оценка на глаз.
+
+===FORBID===
+Делать вывод о покрытии базы по числу категорий; путать `get_db_state_tool()` (числа) с
+`search_docs_tool` (находимость); вызывать справочные инструменты перед каждым запросом; называть
+число без ссылки на замер.
+
+===TOOLS===
+get_db_state_tool, list_categories_tool, search_docs_tool
+
+===CHECK===
+python tools/count_snippet_breakdown.py — числа состава сниппетов
+python tools/check_category_filter.py — фильтр по категории против пустой выдачи
+
+===SOURCE===
+src/mcp_tools_api.py (`get_db_state`, `list_categories`), src/quarantine.py (строка карантина);
+связанные правила в дерево ещё не перенесены: `kb-rules:optional:counters` (числа в ответе),
+`kb-rules:optional:alias-coverage` (находимость с категорией)
+
+
+### id=6133 rules:kb-rules:rules-work
+===WHEN===
+Нужно найти, прочитать, развернуть, исправить или снять правило — этого слоя или любого другого.
+Действия одинаковы для всех слоёв; карточка лежит здесь затем, что здесь её читают первой, и для
+прочих слоёв она применяется без изменений.
+
+===MUST===
+1. Найти карточку — `search_docs_tool(query="<адрес>", category="rules", limit=5)`. Адрес с
+   двоеточием на конце (`rules:kb-rules:`) — карточка-узел, без двоеточия — правило.
+2. Прочитать — `get_snippet_tool(snippet_id)`. Выдача поиска отдаёт id, заголовок и превью в 200
+   символов: по превью не судят о содержимом.
+3. Развернуть поддерево — `python src/rules_report.py --query "rules:kb-rules:"`; файл ложится в
+   `Reports/`, порядок pre-order, уровень заголовка = уровень адреса. Дампер ничего не проверяет и
+   ничего не правит — он читает.
+4. Исправить правило — `update_snippet_tool(snippet_id, new_answer=..., reason=...)`; правка
+   `.md`-файла в базу не попадает, а строка БД при этом остаётся источником.
+5. Снять правило — `mark_snippet_for_deletion_tool(snippet_id, reason)`; что в карантине —
+   `list_marked_snippets_tool`; вернуть — `unmark_snippet_for_deletion_tool`.
+6. Инструмента дерева правил в MCP нет и не планируется, пока структура не устоялась:
+   `get_load_rules_tool` и `get_search_rules_tool` сняты 24.10.2026 (вызов «отдай весь файл
+   правил» обходит категорию и двухфазное чтение), `get_rules_report_tool` не введён. Живая
+   карточка состояния называть их инструментом не вправе — только как снятые имена.
+
+===FORBID===
+Читать правило по превью из выдачи поиска; править `docs/rules/*.md` или `.clinerules/*` как
+источник знания; сочинять адрес, которого нет в дампе; звать `get_load_rules_tool` /
+`get_search_rules_tool` как живой инструмент; называть в живой карточке инструмент, которого нет в
+регистре сервера.
+
+===TOOLS===
+search_docs_tool, get_snippet_tool, update_snippet_tool, mark_snippet_for_deletion_tool,
+unmark_snippet_for_deletion_tool, list_marked_snippets_tool; вне MCP — `src/rules_report.py`
+
+===CHECK===
+python src/rules_report.py --query rules: — состав дерева: карточки, уровни, размеры
+python tools/check_rules_layer.py --layer kb-rules — формат карточек слоя; под адреса дерева
+`rules:kb-rules:<правило>` проверка ещё не адаптирована (шаг отдельный)
+
+===SOURCE===
+src/rules_report.py, src/rules_layer.py (`validate_address`, `node_marker`, `levels_of`),
+tools/check_mcp_tool_wiring.py (`DELETED_TOOLS`)

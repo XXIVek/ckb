@@ -1,0 +1,124 @@
+карта переноса: 103 | не размечено: 0 | коллизий: 0
+✅ переехала: core-rules: п. 1 -> rules:core-rules:journal:pos:1
+✅ переехала: core-rules: п. 10 -> rules:core-rules:journal:pos:10
+✅ переехала: core-rules: п. 11 -> rules:core-rules:journal:pos:11
+✅ переехала: core-rules: п. 12 -> rules:core-rules:journal:pos:12
+✅ переехала: core-rules: п. 13 -> rules:core-rules:journal:pos:13
+✅ переехала: core-rules: п. 14 -> rules:core-rules:journal:pos:14
+✅ переехала: core-rules: п. 15 -> rules:core-rules:journal:pos:15
+✅ переехала: core-rules: п. 16 -> rules:core-rules:journal:pos:16
+✅ переехала: core-rules: п. 17 -> rules:core-rules:journal:pos:17
+✅ переехала: core-rules: п. 18 -> rules:core-rules:journal:pos:18
+✅ переехала: core-rules: п. 19 -> rules:core-rules:journal:pos:19
+✅ переехала: core-rules: п. 2 -> rules:core-rules:journal:pos:2
+✅ переехала: core-rules: п. 20 -> rules:core-rules:journal:pos:20
+✅ переехала: core-rules: п. 21 -> rules:core-rules:journal:pos:21
+✅ переехала: core-rules: п. 22 ч. 1 -> rules:core-rules:journal:pos:22:1
+✅ переехала: core-rules: п. 22 ч. 2 -> rules:core-rules:journal:pos:22:2
+✅ переехала: core-rules: п. 23 ч. 1 -> rules:core-rules:journal:pos:23:1
+✅ переехала: core-rules: п. 23 ч. 2 -> rules:core-rules:journal:pos:23:2
+✅ переехала: core-rules: п. 3 -> rules:core-rules:journal:pos:3
+✅ переехала: core-rules: п. 30 (дополнение 21.10.2026) -> rules:core-rules:journal:pos:30:add2110
+✅ переехала: core-rules: п. 30 ч. 1 -> rules:core-rules:journal:pos:30:1
+✅ переехала: core-rules: п. 30 ч. 2 -> rules:core-rules:journal:pos:30:2
+✅ переехала: core-rules: п. 32 -> rules:core-rules:journal:pos:32
+✅ переехала: core-rules: п. 4 -> rules:core-rules:journal:pos:4
+✅ переехала: core-rules: п. 5 -> rules:core-rules:journal:pos:5
+✅ переехала: core-rules: п. 6 -> rules:core-rules:journal:pos:6
+✅ переехала: core-rules: п. 7 -> rules:core-rules:journal:pos:7
+✅ переехала: core-rules: п. 8 -> rules:core-rules:journal:pos:8
+✅ переехала: core-rules: п. 9 -> rules:core-rules:journal:pos:9
+✅ переехала: core-rules: узел V19 (дополнение 18.10.2026) -> rules:core-rules:journal:node:v19:add1810
+✅ переехала: core-rules: узел V31 -> rules:core-rules:journal:node:v31
+✅ переехала: core-rules: узел V32 -> rules:core-rules:journal:node:v32
+✅ переехала: core-rules: узел V33 -> rules:core-rules:journal:node:v33
+✅ переехала: core-rules: узел V38 -> rules:core-rules:journal:node:v38
+✅ переехала: core-rules: узел V38 (дополнение 19.10.2026) -> rules:core-rules:journal:node:v38:add1910
+✅ переехала: core-rules: узел V39 -> rules:core-rules:journal:node:v39
+✅ переехала: core-rules: узел V39 (дополнение 21.10.2026) -> rules:core-rules:journal:node:v39:add2110
+✅ переехала: core-rules: узел V40 -> rules:core-rules:journal:node:v40
+✅ переехала: core-rules: узел V40 (дополнение 21.10.2026) -> rules:core-rules:journal:node:v40:add2110
+✅ переехала: core-rules: узел V42 (дополнение 21.10.2026) -> rules:core-rules:journal:node:v42:add2110
+✅ переехала: core-rules: узел V42 (дополнение 22.10.2026) -> rules:core-rules:journal:node:v42:add2210
+✅ переехала: core-rules: узел V42 ч. 1 -> rules:core-rules:journal:node:v42:1
+✅ переехала: core-rules: узел V42 ч. 2 -> rules:core-rules:journal:node:v42:2
+✅ переехала: core-rules: узел V42 ч. 3 -> rules:core-rules:journal:node:v42:3
+✅ переехала: core-rules: узел V43 (дополнение 22.10.2026) -> rules:core-rules:journal:node:v43:add2210
+✅ переехала: core-rules: узел V43 ч. 1 -> rules:core-rules:journal:node:v43:1
+✅ переехала: core-rules: узел V43 ч. 2 -> rules:core-rules:journal:node:v43:2
+✅ переехала: core-rules:index -> rules:core-rules:journal:index
+✅ переехала: core-rules:ref:01 -> rules:core-rules:journal:ref:01
+✅ переехала: core-rules:ref:02 -> rules:core-rules:journal:ref:02
+✅ переехала: core-rules:ref:02:2 -> rules:core-rules:journal:ref:02:2
+✅ переехала: core-rules:ref:03 -> rules:core-rules:journal:ref:03
+✅ переехала: core-rules:ref:03:2 -> rules:core-rules:journal:ref:03:2
+✅ переехала: core-rules:ref:03:3 -> rules:core-rules:journal:ref:03:3
+✅ переехала: core-rules:ref:03:4 -> rules:core-rules:journal:ref:03:4
+✅ переехала: core-rules:ref:03:5 -> rules:core-rules:journal:ref:03:5
+✅ переехала: core-rules:ref:04 -> rules:core-rules:journal:ref:04
+✅ переехала: core-rules:ref:04:2 -> rules:core-rules:journal:ref:04:2
+✅ переехала: core-rules:ref:04:3 -> rules:core-rules:journal:ref:04:3
+✅ переехала: core-rules:ref:05 -> rules:core-rules:journal:ref:05
+✅ переехала: core-rules:ref:05:2 -> rules:core-rules:journal:ref:05:2
+✅ переехала: core-rules:ref:05:3 -> rules:core-rules:journal:ref:05:3
+✅ переехала: core-rules:ref:06 -> rules:core-rules:journal:ref:06
+✅ переехала: core-rules:ref:06:2 -> rules:core-rules:journal:ref:06:2
+✅ переехала: core-rules:ref:06:3 -> rules:core-rules:journal:ref:06:3
+✅ переехала: core-rules:ref:07 -> rules:core-rules:journal:ref:07
+✅ переехала: core-rules:ref:08 -> rules:core-rules:journal:ref:08
+✅ переехала: core-rules:ref:09 -> rules:core-rules:journal:ref:09
+✅ переехала: core-rules:ref:10 -> rules:core-rules:journal:ref:10
+✅ переехала: core-rules:ref:11 -> rules:core-rules:journal:ref:11
+✅ переехала: core-rules:ref:12 -> rules:core-rules:journal:ref:12
+✅ переехала: core-rules:ref:13 -> rules:core-rules:journal:ref:13
+✅ переехала: core-rules:ref:14 -> rules:core-rules:journal:ref:14
+✅ переехала: core-rules:ref:15 -> rules:core-rules:journal:ref:15
+✅ переехала: core-rules:ref:16 -> rules:core-rules:journal:ref:16
+✅ переехала: core-rules:ref:17 -> rules:core-rules:journal:ref:17
+✅ переехала: core-rules:ref:18 -> rules:core-rules:journal:ref:18
+✅ переехала: core-rules:ref:19 -> rules:core-rules:journal:ref:19
+✅ переехала: core-rules:ref:20 -> rules:core-rules:journal:ref:20
+✅ переехала: enrich-rules:index -> rules:enrich-rules:journal:index
+✅ переехала: enrich-rules:ref:01 -> rules:enrich-rules:journal:ref:01
+✅ переехала: enrich-rules:ref:02 -> rules:enrich-rules:journal:ref:02
+✅ переехала: enrich-rules:ref:03 -> rules:enrich-rules:journal:ref:03
+✅ переехала: enrich-rules:ref:04 -> rules:enrich-rules:journal:ref:04
+✅ переехала: enrich-rules:ref:05 -> rules:enrich-rules:journal:ref:05
+✅ переехала: enrich-rules:ref:06 -> rules:enrich-rules:journal:ref:06
+✅ переехала: enrich-rules:ref:06:2 -> rules:enrich-rules:journal:ref:06:2
+✅ переехала: enrich-rules:ref:07 -> rules:enrich-rules:journal:ref:07
+✅ переехала: enrich-rules:ref:08 -> rules:enrich-rules:journal:ref:08
+✅ переехала: enrich-rules:ref:08:2 -> rules:enrich-rules:journal:ref:08:2
+✅ переехала: enrich-rules:ref:08:3 -> rules:enrich-rules:journal:ref:08:3
+✅ переехала: enrich-rules:ref:09 -> rules:enrich-rules:journal:ref:09
+✅ переехала: enrich-rules:ref:10 -> rules:enrich-rules:journal:ref:10
+✅ переехала: enrich-rules:ref:10:2 -> rules:enrich-rules:journal:ref:10:2
+✅ переехала: enrich-rules:ref:11 -> rules:enrich-rules:journal:ref:11
+✅ переехала: export-rules:checks -> rules:export-rules:checks:index
+✅ переехала: export-rules:contract -> rules:export-rules:functional:contract
+✅ переехала: export-rules:edit -> rules:export-rules:functional:edit
+✅ переехала: export-rules:index -> rules:export-rules:journal:index
+✅ переехала: export-rules:needs -> rules:export-rules:functional:needs
+✅ переехала: export-rules:removed -> rules:export-rules:functional:removed
+✅ переехала: export-rules:status -> rules:export-rules:functional:status
+✅ переехала: export-rules:workflow -> rules:export-rules:functional:workflow
+  • rules: — заменено ссылок: 18
+  • rules:always:reading — заменено ссылок: 2
+  • rules:core-rules: — заменено ссылок: 128
+  • rules:core-rules:journal:index — заменено ссылок: 66
+  • rules:core-rules:journal:ref:05:2 — заменено ссылок: 6
+  • rules:core-rules:journal:ref:06 — заменено ссылок: 2
+  • rules:core-rules:journal:ref:07 — заменено ссылок: 2
+  • rules:core-rules:journal:ref:10 — заменено ссылок: 94
+  • rules:enrich-rules: — заменено ссылок: 64
+  • rules:enrich-rules:journal:index — заменено ссылок: 30
+  • rules:export-rules: — заменено ссылок: 32
+  • rules:export-rules:checks:index — заменено ссылок: 2
+  • rules:export-rules:functional:removed — заменено ссылок: 2
+  • rules:export-rules:journal:index — заменено ссылок: 16
+  • rules:index — заменено ссылок: 6
+✅ rules:core-rules:journal:index — индекс журнала пересобран: 78 карточек
+✅ rules:enrich-rules:journal:index — индекс журнала пересобран: 15 карточек
+• rules:export-rules:journal:index — карточек журнала нет, индекс не строим
+
+перенесено: 103 | отказов: 0 | ссылок переписано: 470 | изменения записаны

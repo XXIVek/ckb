@@ -292,6 +292,14 @@ try:
     from check_rules_layer import main as rules_layer_check
     if rules_layer_check([]) != 0:
         sys.exit(1)
+    # Корневая карточка `rules:` входит в набор, который читают всегда, — её размер платит за себя
+    # в каждом окне контекста (узел ROOT-ROUTER-COPY, 26.10.2026). В ней лежал раздел `===MCP` —
+    # копия всегда загружаемого `.clinerules/1C_Rule.md`, которую перестали синхронизировать:
+    # 19 612 симв. (80 % карточки) и 1.3 % совпадения с живой версией, причём копия предписывала
+    # отменённый двухшаговый поиск адресом. Сторож снимает копию и не даёт ей вернуться.
+    from strip_root_router_copy import main as root_card_check
+    if root_card_check([]) != 0:
+        sys.exit(1)
 except SystemExit:
     raise
 except Exception as e:
@@ -323,6 +331,7 @@ print("✅ текст правил поиска (SEARCH_RULES.md + .clinerules/1
       "с регистром инструментов server.py; устаревших утверждений нет")
 print("✅ слои правил проекта в local_doc: адреса разрешаются, состояния и индексы целостны, "
       "текст строк совпадает с исходниками")
+print("✅ корневая карточка правил под бюджетом: копии текста маршрутизатора в ней нет")
 print("\n📁 Project structure:")
 project_root = Path(__file__).parent
 for item in sorted(project_root.iterdir()):

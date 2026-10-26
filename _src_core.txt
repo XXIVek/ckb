@@ -1,0 +1,455 @@
+##### id=6125 rules:core-rules: tags=['1c-rules-root', 'rules', 'rules-layer', 'tree-node', '1c-configurations-core']
+===SUMMARY
+Первая карточка слоя правил MCP `1c-configurations-core` — уровень 2 дерева правил. Она говорит, что это за сервер и
+как устроены правила его слоя; сами правила лежат следующим уровнем.
+
+Сегодня правила слоя записаны под прежним адресом `core-rules:<...>` — слой ещё не переразвёрнут в
+дерево `rules:core-rules:<правило>`. Поэтому перечень `===LINKS` ниже ведёт именно туда, а
+подсказка «когда нужен» взята из раздела `===WHEN` самой карточки. Когда слой переразвёрнут,
+ссылки переставляются на адреса дерева в тот же момент, когда меняется строка БД.
+
+Раздел `===MCP` — общие записи слоя, перенесённые из корневой карточки без правок текста. Их разбор
+по отдельным правилам и частям `ref:NNN` — отдельный шаг.
+
+===MCP
+### ⚙️ Шаг 2: Загрузка выгрузок 1С (MCP `1c-configurations-core`)
+
+**Когда использовать:** загрузить каталог выгрузки (внешний отчёт, внешняя обработка, конфигурация,
+расширение) в базу `ckb_1c_configurations`, подтвердить перезагрузку дубликата, удалить загруженный
+объект. **Смотреть содержимое объекта средствами core-MCP нельзя** — инструменты просмотра удалены:
+для этого служат MCP `1c-configurations-enrichment` (карточка объекта, поиск по алиасам, сниппеты)
+и SQL-сверки `check_external_report_*.sql`.
+
+| Сценарий | Инструмент | Описание |
+|----------|-----------|----------|
+| Правила загрузки (Шаг 0) | `get_load_config_rules_tool()` | compact-правила `LOAD_RULES_Config.md` |
+| **Загрузка каталога (точка входа каталога)** | `load_1c_catalog_tool(source_path, force=False)` | тип каталога определяется самим сервером по файлам корневого каталога |
+| **Загрузка двоичного файла внешнего объекта (узел V25)** | `load_external_object_file_tool(file_path, config_file="", db_path="", work_dir="", force=False, keep_layout=False)` | `.erf` / `.epf` → `ibcmd config --db-path <ИБ> export --file=<файл> <база>` → тот же `load_catalog`. **Пути обязаны быть абсолютными**; рабочая ИБ `_ibcmd_work/ib` переиспользуется; `config_file` — `.cf` для загрузки в ИБ (без него имена `cfg:` не разрешатся — это предупреждение, а не отказ, правило R14); имена параметров — только как в коде |
+| Модули предопределённых программ корня (узел V44) | `load_configuration_root_modules_tool(source_path, configuration_uuid=None)` | **второй слой загрузки конфигурации**: `Ext/SessionModule.bsl`, `OrdinaryApplicationModule.bsl`, `ExternalConnectionModule.bsl`, `ManagedApplicationModule.bsl` и содержимое их форм; каждая строка подтверждается записью индекса состава (`ConfigDumpInfo.xml` → `configuration_objects`), поэтому различаются `empty` (пустой модуль), `indexed_no_file` (индекс объявил, файла нет), `file_not_indexed` (файл есть, индекса нет) и `absent` (нет ни тем ни другим). Конфигурация обязана быть загружена точкой входа `load_1c_catalog_tool`; внешнего ключа в схеме нет осознанно (прецедент V20.1); модули объектов и общие модули этим инструментом **не** грузятся |
+| Удаление внешнего объекта | `delete_external_report_tool(source_path \| uuid \| report_id, object_type?)` | снимает запись, детей и обогащение |
+| Привязать внешний объект к конфигурации (узлы V20, V20.1) | `set_object_configuration_tool(uuid \| source_path, configuration_id)` — инструмент enrichment-MCP (контракт 17 → 18); **показывает** привязку карточка `config_enrichment_stats_tool(uuid=…, card=True)`, обратный перечень отдаёт тот же вызов без uuid | привязку заявляет только оператор; `NULL` = «привязка не заявлена», а не «универсальный»; `configuration_id=None` — снять; несуществующий id отклоняется инструментом; внешнего ключа в схеме нет, битая ссылка называется прямо и требует перепривязки; `force=True` переносит значение |
+
+> ⚠️ **Контракт — пять инструментов** (три утверждены 12.10.2026: `register_external_report_tool`
+> и `analyze_config_load_tool` убраны, анализ выполняется внутри точки входа; четвёртый —
+> `load_external_object_file_tool`, добавлен узлом V25 15.10.2026 как вторая точка входа, для
+> двоичного файла внешнего объекта; пятый — `load_configuration_root_modules_tool`, добавлен узлом
+> V44 22.10.2026 как второй слой загрузки конфигурации: модули предопределённых программ корня и
+> содержимое их форм). 18 внеконтрактных
+> инструментов (`list_configurations_tool`, `get_configuration_tool`, `find_config_by_name_uuid_tool`,
+> `search_config_objects_tool`, `list_config_objects_tool`, `get_object_structure_tool`,
+> `search_bsl_code_tool`, `get_bsl_module_code_tool`, `list_bsl_modules_tool`,
+> `read_config_file_tool`, `get_enum_values_tool`, `batch_index_from_dump_tool`,
+> `count_objects_by_config_tool`, `delete_objects_by_config_tool`, `update_configuration_status_tool`,
+> `delete_config_tool`) **удалены 14.10.2026** — они обращались к несуществующей БД
+> `configurations` и к отсутствующим таблицам. Состав инструментов проверяется AST-сверкой
+> `python tools/check_mcp_tool_wiring.py`.
+> Норматив поведения: `docs/config-scenarios/FLOWCHART_1c-configurations-core.md`.
+>
+> 📌 **Узлы V20 + V20.1 (14.10.2026): привязка внешнего объекта к конфигурации.** В `external_report`
+> есть колонка `configuration_id` — **id строки заголовка** конфигурации (`configurations.id`).
+> Внешний ключ **снят узлом V20.1** в тот же день: `configurations` — справочная таблица, нужная
+> только при проверке данных отчёта, а ключ блокировал бы удаление или пересоздание заголовка;
+> индекс `idx_external_report_configuration_id` сохранён (обратный поиск привязок и битых ссылок).
+> Привязку **заявляет только оператор**: из выгрузки 1С значение не выводится, автоматической
+> классификации («универсальный / параметризуемый / привязанный») нет. Состояний ровно три:
+> `NULL` — «привязка **не заявлена**» (никогда не читается как «отчёт универсальный» — такого
+> состояния в модели нет); id + живая строка заголовка — «привязано»; id без строки заголовка —
+> «битая ссылка, требуется перепривязка» (название состояния даёт карточка, сводка и
+> предупреждение генерации). Ставит и снимает привязку `set_object_configuration_tool`
+> (enrichment-MCP, контракт 17 → 18): несуществующий id отклоняется, битой ссылки инструмент не
+> создаёт. `force=True` значение **переносит** (правило R11 норматива).
+> Подробности: п. 20–21 `.clinerules/1c-configurations-core_Rule.md`, раздел 12
+> `docs/CONFIGURATIONS_ENRICHMENT_PLAN.md`, проверки `python tools/check_v20_config_link.py`,
+> фаза `phase_configuration_link` в `validate_enrichment_flow.py`, раздел `15f`
+> `check_external_report_inventory.sql`.
+
+**Варианты каталога** (правило R1, признаки — только файлы корневого каталога):
+
+| Вариант | Статус |
+|---|---|
+| `external_report` — внешний отчёт | ✅ реализован (включая обогащение V17) |
+| `external_processing` — внешняя обработка | ✅ реализован узлом V22: заголовок пишется в ту же таблицу `external_report` с `object_kind='external_processing'` (правило R12); отдельной таблицы `external_processing` в схеме нет |
+| `configuration` — конфигурация | ⚠️ частично (узлы V32/V33): `Configuration.xml` → заголовок `configurations`, `ConfigDumpInfo.xml` → индекс состава `configuration_objects` (перечень объектов метаданных, без их XML); содержимое видов метаданных (реквизиты, формы, макеты, модули объектов конфигурации) — не грузится |
+| `extension` — расширение | ❌ возвращает «сценарий не реализован» (заглушка) |
+| двоичный файл `*.erf` / `*.epf` (это не каталог) | ✅ реализован узлом V25: `load_external_object_file_tool` конвертирует файл штатной командой `ibcmd config --db-path <ИБ> export --file=<файл> <база>` в каталог разбора, дальше работает то же правило R1 и тот же `load_catalog` |
+
+---
+
+### 2. Редактирование кода MCP `1c-configurations-core` (server_configurations_core.py)
+
+**Перед началом редактирования файлов MCP `1c-configurations-core`:**
+
+✅ **ОБЯЗАТЕЛЬНО** ознакомьтесь с файлом правил:
+
+```text
+C:\1C_LLM\ckb\.clinerules\1c-configurations-core_Rule.md
+```
+
+**Что нужно знать из файла правил:**
+
+- Структура базы данных `ckb_1c_configurations` (`external_report`, `attributes`,
+  `tabular_sections`, `forms`, `form_ext`, `templates`, `bsl_modules`), витрины
+  `v_form_elements`, `v_form_events`
+- Контракт загрузки: пять инструментов, четыре исхода, правило R1 (тип по файлам корневого каталога)
+- Порядок создания БД «с нуля»: шаг 1 `src/ddl_external_report.sql` → шаг 1b
+  `src/ddl_enrichment.sql` → шаг 2 `create_1c_configurations_db.sql`
+- Критические правила работы с UUID (R3), транзакционностью загрузки и удалением детей
+
+**После ознакомления:**
+
+1. Убедитесь, что понимаете механизм разбора выгрузки (`src/external_*_parser.py`)
+2. Проверьте соответствие описанных таблиц реальному состоянию БД (`_cmp_ddl.py`)
+3. Помните: `server_configurations_core.py` ведётся **вручную**, генератора больше нет
+4. Только после этого приступайте к редактированию кода
+
+---
+
+===LINKS
+| id | адрес | когда нужен |
+|---:|---|---|
+| 6004 | `core-rules:index` | Карточка-оглавление слоя `core-rules`. Первый шаг работы с этим MCP — прочитать её, дальше брать нужный адрес … |
+| 6005 | `core-rules:ref:01` | — |
+| 6006 | `core-rules:ref:02` | — |
+| 6007 | `core-rules:ref:02:2` | — |
+| 6008 | `core-rules:ref:03` | — |
+| 6009 | `core-rules:ref:03:2` | — |
+| 6010 | `core-rules:ref:03:3` | — |
+| 6011 | `core-rules:ref:03:4` | — |
+| 6012 | `core-rules:ref:03:5` | — |
+| 6013 | `core-rules:ref:04` | — |
+| 6014 | `core-rules:ref:04:2` | — |
+| 6015 | `core-rules:ref:04:3` | — |
+| 6016 | `core-rules:ref:05` | — |
+| 6017 | `core-rules:ref:05:2` | — |
+| 6018 | `core-rules:ref:05:3` | — |
+| 6019 | `core-rules:ref:06` | — |
+| 6020 | `core-rules:ref:06:2` | — |
+| 6021 | `core-rules:ref:06:3` | — |
+| 6022 | `core-rules:ref:07` | — |
+| 6023 | `core-rules:ref:08` | — |
+| 6024 | `core-rules:ref:09` | — |
+| 6025 | `core-rules:ref:10` | — |
+| 6026 | `core-rules:ref:11` | — |
+| 6027 | `core-rules:ref:12` | — |
+| 6028 | `core-rules:ref:13` | — |
+| 6029 | `core-rules:ref:14` | — |
+| 6030 | `core-rules:ref:15` | — |
+| 6031 | `core-rules:ref:16` | — |
+| 6032 | `core-rules:ref:17` | — |
+| 6033 | `core-rules:ref:18` | — |
+| 6034 | `core-rules:ref:19` | — |
+| 6035 | `core-rules:ref:20` | — |
+
+===INDEX
+core-rules:index
+core-rules:ref:01
+core-rules:ref:02
+core-rules:ref:02:2
+core-rules:ref:03
+core-rules:ref:03:2
+core-rules:ref:03:3
+core-rules:ref:03:4
+core-rules:ref:03:5
+core-rules:ref:04
+core-rules:ref:04:2
+core-rules:ref:04:3
+core-rules:ref:05
+core-rules:ref:05:2
+core-rules:ref:05:3
+core-rules:ref:06
+core-rules:ref:06:2
+core-rules:ref:06:3
+core-rules:ref:07
+core-rules:ref:08
+core-rules:ref:09
+core-rules:ref:10
+core-rules:ref:11
+core-rules:ref:12
+core-rules:ref:13
+core-rules:ref:14
+core-rules:ref:15
+core-rules:ref:16
+core-rules:ref:17
+core-rules:ref:18
+core-rules:ref:19
+core-rules:ref:20
+
+
+##### id=6022 core-rules:ref:07 tags=['1c-configurations-core', 'core-rules', 'rules-layer', 'index']
+### ⚠️ Критические правила и ограничения
+### Обязательные шаги перед работой
+
+1. **ВСЕГДА читайте индекс слоя правил `core-rules:index`** перед началом работы: правила больше
+   не отдаются отдельным инструментом (узел RULE-LAYER, 24.10.2026), а сплошной файл правил
+   обходил категорию и подмешивал чужие строки.
+2. **Загружайте каталог только через `load_1c_catalog_tool(source_path, force=False)`** —
+   отдельный анализ перед загрузкой не нужен и не выполняется.
+3. Если `uuid` в XML пустой — это **ошибка загрузки** (R3), а не попытка вставки.
+4. Дубликат по UUID перезаписывается **только** явным `force=True` — и **только после вопроса
+   оператору**. Исход `⚠️ уже загружено` — это точка остановки диалога, а не повод выбирать
+   `force=True` самостоятельно: обычная просьба «загрузи конфигурацию» не означает согласия на
+   перезапись (оператор не знает о дубликате). Самостоятельное `force=True` допустимо лишь при
+   явной команде «замени конфигурацию» / «перезагрузи» — она и есть подтверждение.
+5. **За содержимым выгруженного объекта — только в MCP-инструменты.** Прямые `psql.exe`,
+   `information_schema`, чтение файлов выгрузки и иные обращения мимо MCP в ответе оператору
+   не участвуют: нужные данные отдают `config_enrichment_stats_tool(card=True)`,
+   `list_config_aliases_tool(target_type=…)`, `list_config_snippets_tool`, `get_config_snippet_tool`.
+   Если информации ни одним инструментом контракта не получить — это дефект контракта: нужно
+   сказать оператору и предложить инструмент, а не ходить в обход. Прямой SQL остаётся только
+   в скриптах-валидаторах и SQL-сверках проекта (`check_external_report_*.sql`, `_cmp_ddl.py`),
+   которые сами ничего не отвечают оператору.
+
+### Известные проблемы и ограничения
+
+#### Проблема: Ошибка при регистрации внешних отчетов с пустыми ChildObjects — ✅ Исправлено
+- **Симптом:** `❌ Ошибка: Failed to get object ID from INSERT result: []`
+- **Причина:** При пустом `<ChildObjects/>` (0 реквизитов, 0 ТЧ, 0 форм, 0 макетов) функция `_run_psql()` возвращала пустой список `[]`, и код не мог извлечь ID через `[0]['result']`
+- **Решение (этап 12.10.2026, узел V9):** запись метаданных переведена на psycopg2 — `TableRowWriter.insert()` выполняет `INSERT … RETURNING id` и читает ID через `cursor.fetchone()`. Ни `RETURNING` через psql, ни fallback `SELECT по uuid`, ни `SELECT MAX(id)` больше не нужны: для пустого `ChildObjects` вставка отрабатывает так же, как с детьми. Проверено на `Test3_Otchet_Null`, `Test1_Otchet`, `Test2_Otchet`, `Test4_Otchet_Regress`
+- **Индексация BSL-модулей** осталась на `_run_psql()` (унаследованный блок): SQL передаётся через stdin как UTF-8 (`PGCLIENTENCODING=UTF8`), проверяется `stderr` на наличие `ERROR:` даже при `returncode == 0`. Перевод BSL в транзакцию psycopg2 — отложен (см. норматив, раздел 9, п. 5)
+
+#### Проблема: Внешние отчеты без папок Ext/Forms/Templates
+- Загрузка продолжается, счётчики `forms`/`form_ext`/`templates`/`bsl_modules` = 0, в карточке
+  предупреждение — это **нормально** (эталон: `Test3_Otchet_Null`, `Test4_Otchet_Regress`)
+- Бинарная форма (`Forms/<Имя>/Ext/Form.bin` вместо `Form.xml`) — тоже не ошибка: содержимое
+  сохраняется в `form_ext.ext_bin`, свойства формы не разбираются, выдаётся предупреждение
+- UUID из корневого тега `<ExternalReport uuid="...">` обязателен; uuid формы/макета обязателен,
+  но берётся из `Forms/<Имя>.xml` / `Templates/<Имя>.xml` (R3)
+
+#### Проблема: Пустой name в XML
+- Если `<Properties><Name>` пуст, используется имя файла без расширения как fallback
+- Может привести к нечитаемым названиям объектов
+
+### Основные правила
+
+1. **Внешние обработки/отчеты НЕ проходят через `batch_index_from_dump`** — у них нет ConfigDumpInfo.xml
+2. **BSL-модули внешних обработок** индексируются автоматически из папки `*/Ext/*.bsl`
+3. **Бинарные формы** (`Forms/<Имя>/Ext/Form.bin`) разбираются загрузчиком: `0/module` →
+   `form_ext.ext` (узел V14), `0/form` → колонки состава `form_ext` (узел V15); прочее бинарное
+   содержимое (`templates.ext_bin`) сохраняется как есть и не разбирается
+4. **Удаление внешнего объекта — `delete_external_report_tool(source_path | uuid | report_id,
+   object_type?)`**; `delete_config_tool` удалён 14.10.2026 вместе с внеконтрактными
+   инструментами (п. 11)
+5. **Источники конфигураций:** `C:\1C_LLM\LoadDoc` (вне проекта); с 18.10.2026 полные
+   конфигурации консолидованы в `C:\1C_LLM\LoadDoc\Configurations` — см. раздел
+   «Путь к источникам конфигураций»
+6. **Правим только в базе данных (принято оператором 15.10.2026).** Создание, редактирование и
+   удаление внешнего объекта выполняется **только строками БД** `ckb_1c_configurations`
+   (`external_report`, `attributes`, `tabular_sections`, `forms`, `form_ext`, `templates`,
+   `bsl_modules`, `config_*`). Каталог XML-выгрузки — **не источник истины и не место правок**,
+   а транспорт: через него объект загружается в БД (`load_1c_catalog_tool`,
+   `load_external_object_file_tool`) и выгружается из неё (сборка XML из строк БД →
+   `ibcmd config import` → `.erf`/`.epf`). Штатный цикл правки: **правка строк БД → сборка XML
+   из БД → `import_from_layout` → проверка в конфигураторе → повторная загрузка**. Правки файлов
+   выгрузки «в обход БД» рабочим путём не считаются; значит любой инструмент правки обязан писать
+   в БД, а отдавать объект наружу — только через сборку XML из этих же строк (узел V18/V29).
+   Полнота обратной сборки (проверено по живой схеме): ordinary-форма — из `form_ext.ext_bin`
+   побайтово, макет — из `templates.ext`, модули — из `bsl_modules.code` / `form_ext.ext`,
+   свойства заголовка — из колонок `external_report`; **исходный текст `Form.xml` управляемой
+   формы в БД не сохраняется** (в `form_ext` лежат только разложенные колонки), поэтому для
+   загруженного извне объекта она будет сборкой по колонкам, а не побайтовым воспроизведением.
+
+
+##### id=6029 core-rules:ref:14 tags=['1c-configurations-core', 'core-rules', 'rules-layer', 'ref']
+### Четыре и только четыре исхода `load_1c_catalog_tool`
+Те же четыре исхода отдаёт `load_external_object_file_tool` (узел V25): мост возвращает ответ
+точки входа без изменений, добавляя отдельный раздел разбора (чем работали, состояние ИБ,
+`cfg:`-имена, тайминги); при отказе разбора карточки загрузки нет вовсе — есть строка о этапе.
+
+| Исход | Когда | Действия оператора |
+|---|---|---|
+| `✅ загружено` | объект новый | проверить карточку: ID, UUID, имя, число BSL-модулей |
+| `♻️ перезагружено` | был дубликат + `force=True` | — |
+| `⚠️ уже загружено` | UUID уже есть в таблице (в том числе при другой версии объекта) | повторить вызов с `force=True` или удалить через `delete_external_report_tool` |
+| `❌ не могу загрузить` | нет каталога / каталог не подходит / пустой UUID / сценарий не реализован / не получен ID / тот же `uuid` занят строкой другого вида (узел V22, статус `kind_conflict`) | устранить причину и повторить |
+
+Ключевые правила:
+
+1. **Пустой UUID — это ошибка загрузки**, а не попытка вставки без идентификатора.
+2. **Дубликат не перезагружается молча**: перезапись только по явному `force=True`.
+   AI-ассистент, получив `⚠️ уже загружено`, **обязан остановиться и спросить оператора**.
+   Фраза вида «загрузи конфигурацию» права на самостоятельную перезапись не даёт: оператор не
+   знает, есть ли дубликат. `force=True` без вопроса допустим только по явной команде
+   («замени конфигурацию», «перезагрузи», «force=True») — она означает, что о дубликате известно.
+   То же касается `delete_external_report_tool`: удаление уже загруженной записи — решение оператора.
+3. Тот же UUID при другой версии — тот же случай дубликата: колонки `version` в таблице
+   `external_report` нет, сравнения версий не выполняется.
+4. Ответы всегда на русском; одна ошибка — одна причина и одна подсказка.
+5. **Модуль формы хранится в `form_ext.ext`**, а не в `bsl_modules` (правило R9). В
+   `bsl_modules` — только модули объекта/менеджера из `Ext/`.
+6. **uuid формы и макета берётся только из файлов регистрации** `Forms/<Имя>.xml`,
+   `Templates/<Имя>.xml`; имена из корневого XML — только сверка (расхождение = предупреждение).
+7. Дочерние строки уникальны **в пределах родителя** (правило R10): `forms`/`templates` —
+   `UNIQUE (parent_uuid, uuid)`, `form_ext` — `UNIQUE (form_id)`, `bsl_modules` — частичный
+   индекс `(parent_uuid, file_path)`.
+8. **`configuration_id` — данные оператора, а не выгрузки (правило R11, узлы V20/V20.1).** Из XML
+   внешнего объекта привязка к конфигурации не выводится; поле `external_report.configuration_id`
+   (id строки заголовка `configurations.id`) заполняет только оператор — инструментом
+   `set_object_configuration_tool` (enrichment-MCP). Внешнего ключа в схеме нет (узел V20.1):
+   `configurations` — справочная таблица, нужная при проверке данных отчёта, а ключ блокировал бы
+   ведение заголовков; индекс по колонке сохранён ради обратного поиска. `NULL` = «привязка не
+   заявлена» — это НЕ «отчёт универсальный» (такого состояния в модели нет); id без строки
+   заголовка = «битая ссылка, требуется перепривязка» — состояние называется прямо в карточке,
+   сводке и в предупреждении генерации. `force=True` переносит значение на новую строку; карточка
+   дубликата показывает привязку, карточка перезагрузки — строку «Привязка к конфигурации
+   перенесена».
+9. **Внешний объект — одна таблица-заголовок и колонка вида (правило R12, узел V22).** И отчёт, и
+   обработка пишутся в `external_report`; вид задаёт `object_kind` (`external_report` /
+   `external_processing`), его заявляет класс писателя заголовка, а не разбор XML; пустой
+   `<xr:ClassId>` читается как `external_report` и даёт предупреждение, чужой ClassId — отказ.
+   Отдельной таблицы `external_processing` и колонки `bsl_modules.processing_id` в схеме нет;
+   `parent_type` во всех дочерних строках совпадает с `object_kind` заголовка. Один `uuid` под
+   двумя видами — отказ `kind_conflict` (это исход `❌`, а не дубликат: `force=True` удалил бы
+   чужой объект).
+
+
+##### id=6030 core-rules:ref:15 tags=['1c-configurations-core', 'core-rules', 'rules-layer', 'ref']
+### Что сохраняется
+**Из корневого XML (узел V12):** реквизиты объекта и колонки табличных частей — в `attributes`,
+табличные части — в `tabular_sections` (связь `parent_uuid → external_report(uuid)`, колонки
+ТЧ перечислены в `column_uuids`).
+
+**Из подкаталогов выгрузки (узел V13):**
+
+| Что в выгрузке | Куда сохраняется |
+|---|---|
+| `Forms/<Имя>.xml` | `forms` (`uuid` берётся из этого файла) |
+| `Forms/<Имя>/Ext/Form.xml` | `form_ext`: скалярные свойства формы (читаются из **корня** `Form.xml`, обёртки `<Properties>` в нём нет) + `auto_command_bar`, `events`, `attributes`, `commands`, `items` — jsonb |
+| `Forms/<Имя>/Ext/Form/Module.bsl` | `form_ext.ext` (+ `ext_size`, `ext_format`, `ext_path`) |
+| `Forms/<Имя>/Ext/Form.bin` | `form_ext.ext_bin` (`ext_format='bin'`) |
+| `Templates/<Имя>.xml`, `Templates/<Имя>/Ext/Template.xml`, `Template.bin` | `templates` + `templates.ext` / `ext_bin` / `ext_root_tag` |
+| `Ext/objectmodule.bsl`, `Ext/managermodule.bsl` | `bsl_modules` (+ `parent_uuid`, `parent_type`, `module_type`, `code_size`, `truncated`) |
+
+Все вставки — **одна транзакция**, при ошибке полный откат. Отсутствующие каталоги `Forms/`,
+`Templates/`, `Ext/`, бинарная форма вместо `Form.xml`, форма/макет на диске без объявления в
+корневом XML — **предупреждение, а не ошибка**. Порог текстового содержимого — 1 000 000
+символов, факт обрезки — `ext_truncated` / `truncated`. Индексация BSL идёт в той же транзакции
+(блок через `psql.exe` из загрузчика удалён).
+
+**Обычная форма** (`forms.form_type='Ordinary'`, вместо `Form.xml` — `Form.bin`): `Form.bin` —
+контейнер 1С, внутри `0/form` (текст разметки: имена элементов, команд, событий открытым текстом)
+и `0/module` (текст модуля формы). **С узла V14 (13.10.2026)** загрузчик сам распаковывает
+сохранённый `ext_bin` и пишет текст `0/module` в `form_ext.ext`: `ext_size` остаётся размером
+`Form.bin`, `ext_path` ведёт на `Form.bin`, в `bsl_modules` модуль формы не дублируется (R9).
+`v8unpack` — опциональная зависимость (решение зафиксировано узлом V15: в корень проекта не
+переносится, остаётся в `tools/requirements.txt`): без неё `ext` пуст, загрузка продолжается,
+предупреждение говорит про `Form.bin`, а не про несуществующий `Ext/Form/Module.bsl`.
+**С узла V15 (13.10.2026)** разметка `0/form` раскладывается декодером
+`src/external_form_decoder.py::decode_layout` (обёртка над `v8unpack.FormElements26/27`, версия
+читается из `0/form`) в те же колонки `form_ext`, что и разбор `Form.xml` у управляемой формы:
+`items` (`path`/`name`/`type`/`page`/`data_source`/`captions`), `attributes` (источники данных
+формы), `events`, `commands`, `auto_command_bar`. Контейнер распакуется один раз на форму и
+переиспользуется для `0/module` и `0/form`; полный `elem.json` в БД не пишется (источник истины —
+`ext_bin`). Сбой разбора (нет `v8unpack`, неподдерживаемая версия, битая разметка) — предупреждение
+и пустые колонки состава, загрузка идёт дальше. Не сохраняются: скалярные свойства ordinary-формы
+и её заголовок (колонки под них нет, DDL узла V15 не менялся). Ручные инструменты:
+`python tools/extract_form_modules.py <каталог>` и `tools/pack_form_modules.py` (нужен
+`pip install v8unpack`, вызов с `deflate=False`; CLI `-E` к `Form.bin` неприменим), разбор одной
+разметки и round-trip — `python tools/decode_form_layout.py`.
+
+**Скалярные свойства содержимого формы (узел V14.1, 13.10.2026).** В `Form.xml` они лежат в его
+корне, а не в `<Properties>` (в отличие от XML метаданных), и читаются по `FORM_CONTENT_FIELDS`:
+`command_bar_location`, `report_result`, `details_data`, `report_form_type`, `auto_show_state`,
+`custom_settings_folder`, `report_result_view_mode`, `view_mode_application_on_set_report_result`.
+До правки эти колонки оставались NULL при явно заданных в выгрузке значениях (дефект п. 18
+правил); проверка — раздел 19 `check_external_report_fill.sql` и проверка «скалярные свойства
+формы» в `validate_external_children.py`. У ordinary-формы (`ext_format='bin'`) эти свойства не
+заполняются и дальше: для ordinary `Form.xml` не выгружается, а скаляры из `0/form` в узел V15 не
+входили (узла для них пока нет).
+
+
+##### id=6031 core-rules:ref:16 tags=['1c-configurations-core', 'core-rules', 'rules-layer', 'ref']
+### Предупреждения
+- **НЕ запускать `python generate_servers.py`** для core-сервера: `server_configurations_core.py`
+  ведётся вручную, генератор возьмёт тела инструментов из устаревшего `server_configurations.py`
+  и потеряет инструменты контракта.
+- После правок в `src/*.py` или `server_configurations_core.py` MCP-сервер нужно перезапустить:
+  `cd C:\1C_LLM\ckb; python server_configurations_core.py` — иначе работает старый код.
+- Проверка поведения: `python validate_load_flow.py` (безопасно) и
+  `python validate_load_flow.py --with-load` (загружает тестовые внешние отчёты и сверяет
+  счётчики `attributes`/`tabular_sections`/`forms`/`form_ext`/`templates`/`bsl_modules`,
+  записи удаляет); `python validate_external_children.py` — содержимое дочерних таблиц V12–V15
+  (модуль формы в `form_ext.ext`, состав ordinary-формы в `form_ext.items`/`attributes`/`events`/
+  `commands`, содержимое макетов в `templates.ext`, витрины `v_form_elements`/`v_form_events`,
+  деградация без `v8unpack` и детерминированный повторный разбор, каскад, откат, сироты);
+  `python _v13_mcp_layer.py` — те же вызовы через тонкие обёртки `server_configurations_core.py`
+  (load → duplicate → force → delete по uuid/report_id/source_path), но без stdio-транспорта;
+  `python _cmp_ddl.py` — собирает временную БД шагами установки (см. ниже «Схема БД») и сверяет
+  со живой `ckb_1c_configurations` всю схему public: колонки таблиц и витрин, индексы, внешние
+  ключи, определения витрин; расхождений быть не должно. Содержимое **обычной** формы
+  (`form_type='Ordinary'`, `Form.bin`) —
+  `python validate_form_bin_decode.py --file <Form.bin> --uuid <uuid> --form <Имя> --out <файл>`:
+  распаковывает контейнер (нужен v8unpack, `deflate=False`) из файла или из `form_ext.ext_bin`,
+  печатает состав контейнера и список процедур модуля, сохраняет байты модуля в файл и сверяет
+  оба источника (секция V14); затем сверяет офлайн-разбор `0/form` с содержимым `form_ext.items`/
+  `attributes`/`events`/`commands` и строками витрин и проверяет round-trip разметки (секция V15).
+  Тот же разбор одной разметки — `python tools/decode_form_layout.py`. Логи перенаправления
+  пишутся с кириллицей только при
+  `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8` и `$env:PYTHONIOENCODING='utf-8'`.
+- **Схема БД «с нуля» — ровно три шага после `CREATE DATABASE`** (порядок фиксирован,
+  подробности и причина — `.clinerules/1c-configurations-core_Rule.md`, раздел «Порядок создания
+  БД «с нуля»», и п. 17 там же): шаг 1 `src/ddl_external_report.sql` (генерируется
+  `src/generate_ddl.py`; `external_report` — единая таблица-заголовок внешних объектов с колонкой
+  `object_kind` (узел V22) + дочерние таблицы + витрины `v_form_elements` / `v_form_events`),
+  шаг 1b `src/ddl_enrichment.sql` (`config_*` и витрины обогащения, узел V17), шаг 2
+  `create_1c_configurations_db.sql` (`configurations`, `config_extensions`, `bsl_modules`;
+  таблица `external_processing` с узла V22 не создаётся). Для уже созданной БД изменения схемы
+  применяются аддитивными `migrate_*.sql` (в том числе `migrate_v22_object_kind.sql`); правка
+  схемы обязана идти парой «миграция + DDL/бутстрап», иначе `_cmp_ddl.py` падает.
+- Ручная SQL-проверка заполнения, поиска и инвентаря: `check_external_report_fill.sql`
+  (разделы 1–9 — целостность, дубликаты, сироты, заполненность jsonb; разделы 10–15 — V13:
+  счётчики `forms`/`form_ext`/`templates`/`bsl_modules`, размещение модулей по R9, содержимое
+  макетов, дубли в пределах родителя по R10; раздел 16 — типы форм `Ordinary`/`Managed` и
+  заполненность `ext`/`ext_bin`: пустой `ext_bin` у `Ordinary` — дефект; разделы 17–18 — V14+V15:
+  модуль формы извлечён, пустых `items` у `Ordinary` быть не должно, заполненные `attributes`/
+  `events`/`commands`/`auto_command_bar` = 1, инварианты `ext_size` / `ext_truncated` / `ext_path`,
+  состав форм и событий через витрины (для эталонной ordinary-формы: 10 элементов, 3 с источником
+  данных, 4 с подписью, 1 событие); раздел 19 — V14.1:
+  скалярные свойства содержимого формы (пустой `report_form_type` у `Managed` с `Form.xml` —
+  дефект разбора); `check_external_report_search.sql` (поиск 1–9 и 10–11 —
+  содержимое макета и модуля формы; 12–16 — элементы ordinary-формы, их подписи, источники данных,
+  события через витрины); `check_external_report_inventory.sql` (разделы 0–14; инвентарь «что видно
+  из БД без распаковки `Form.bin`»: состав и наполнение форм, модули `bsl_modules` и `form_ext.ext`,
+  содержимое витрин, слепые зоны). Пустой jsonb-массив — не NULL:
+  считать через `jsonb_typeof` / `jsonb_array_length`, а не `IS NOT NULL`. Запускать через
+  `psql -v ON_ERROR_STOP=1 -f … -o файл` при
+  `PGCLIENTENCODING=UTF8`: без `ON_ERROR_STOP` ошибка в середине файла не останавливает выполнение
+  и часть проверок молча не делается; в `-c "…" ` кириллица из консоли ломается, а конвейер
+  PowerShell перекодирует вывод; литерал `'\'` внутри SQL ломает разбор скрипта — слэш через `chr(92)`.
+
+
+##### id=6034 core-rules:ref:19 tags=['1c-configurations-core', 'core-rules', 'rules-layer', 'ref']
+### Метрики качества загрузки
+| Тип объекта | Ожидаемый результат | Комментарий |
+|---|---|---|
+| external_report | `forms`/`form_ext` = число каталогов `Forms/`, `templates` с заполненным `ext` или `ext_bin` = число каталогов `Templates/` | 0 — допустимо, если каталогов в выгрузке нет (`Test3_Otchet_Null`, `Test4_Otchet_Regress`) |
+| external_report | `bsl_modules` = число распознанных модулей `Ext/*.bsl` | модуль ФОРМ обязан быть в `form_ext.ext`, а не в `bsl_modules` (R9) |
+| external_report | `attributes` ≥ число `<Attribute>` + колонок ТЧ, `column_uuids` разрешаются полностью | битых ссылок и дублей быть не должно |
+| configuration (заголовок, V32) | `configurations` = 1 строка на `Configuration.xml`; коллизия имени — отдельный статус `name_conflict` (`force=True` не предлагается); `force=True` пересоздаёт строку: id меняется, привязка `external_report.configuration_id` становится `dangling` | провенанс строк конфигурации НЕ ведётся (решение D-C, граница V31) |
+| configuration (индекс состава, V33) | `configuration_objects` = число записей `ConfigDumpInfo.xml` (`entries_total`); отсутствие `ConfigDumpInfo.xml` — предупреждение, а не отказ; таблица индексов не создана — отказ с требованием применить `migrate_v33_configuration_objects.sql` | индекс — производные данные выгрузки, без версионности; повторная загрузка снимает строки и пишет заново |
+| extension | — | метрики появятся вместе с реализацией варианта 2 (остаётся заглушкой) |
+| external_report / external_processing (провенанс, V31) | `origin_kind`/`origin_path`/`origin_sha256` заполнены у строки, загруженной после V31; карточка дубликата и `force=True` обязаны назвать, из какого входа загружена снимаемая строка | провенанс есть только у внешних объектов; у строк конфигурации его нет (D-C); версионности состояний нет (V19 не реализован). Внешняя обработка (узел V22) подчиняется тем же метрикам, что и внешний отчёт: заголовок в той же таблице `external_report`, вид различает `object_kind` |
+
+
+##### id=6035 core-rules:ref:20 tags=['1c-configurations-core', 'core-rules', 'rules-layer', 'ref']
+### Провенанс строки внешнего объекта (узел V31)
+Провенанс отвечает на вопрос «из какого входа появилась эта строка БД». Его заполняет **загрузчик**
+по факту своего вызова, а не оператор: в отличие от `configuration_id` (узел V20, который `force=True`
+переносит), провенанс `force=True` **перезаписывает** — это слепок текущего источника.
+
+| Колонка `external_report` | Что пишет загрузчик |
+|---|---|
+| `origin_kind` | вид входа: `catalog` (каталог XML-выгрузки) / `binary_file` (файл `.erf`/`.epf`) / `authored_layout` (наш собранный layout). Словарь замкнут CHECK; NULL = «провенанс не записан» |
+| `origin_path` | путь этого входа (для `.erf`/`.epf` — сам файл, а не каталог разбора: последний удаляется после успеха и источником не является) |
+| `origin_sha256` | digest несущего входа: файла либо поимённого listing каталога (не склейка содержимого) |
+| `origin_manifest` | состав входа (`{kind, scope, …}`, для каталога — `files[]` и признак `truncated`) |
+
+Границы:
+
+- **`force=True` обязан назвать источник снимаемой строки** — иначе оператор не понимает, тот ли это вход;
+- **провенанс есть только у внешних объектов.** У строк `configurations`/`configuration_objects` колонок
+  `origin_*` нет (решение D-C), и ответ загрузки говорит об этом прямо;
+- **отказ вычислить отпечаток — не отказ загрузки**: колонки остаются NULL, в карточке — предупреждение;
+- **версионности состояний нет** (узел V19 не реализован): провенанс — это источник текущей строки, а не история.
+
+Норматив: `src/external_provenance.py` (docstring), `migrate_v31_provenance.sql`, модель —
+`docs/EXTERNAL_OBJECT_EDIT_PLAN.md` раздел 16; проверка — `tools/check_v31_provenance.py`.

@@ -1,0 +1,13 @@
+core-rules L2|1
+core-rules L3|20
+core-rules L4|11
+enrich-rules L2|1
+enrich-rules L3|11
+enrich-rules L4|4
+export-rules L2|8
+kb-rules L2|1
+kb-rules L3|19
+kb-rules L4|20
+kb-rules L5|7
+rules L2|1
+rules L3|7
