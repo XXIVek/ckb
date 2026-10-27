@@ -295,6 +295,10 @@ CREATE TABLE IF NOT EXISTS bsl_modules (
     revision_no INTEGER NOT NULL DEFAULT 1,
     changed_at TIMESTAMP,
     changed_by TEXT,
+    -- узел V46 (D11): признак коммита строки версии. Заявляет загрузчик значением FALSE;
+    -- TRUE ставит событие коммита. Это не признак «текущей строки»: их круг разрешает
+    -- манифест родителя (решение A1), и от значения флага членство в манифесте не зависит.
+    is_committed BOOLEAN NOT NULL DEFAULT FALSE,
     CONSTRAINT bsl_modules_revision_no_positive CHECK (revision_no >= 1),
     CONSTRAINT bsl_modules_changed_by_known
         CHECK (changed_by IS NULL OR changed_by IN ('load', 'edit', 'restore')),
@@ -480,6 +484,162 @@ CREATE TABLE IF NOT EXISTS bsl_modules_external_connection (
 
 
 -- --------------------------------------------
+-- ТАБЛИЦЫ Е–З узла V46: свойства подсистем и общих модулей конфигурации.
+-- Модель — раздел 4 плана docs/CONFIGURATION_OBJECT_PROPERTIES_PLAN.md (решения D1, D2, D3,
+-- D8, D9, D10, D11). Внешних ключей нет осознанно (прецедент V20.1): FK на заголовок
+-- конфигурации блокировал бы её пересоздание, а ссылка на объект метаданных читается индексом
+-- состава, а не ключом.
+-- Ключ цепочки состояния — (configuration_uuid, full_name, revision_no): full_name является
+-- естественным ключом объекта (замер 2.3), object_name ключом быть не может (D8). Глубина
+-- tree_depth считается от 1 (замер 2.2: 1…5), а не от 0, как depth индекса состава.
+-- Состояние объявления (declaration_state) CHECK не получает: словарь задаёт разбор (шаг П3,
+-- единый источник в коде разбора); повторять его в схеме — значит разъезжать с кодом
+-- (прецедент 48 имён перечней до узла V43).
+-- --------------------------------------------
+CREATE TABLE IF NOT EXISTS subsystems (
+    id BIGSERIAL PRIMARY KEY,
+    configuration_uuid UUID NOT NULL,
+    object_uuid UUID NOT NULL,
+    parent_object_uuid UUID,
+    full_name TEXT NOT NULL,
+    parent_full_name TEXT,
+    object_name TEXT NOT NULL,
+    tree_depth SMALLINT NOT NULL,
+    ordinal INTEGER NOT NULL DEFAULT 0,
+    parent_source TEXT NOT NULL DEFAULT 'layout',
+    declaration_state TEXT,
+    comment TEXT,
+    synonym JSONB,
+    explanation TEXT,
+    include_help_in_contents BOOLEAN,
+    include_in_command_interface BOOLEAN,
+    use_one_command BOOLEAN,
+    content JSONB,
+    content_unresolved JSONB,
+    picture JSONB,
+    created_at TIMESTAMP DEFAULT NOW(),
+    revision_no INTEGER NOT NULL DEFAULT 1,
+    changed_at TIMESTAMP,
+    changed_by TEXT,
+    is_committed BOOLEAN NOT NULL DEFAULT FALSE,
+    CONSTRAINT subsystems_tree_depth_range CHECK (tree_depth BETWEEN 1 AND 5),
+    CONSTRAINT subsystems_parent_source_known
+        CHECK (parent_source IN ('layout', 'declared', 'index_name')),
+    CONSTRAINT subsystems_revision_no_positive CHECK (revision_no >= 1),
+    CONSTRAINT subsystems_changed_by_known
+        CHECK (changed_by IS NULL OR changed_by IN ('load', 'edit', 'restore')),
+    CONSTRAINT subsystems_changed_pair_check
+        CHECK ((changed_at IS NULL) = (changed_by IS NULL))
+);
+
+-- Ссылки включения Content (D3): исходный порядок держит jsonb-колонка родителя, здесь —
+-- разрешённые ссылки. Ревизия строки относится к состоянию подсистемы, а не живёт своей
+-- цепочкой — тот же порядок, что у form_ext (uq_form_ext_form_id_revision): описание детей
+-- принадлежит ревизии родителя. Неразрешённая ссылка остаётся строкой с resolved=FALSE и
+-- пустыми целевыми колонками — «ссылки нет» и «ссылка есть, но цель не найдена» различимы.
+CREATE TABLE IF NOT EXISTS subsystem_content (
+    id BIGSERIAL PRIMARY KEY,
+    configuration_uuid UUID NOT NULL,
+    subsystem_object_uuid UUID NOT NULL,
+    subsystem_full_name TEXT NOT NULL,
+    ordinal INTEGER NOT NULL,
+    ref_text TEXT NOT NULL,
+    ref_form TEXT NOT NULL,
+    resolved BOOLEAN NOT NULL DEFAULT FALSE,
+    target_object_type TEXT,
+    target_object_uuid UUID,
+    target_full_name TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    revision_no INTEGER NOT NULL DEFAULT 1,
+    changed_at TIMESTAMP,
+    changed_by TEXT,
+    is_committed BOOLEAN NOT NULL DEFAULT FALSE,
+    CONSTRAINT subsystem_content_ref_form_known
+        CHECK (ref_form IN ('qualified_name', 'uuid')),
+    CONSTRAINT subsystem_content_object_revision_ordinal_key
+        UNIQUE (subsystem_object_uuid, revision_no, ordinal),
+    CONSTRAINT subsystem_content_revision_no_positive CHECK (revision_no >= 1),
+    CONSTRAINT subsystem_content_changed_by_known
+        CHECK (changed_by IS NULL OR changed_by IN ('load', 'edit', 'restore')),
+    CONSTRAINT subsystem_content_changed_pair_check
+        CHECK ((changed_at IS NULL) = (changed_by IS NULL))
+);
+
+-- Свойства общего модуля (D1, D6): набор свойств замкнут замером 2.5 — ровно 11 свойств
+-- CommonModule, других ни в одной из трёх выгрузок нет. Словарь return_values_reuse снят
+-- тем же замером (_v46e_cm_values_probe.py), а не взят из справочника по памяти.
+-- Текста модуля здесь нет (D6, замер 2.6): 188 МБ на BGU2 и 294 МБ на BP3 — содержимое
+-- загружает отдельная процедура, а не строка свойства.
+CREATE TABLE IF NOT EXISTS common_modules (
+    id BIGSERIAL PRIMARY KEY,
+    configuration_uuid UUID NOT NULL,
+    object_uuid UUID NOT NULL,
+    full_name TEXT NOT NULL,
+    object_name TEXT NOT NULL,
+    comment TEXT,
+    synonym JSONB,
+    global BOOLEAN,
+    privileged BOOLEAN,
+    server BOOLEAN,
+    server_call BOOLEAN,
+    external_connection BOOLEAN,
+    client_managed_application BOOLEAN,
+    client_ordinary_application BOOLEAN,
+    return_values_reuse TEXT,
+    declaration_state TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    revision_no INTEGER NOT NULL DEFAULT 1,
+    changed_at TIMESTAMP,
+    changed_by TEXT,
+    is_committed BOOLEAN NOT NULL DEFAULT FALSE,
+    CONSTRAINT common_modules_return_values_reuse_known
+        CHECK (return_values_reuse IS NULL
+               OR return_values_reuse IN ('DontUse', 'DuringSession', 'DuringRequest')),
+    CONSTRAINT common_modules_revision_no_positive CHECK (revision_no >= 1),
+    CONSTRAINT common_modules_changed_by_known
+        CHECK (changed_by IS NULL OR changed_by IN ('load', 'edit', 'restore')),
+    CONSTRAINT common_modules_changed_pair_check
+        CHECK ((changed_at IS NULL) = (changed_by IS NULL))
+);
+
+-- Дескриптор модуля общего модуля: путь относительно корня выгрузки вместо текста.
+-- Состояние называет отсутствие содержательного состояния, а не молчит о нём (D9):
+-- 'file' — текст есть и он будет загружен, 'bin_only' — есть только Module.bin,
+-- 'indexed_no_file' — запись индекса состава без файла, 'file_not_in_index' — файл без
+-- записи индекса. Слот вида один ('Module', словарь V40): слоты предопределённых программ
+-- корня живут таблицами узла V44 и здесь не дублируются.
+CREATE TABLE IF NOT EXISTS common_module_sources (
+    id BIGSERIAL PRIMARY KEY,
+    configuration_uuid UUID NOT NULL,
+    object_uuid UUID NOT NULL,
+    module_name TEXT NOT NULL,
+    module_type TEXT NOT NULL DEFAULT 'Module',
+    file_path TEXT,
+    file_size BIGINT,
+    content_state TEXT NOT NULL,
+    content_loaded BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    revision_no INTEGER NOT NULL DEFAULT 1,
+    changed_at TIMESTAMP,
+    changed_by TEXT,
+    is_committed BOOLEAN NOT NULL DEFAULT FALSE,
+    CONSTRAINT common_module_sources_module_type_check CHECK (module_type = 'Module'),
+    CONSTRAINT common_module_sources_content_state_check
+        CHECK (content_state IN ('file', 'bin_only', 'indexed_no_file', 'file_not_in_index')),
+    -- путь есть — состояние обязано называть текст; «пути нет» и «текста нет» — одно и то же
+    CONSTRAINT common_module_sources_path_state_check
+        CHECK (file_path IS NULL OR content_state = 'file'),
+    CONSTRAINT common_module_sources_revision_no_positive CHECK (revision_no >= 1),
+    CONSTRAINT common_module_sources_changed_by_known
+        CHECK (changed_by IS NULL OR changed_by IN ('load', 'edit', 'restore')),
+    CONSTRAINT common_module_sources_changed_pair_check
+        CHECK ((changed_at IS NULL) = (changed_by IS NULL)),
+    CONSTRAINT common_module_sources_configuration_object_module_revision_key
+        UNIQUE (configuration_uuid, object_uuid, module_type, revision_no)
+);
+
+
+-- --------------------------------------------
 -- ИНДЕКСЫ (только для таблиц этого файла; индексы внешнего отчёта — в src/ddl_external_report.sql)
 -- --------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_configurations_name ON configurations(name);
@@ -509,7 +669,7 @@ SELECT m.id,
        m.configuration_id, m.module_name, m.file_path, m.code,
        m.object_type, m.object_name, m.report_id, m.created_at,
        m.parent_uuid, m.parent_type, m.module_type, m.code_size,
-       m.truncated, m.revision_no, m.changed_at, m.changed_by
+       m.truncated, m.revision_no, m.changed_at, m.changed_by, m.is_committed
 FROM bsl_modules m
 WHERE m.parent_uuid IS NULL
    OR NOT EXISTS (
@@ -518,6 +678,68 @@ WHERE m.parent_uuid IS NULL
           AND n.file_path = m.file_path
           AND n.revision_no > m.revision_no
    );
+
+-- Витрина текущего состояния подсистем (узел V46). Ключ цепочки — (configuration_uuid,
+-- full_name): full_name является естественным ключом объекта (замер 2.3 плана), цепочка
+-- ведётся по имени, а не по object_uuid — пересоздание объекта с новым UUID продолжает ту же
+-- цепочку, а не начинает новую (решение D8). Признак коммита в выдаче лежит, но на круг
+-- строк не влияет: текущей остаётся максимальная ревизия независимо от флага (решение A1).
+CREATE OR REPLACE VIEW v_current_subsystems AS
+SELECT s.id,
+       s.configuration_uuid, s.object_uuid, s.parent_object_uuid,
+       s.full_name, s.parent_full_name, s.object_name, s.tree_depth, s.ordinal,
+       s.parent_source, s.declaration_state, s.comment, s.synonym, s.explanation,
+       s.include_help_in_contents, s.include_in_command_interface, s.use_one_command,
+       s.content, s.content_unresolved, s.picture, s.created_at,
+       s.revision_no, s.changed_at, s.changed_by, s.is_committed
+FROM subsystems s
+WHERE NOT EXISTS (SELECT 1 FROM subsystems h
+                  WHERE h.configuration_uuid = s.configuration_uuid
+                    AND h.full_name = s.full_name
+                    AND h.revision_no > s.revision_no);
+
+-- Витрина ссылок включения текущей ревизии подсистемы — по образцу v_current_form_ext:
+-- строки относятся к той ревизии родителя, которая признана текущей.
+CREATE OR REPLACE VIEW v_current_subsystem_content AS
+SELECT sc.id,
+       sc.configuration_uuid, sc.subsystem_object_uuid, sc.subsystem_full_name,
+       sc.ordinal, sc.ref_text, sc.ref_form, sc.resolved,
+       sc.target_object_type, sc.target_object_uuid, sc.target_full_name,
+       sc.created_at,
+       sc.revision_no, sc.changed_at, sc.changed_by, sc.is_committed
+FROM subsystem_content sc
+WHERE EXISTS (SELECT 1 FROM v_current_subsystems cs
+              WHERE cs.configuration_uuid = sc.configuration_uuid
+                AND cs.object_uuid = sc.subsystem_object_uuid
+                AND cs.revision_no = sc.revision_no);
+
+-- Витрина текущего состояния свойств общих модулей (узел V46).
+CREATE OR REPLACE VIEW v_current_common_modules AS
+SELECT cm.id,
+       cm.configuration_uuid, cm.object_uuid, cm.full_name, cm.object_name,
+       cm.comment, cm.synonym, cm.global, cm.privileged, cm.server, cm.server_call,
+       cm.external_connection, cm.client_managed_application,
+       cm.client_ordinary_application, cm.return_values_reuse, cm.declaration_state,
+       cm.created_at, cm.revision_no, cm.changed_at, cm.changed_by, cm.is_committed
+FROM common_modules cm
+WHERE NOT EXISTS (SELECT 1 FROM common_modules h
+                  WHERE h.configuration_uuid = cm.configuration_uuid
+                    AND h.full_name = cm.full_name
+                    AND h.revision_no > cm.revision_no);
+
+-- Витрина дескрипторов модулей текущей ревизии общего модуля. Текста ни в одной строке нет
+-- (D6): витрина перечисляет состояние и путь, содержимое читает отдельная процедура.
+CREATE OR REPLACE VIEW v_current_common_module_sources AS
+SELECT cs.id,
+       cs.configuration_uuid, cs.object_uuid, cs.module_name, cs.module_type,
+       cs.file_path, cs.file_size, cs.content_state, cs.content_loaded, cs.created_at,
+       cs.revision_no, cs.changed_at, cs.changed_by, cs.is_committed
+FROM common_module_sources cs
+WHERE NOT EXISTS (SELECT 1 FROM common_module_sources h
+                  WHERE h.configuration_uuid = cs.configuration_uuid
+                    AND h.object_uuid = cs.object_uuid
+                    AND h.module_type = cs.module_type
+                    AND h.revision_no > cs.revision_no);
 
 -- Индексы configuration_objects (узел V33). Перечень объекта читают по конфигурации и по
 -- виду, дочерние элементы — по parent_name, поиск по идентификатору — по object_id/uuid.
@@ -549,6 +771,40 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_bsl_modules_ordinary_application_configurat
     ON bsl_modules_ordinary_application(configuration_uuid);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_bsl_modules_external_connection_configuration_uuid
     ON bsl_modules_external_connection(configuration_uuid);
+
+-- Индексы узла V46. Отдельного индекса по configuration_uuid у subsystems и common_modules
+-- нет: его обслуживает уникальный индекс цепочки состояния с той же ведущей колонкой
+-- (тот же порядок, что у bsl_modules_* узла V44). У subsystem_content ведущая колонка
+-- уникального индекса — object подсистемы, поэтому индекс по конфигурации нужен отдельно.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_subsystems_configuration_full_name_revision
+    ON subsystems(configuration_uuid, full_name, revision_no);
+CREATE INDEX IF NOT EXISTS idx_subsystems_object_uuid_revision
+    ON subsystems(object_uuid, revision_no);
+CREATE INDEX IF NOT EXISTS idx_subsystems_full_name
+    ON subsystems(full_name);
+CREATE INDEX IF NOT EXISTS idx_subsystems_parent_object_uuid
+    ON subsystems(parent_object_uuid) WHERE parent_object_uuid IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_subsystems_configuration_parent
+    ON subsystems(configuration_uuid, parent_full_name);
+
+CREATE INDEX IF NOT EXISTS idx_subsystem_content_configuration_uuid
+    ON subsystem_content(configuration_uuid);
+CREATE INDEX IF NOT EXISTS idx_subsystem_content_full_name
+    ON subsystem_content(subsystem_full_name);
+CREATE INDEX IF NOT EXISTS idx_subsystem_content_target_uuid
+    ON subsystem_content(target_object_uuid) WHERE target_object_uuid IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_common_modules_configuration_full_name_revision
+    ON common_modules(configuration_uuid, full_name, revision_no);
+CREATE INDEX IF NOT EXISTS idx_common_modules_object_uuid_revision
+    ON common_modules(object_uuid, revision_no);
+CREATE INDEX IF NOT EXISTS idx_common_modules_full_name
+    ON common_modules(full_name);
+
+CREATE INDEX IF NOT EXISTS idx_common_module_sources_configuration_uuid
+    ON common_module_sources(configuration_uuid);
+CREATE INDEX IF NOT EXISTS idx_common_module_sources_object_uuid
+    ON common_module_sources(object_uuid);
 
 
 -- --------------------------------------------

@@ -158,6 +158,10 @@ CREATE TABLE IF NOT EXISTS external_report (
     revision_no INTEGER NOT NULL DEFAULT 1,
     changed_at TIMESTAMP,
     changed_by TEXT,
+    -- узел V46 (D11): строка версии, не помеченная коммитом. Признак заявляет
+    -- загрузчик значением FALSE; TRUE ставит событие коммита. Это не признак
+    -- «текущей строки» — их круг разрешает манифест родителя (решение A1).
+    is_committed BOOLEAN NOT NULL DEFAULT FALSE,
     CONSTRAINT external_report_uuid_revision_no_key UNIQUE (uuid, revision_no),
     CONSTRAINT external_report_revision_no_positive CHECK (revision_no >= 1),
     CONSTRAINT external_report_changed_by_known
@@ -228,6 +232,10 @@ CREATE TABLE attributes (
     revision_no INTEGER NOT NULL DEFAULT 1,
     changed_at TIMESTAMP,
     changed_by TEXT,
+    -- узел V46 (D11): строка версии, не помеченная коммитом. Признак заявляет
+    -- загрузчик значением FALSE; TRUE ставит событие коммита. Это не признак
+    -- «текущей строки» — их круг разрешает манифест родителя (решение A1).
+    is_committed BOOLEAN NOT NULL DEFAULT FALSE,
     CONSTRAINT attributes_uuid_revision_no_key UNIQUE (uuid, revision_no),
     CONSTRAINT attributes_revision_no_positive CHECK (revision_no >= 1),
     CONSTRAINT attributes_changed_by_known
@@ -258,6 +266,10 @@ CREATE TABLE tabular_sections (
     revision_no INTEGER NOT NULL DEFAULT 1,
     changed_at TIMESTAMP,
     changed_by TEXT,
+    -- узел V46 (D11): строка версии, не помеченная коммитом. Признак заявляет
+    -- загрузчик значением FALSE; TRUE ставит событие коммита. Это не признак
+    -- «текущей строки» — их круг разрешает манифест родителя (решение A1).
+    is_committed BOOLEAN NOT NULL DEFAULT FALSE,
     CONSTRAINT tabular_sections_uuid_revision_no_key UNIQUE (uuid, revision_no),
     CONSTRAINT tabular_sections_revision_no_positive CHECK (revision_no >= 1),
     CONSTRAINT tabular_sections_changed_by_known
@@ -290,6 +302,10 @@ CREATE TABLE forms (
     revision_no INTEGER NOT NULL DEFAULT 1,
     changed_at TIMESTAMP,
     changed_by TEXT,
+    -- узел V46 (D11): строка версии, не помеченная коммитом. Признак заявляет
+    -- загрузчик значением FALSE; TRUE ставит событие коммита. Это не признак
+    -- «текущей строки» — их круг разрешает манифест родителя (решение A1).
+    is_committed BOOLEAN NOT NULL DEFAULT FALSE,
     CONSTRAINT forms_uuid_revision_no_key UNIQUE (uuid, revision_no),
     CONSTRAINT forms_revision_no_positive CHECK (revision_no >= 1),
     CONSTRAINT forms_changed_by_known
@@ -326,6 +342,10 @@ CREATE TABLE templates (
     revision_no INTEGER NOT NULL DEFAULT 1,
     changed_at TIMESTAMP,
     changed_by TEXT,
+    -- узел V46 (D11): строка версии, не помеченная коммитом. Признак заявляет
+    -- загрузчик значением FALSE; TRUE ставит событие коммита. Это не признак
+    -- «текущей строки» — их круг разрешает манифест родителя (решение A1).
+    is_committed BOOLEAN NOT NULL DEFAULT FALSE,
     CONSTRAINT templates_uuid_revision_no_key UNIQUE (uuid, revision_no),
     CONSTRAINT templates_revision_no_positive CHECK (revision_no >= 1),
     CONSTRAINT templates_changed_by_known
@@ -380,6 +400,10 @@ CREATE TABLE form_ext (
     revision_no INTEGER NOT NULL DEFAULT 1,
     changed_at TIMESTAMP,
     changed_by TEXT,
+    -- узел V46 (D11): строка версии, не помеченная коммитом. Признак заявляет
+    -- загрузчик значением FALSE; TRUE ставит событие коммита. Это не признак
+    -- «текущей строки» — их круг разрешает манифест родителя (решение A1).
+    is_committed BOOLEAN NOT NULL DEFAULT FALSE,
     CONSTRAINT form_ext_revision_no_positive CHECK (revision_no >= 1),
     CONSTRAINT form_ext_changed_by_known
         CHECK (changed_by IS NULL OR changed_by IN ('load', 'edit', 'restore')),
@@ -416,7 +440,7 @@ SELECT er.id,
        er.variants_storage, er.settings_storage, er.created_at, er.updated_at,
        er.configuration_id, er.object_kind, er.origin_kind, er.origin_path,
        er.origin_sha256, er.origin_manifest, er.origin_recorded_at, er.children_manifest,
-       er.revision_no, er.changed_at, er.changed_by
+       er.revision_no, er.changed_at, er.changed_by, er.is_committed
 FROM external_report er
 WHERE NOT EXISTS (SELECT 1
                   FROM external_report h
@@ -432,7 +456,7 @@ SELECT a.id,
        a.fill_checking, a.fill_from_filling_value, a.fill_value, a.choice_folders_and_items,
        a.choice_parameter_links, a.choice_parameters, a.quick_choice, a.create_on_input,
        a.choice_form, a.link_by_type, a.choice_history_on_input, a.created_at,
-       a.revision_no, a.changed_at, a.changed_by
+       a.revision_no, a.changed_at, a.changed_by, a.is_committed
 FROM attributes a
 WHERE NOT EXISTS (SELECT 1
                   FROM attributes h
@@ -444,7 +468,7 @@ SELECT ts.id,
        ts.uuid, ts.parent_uuid, ts.internalinfo_generatedtype, ts.name,
        ts.synonym, ts.comment, ts.tooltip, ts.fill_checking,
        ts.standardattributes, ts.column_uuids, ts.created_at, ts.revision_no,
-       ts.changed_at, ts.changed_by
+       ts.changed_at, ts.changed_by, ts.is_committed
 FROM tabular_sections ts
 WHERE NOT EXISTS (SELECT 1
                   FROM tabular_sections h
@@ -456,7 +480,7 @@ SELECT f.id,
        f.uuid, f.parent_uuid, f.name, f.synonym,
        f.comment, f.form_type, f.include_help_in_contents, f.use_purposes,
        f.created_at, f.parent_type, f.revision_no, f.changed_at,
-       f.changed_by
+       f.changed_by, f.is_committed
 FROM forms f
 WHERE NOT EXISTS (SELECT 1
                   FROM forms h
@@ -471,7 +495,7 @@ SELECT fe.id,
        fe.view_mode_application_on_set_report_result, fe.auto_command_bar, fe.events, fe.attributes,
        fe.commands, fe.items, fe.ext, fe.ext_size,
        fe.ext_truncated, fe.ext_bin, fe.ext_format, fe.ext_path,
-       fe.created_at, fe.revision_no, fe.changed_at, fe.changed_by
+       fe.created_at, fe.revision_no, fe.changed_at, fe.changed_by, fe.is_committed
 FROM form_ext fe
 JOIN forms f ON f.id = fe.form_id
             AND f.revision_no = fe.revision_no
@@ -486,7 +510,7 @@ SELECT t.id,
        t.comment, t.template_type, t.created_at, t.parent_type,
        t.ext, t.ext_bin, t.ext_format, t.ext_size,
        t.ext_path, t.ext_root_tag, t.ext_truncated, t.revision_no,
-       t.changed_at, t.changed_by
+       t.changed_at, t.changed_by, t.is_committed
 FROM templates t
 WHERE NOT EXISTS (SELECT 1
                   FROM templates h
