@@ -284,6 +284,53 @@ python tools/check_rule_tool_coverage.py — часть B обязана быт�
 | rules:checks:layer-verification | что карточки правил целы, читаемы, не ссылаются в никуда и вызываются ли карточки правки кода словами намерения | check_rules_layer.py, readdress_rules_layer.py, regen_journal_index.py, _named_artifacts_audit.py |
 | rules:checks:project-integration | что проверки встроены в прогон проекта и чем подтверждён их состав | validate_project.py, check_mcp_tool_wiring.py, check_search_rules_sync.py |
 | rules:checks:edit-code-call | что формулировки намерения править код сервера ведут в карточку правки кода этого слоя | check_rules_layer.py, _probe_edit_cards.py |
+| rules:checks:always-budget | что всегда читаемый набор укладывается в бюджет и мерится тем же набором, который кладётся в контекст, а не состоянием `always` слоя | _rules_check_snapshot.py, check_rules_layer.py (check_always_policy_budget), _d4_probe.py |
+
+## rules:checks:always-budget
+
+===WHEN
+Перед тем как поднимать `ALWAYS_BUDGET_CHARS`, добавлять правило в всегда читаемый набор или
+говорить оператору, что «бюджет соблюдён». Узел D4 плана `docs/RULES_CONTEXT_PLAN.md`
+(27.10.2026, решение оператора).
+
+===MUST
+1. Мерить тот набор, который действительно кладётся в контекст: политику читателя
+   `ALWAYS_ADDRESSES` (`tools/rules_read.py`), а не только состояние `always` слоя. Это две
+   разные величины, и путать их — значит получить зелёный прогон при превышенном бюджете: прогон
+   слоя печатает по корневому слою «always 4 на 12899/16000» (карточки `rules:always:*`), тогда
+   как заходят родительские `rules:` 5600 и `rules:kb-rules:` 11 341 = 16 941 симв., у которых
+   состояния `always` нет вовсе.
+2. Снимать состав одной командой: `python _rules_check_snapshot.py` — она печатает дату прогона,
+   состав слоёв, объём каждой карточки политики против порога, длины адресов и итог проверки.
+   Порог и список адресов она берёт из кода (`RL.ALWAYS_BUDGET_CHARS`, `ALWAYS_ADDRESSES`), а не
+   переписывает их к себе.
+3. Порог поднимать только замером и с обоснованием в комментарии константы
+   `ALWAYS_BUDGET_CHARS` (`src/rules_layer.py`) и в журнале решений плана. Узел D4: замер
+   16 941, порог поднят до 18 000 (замер + ~6 % запаса на следующее общее правило).
+4. Проверять, что мера не декоративна: при прежнем пороге 16 000 прогон обязан дать ровно один
+   провал `check_always_policy_budget` с адресами и размерами карточек (замер 27.10.2026 — так и
+   происходит), при 18 000 — 0 провалов (2093 проверки).
+
+===FORBID
+- объявлять бюджет соблюдённым по always-состоянию слоя: это другая мера и другой набор;
+- поднимать порог, чтобы прогон прошёл, — подъём делается замером до прогона и с обоснованием;
+- держать число порога в тексте правила, маршрутизаторе или документе прогона, не сверяя его с
+  кодом: носители числа перечисляет `python _d4_probe.py`.
+
+===TOOLS
+MCP-инструментов не требует; проверка читает local_doc.
+
+===CHECK
+python _rules_check_snapshot.py — объём always-набора по каждой карточке политики и вердикт
+python tools/check_rules_layer.py — строка `check_always_policy_budget` (набор политики против
+`ALWAYS_BUDGET_CHARS`)
+python _d4_probe.py — где число порога названо текстом (файлы-носители и карточки)
+
+===SOURCE
+src/rules_layer.py (`ALWAYS_BUDGET_CHARS`, `always_budget`), tools/rules_read.py
+(`ALWAYS_ADDRESSES`, `cmd_always`), tools/check_rules_layer.py (`check_always_policy_budget`),
+`_rules_check_snapshot.py`, `_d4_probe.py`; решение оператора D4 (27.10.2026) —
+`docs/RULES_CONTEXT_PLAN.md`, раздел 6.
 
 ## rules:checks:layer-verification
 

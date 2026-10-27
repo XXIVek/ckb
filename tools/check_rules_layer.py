@@ -788,6 +788,44 @@ def check_router(markers_written):
 
 # ------------------------------------------------------------------ прогон
 
+def check_always_policy_budget():
+    """Узел D4 (план `docs/RULES_CONTEXT_PLAN.md`, 27.10.2026): бюджет того, что реально грузится.
+
+    Проверка слоя (`check_layer_v2_indexes`) считает `RL.always_budget` по префиксу `…:always:`.
+    В контекст при этом кладётся другой набор — политика читателя `ALWAYS_ADDRESSES`
+    (`tools/rules_read.py`): родительские карточки слоёв, у которых состояния `always` нет вовсе.
+    Замер 27.10.2026: политики дают 16 941 симв., а прогон слоя шёл зелёным, потому что считал
+    не тот набор. Порог, не совпадающий с тем, что действительно читается, границей не является —
+    поэтому здесь проверяется набор политики, а не только always-состояние слоя.
+    """
+    try:  # список адресов берётся у читателя правил: своя копия списка разошлась бы с политикой
+        import rules_read as reader
+    except Exception as exc:
+        check(False, "набор always политики доступен проверке", f"import rules_read: {exc}")
+        return
+    from database import get_cursor
+
+    addresses = list(reader.ALWAYS_ADDRESSES)
+    sizes = {}
+    with get_cursor() as cur:
+        for address in addresses:
+            cur.execute("SELECT length(answer) AS size FROM knowledge_snippets WHERE question=%s",
+                        (address,))
+            row = cur.fetchone()
+            sizes[address] = int(row["size"]) if row else None
+    missing = [a for a, size in sizes.items() if size is None]
+    check(not missing, "каждый адрес always-политики читается карточкой",
+          f"нет строк по адресам: {missing} — при отсутствии карточки «читаем всегда» означает"
+          " не отсутствие правила, а то, что правило не было прочитано")
+    total = sum(size for size in sizes.values() if size)
+    check(total <= RL.ALWAYS_BUDGET_CHARS,
+          "набор always политики укладывается в ALWAYS_BUDGET_CHARS",
+          f"{total} > {RL.ALWAYS_BUDGET_CHARS} символов по адресам "
+          f"{[(a, sizes[a]) for a in addresses if sizes[a]]}. Снимок состава даёт "
+          "`python _rules_check_snapshot.py`. Порог поднимается только замером с обоснованием"
+          " (узел D4 плана) и не поднимается молча")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(
         description="Проверка доступности и целостности слоёв правил local_doc "
@@ -855,6 +893,9 @@ def main(argv=None):
                 if by_address:
                     written.append(marker)
         check_router(written)
+        # Узел D4: отдельной проверкой и вне цикла по слоям, потому что меряется не слой, а
+        # набор политики читателя — тот, что попадает в контекст при любом заходе.
+        check_always_policy_budget()
 
     print(f"\nпроверок: {_checks}, провалено: {len(_failures)}")
     if _failures:
