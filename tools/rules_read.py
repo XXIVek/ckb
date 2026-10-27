@@ -48,6 +48,7 @@
     python tools/rules_read.py --tree "rules:core-rules:"
     python tools/rules_read.py find карант
     python tools/rules_read.py --marked "rules:kb-rules:always:index"
+    python tools/rules_read.py --always --no-log
 
 Граница по адресам. Инструмент читает и дерево `rules:<слой>:…`, и прежние адреса `<метка>:…`
 тех слоёв, которые ещё не переразвёрнуты (сейчас это core/enrich/export и девять старых строк
@@ -55,6 +56,16 @@ kb-rules): иначе «поднять вариативный слой» был�
 `--layers` показывает, под какими адресами находится каждый слой, и молчанием это не скрывает.
 По содержимому карточек инструмент не ищет — для этого есть `search_docs_tool` (категория
 `rules`); здесь поиск идёт адресом и алиасом.
+
+Лог обращения. Каждое обращение к правилам дописывается в `logs/rules_load.log` (модуль
+`tools/rules_logging.py`). Формат по умолчанию — краткий: одна строка на прочитанную карточку,
+дата и её адрес; этого хватает на вопрос «когда и какое правило читали». Подробный формат
+включается флагом `--full-log`: там видны режим вызова, id, объём, промахи и итог обращения —
+это нужно замерам, а не обычной работе. Запись не меняет вывод и код возврата: ошибка лога
+называется в stderr один раз, но чтение правила не отменяет. `--no-log` отключает запись —
+для прогонов вроде замера объёма always-набора, где лишней строки быть не должно; `--log-file`
+пишет в другой файл каталога `logs/` (замер на отдельном файле не пачает рабочий лог). Разбор
+— тем же модулем: `python tools/rules_logging.py --stats`, `--tail`, `--check`, `--rotate`.
 
 Код возврата: 0 — карточка или перечень найдены; 1 — не найдено либо ошибка разбора.
 """
@@ -66,7 +77,7 @@ import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-for _p in (PROJECT_ROOT, PROJECT_ROOT / "src"):
+for _p in (PROJECT_ROOT, PROJECT_ROOT / "src", PROJECT_ROOT / "tools"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
@@ -81,6 +92,8 @@ import rules_layer as RL  # noqa: E402
 from quarantine import MARK_ARRAY, is_marked, reason_of, sql_not_marked  # noqa: E402
 from rules_report import tree_key  # noqa: E402
 from mcp_tools_api import TITLE_LAYER_MARKERS, normalize_title  # noqa: E402
+from rules_logging import (FORMAT_BRIEF, FORMAT_FULL, log_path, null_log,  # noqa: E402
+                          open_session)
 
 # Дерево правил адресуется корнем `rules:`; строки вне него (сниппеты BSL, карточки
 # knowledge-слоёв) этому инструменту не отдаются: он читает набор правил, а не базу целиком.
@@ -299,39 +312,60 @@ def purpose_of(card):
 
 
 # ------------------------------------------------------------------ режимы
-def cmd_always(cards, max_chars=0):
+def cmd_always(cards, max_chars=0, log=None):
     """Полный текст того, что читается всегда (корень дерева и слой `kb-rules`).
 
     Пропущенная карточка называется адресом: пустой ответ по политике «читаем всегда»
     прочитался бы как «правил нет», тогда как на самом деле карточка снята или не
     сгенерирована.
+
+    В лог каждая карточка набора пишется своей строкой с временем обращения, а корень дерева
+    лог выделяет блоком «НАЧАЛО ЗАГРУЗКИ ПРАВИЛ»: по нему видно, что заход начинался с общих
+    правил. Объём набора пишется отдельной строкой `ЗАМЕКА` — перебор бюджета это факт
+    прогона, а не только строка в выводе.
     """
+    log = log or null_log()
     known = {c["norm"]: c for c in cards}
     missing = [a for a in ALWAYS_ADDRESSES if normalize_title(a) not in known]
     print("ЧИТАЕМ ВСЕГДА — политика набора правил, константа ALWAYS_ADDRESSES:")
+    total = 0
     for address in ALWAYS_ADDRESSES:
         card = known.get(normalize_title(address))
         if card is None:
+            log.missed(address, "адрес always-набора отсутствует в базе")
             continue
+        total += int(card["size"])
+        log.loaded(card)
         print_card(card, max_chars)
     if missing:
         print("НЕТ В БАЗЕ (не отдаётся, хотя политика требует читать всегда): "
               + ", ".join(missing))
+    log.note(f"объём always-набора: карточек {len(ALWAYS_ADDRESSES) - len(missing)}, "
+             f"{total} символов при бюджете {RL.ALWAYS_BUDGET_CHARS} "
+             "(src/rules_layer.py) — "
+             + ("ПЕРЕБОР" if total > RL.ALWAYS_BUDGET_CHARS else "в бюджете")
+             + (f"; вывод ограничен {max_chars} симв. на карточку" if max_chars else ""))
     print("ВАРИАТИВНЫЕ СЛОИ поднимают только по задаче: python tools/rules_read.py --layers")
     return 1 if missing else 0
 
 
-def cmd_layers(cards):
+def cmd_layers(cards, log=None):
     """Слои дерева: адрес, политика загрузки, назначение, объём. Решение — по описанию.
 
     Строка слоя называется даже тогда, когда у слоя нет корневого узла или когда его правила
     лежат под прежним адресом: молчаливый пропуск прочитался бы как «правил этого сервера
     нет», а на самом деле они не переразвёрнуты в дерево.
+
+    В лог режим пишется одной строкой `ЗАМЕКА`: назначения слоёв берутся из индексных
+    карточек, целиком тексты слоя не читаются — записать их как «ЗАГРУЖЕНО» значило бы
+    завысить объём обращений.
     """
+    log = log or null_log()
     known = {c["norm"]: c for c in cards}
     layers = layer_cards(cards)
     root = known.get(normalize_title(TREE_ROOT))
     if not root and not layers:
+        log.note("в базе нет ни корня дерева, ни слоёв — осмотр: python src/rules_report.py")
         print("ОШИБКА: в базе нет ни корня дерева, ни слоёв; осмотр — "
               "python src/rules_report.py")
         return 1
@@ -360,47 +394,61 @@ def cmd_layers(cards):
     print()
     print("Чтение: общий блок — --always; выбранный слой — read по его адресу; перечень")
     print("карточек слоя — --tree <адрес слоя>; отдельное правило — read по его адресу.")
+    log.note(f"осмотр слоёв: корень поднят={'да' if root else 'нет'}, слоёв {len(layers)}; "
+             "назначения взяты индексными карточками, целых текстов не печаталось")
     return 0
 
 
-def cmd_tree(cards, address):
+def cmd_tree(cards, address, log=None):
     """Только перечень поддерева, без содержимого — осмотр перед чтением."""
+    log = log or null_log()
     found = subtree(cards, address)
     if not found:
-        return not_found(address)
+        return not_found(address, log)
     print_pointers(found, f"ПОДДЕРЕВО {address}")
+    log.note(f"перечень поддерева {address}: карточек {len(found)}, содержимое не читалось")
     return 0
 
 
-def cmd_read(cards, address, max_chars=0):
+def cmd_read(cards, address, max_chars=0, log=None):
     """Чтение адресом: точный — одна карточка целиком; префикс — родитель целиком + указатели.
 
     Порядок `tree_key` даёт родителем самую короткую строку префикса: `rules:kb-rules:`
     стоит перед `rules:kb-rules:checks:index`, поэтому целиком печатается именно карта слоя,
     а не первая попавшаяся её строка.
+
+    В лог записывается то, что реально прочитано целиком: при чтении по префиксу это
+    родительская карточка, а дети — примечанием с числом указателей. Записать детей как
+    загрузки значило бы приписать агенту текст, которого он не видел.
     """
+    log = log or null_log()
     key = normalize_title(address)
     exact = [c for c in cards if c["norm"] == key]
     if exact:
         print(f"ПО АДРЕСУ {address} — карточка одна, читается целиком.")
+        log.loaded(exact[0])
         print_card(exact[0], max_chars)
         return 0
     found = subtree(cards, address)
     if not found:
-        return not_found(address)
+        return not_found(address, log)
     print(f"ПО АДРЕСУ {address} — поддерево, карточек: {len(found)}. Читаем целиком "
           f"родительскую карточку, дети даются указателями.")
+    log.loaded(found[0], note=f"родитель по префиксу {address}, "
+                              f"детей указано указателями: {len(found) - 1}")
     print_card(found[0], max_chars)
     if len(found) > 1:
         print_pointers(found[1:], f"ДЕТИ {address}")
     return 0
 
 
-def cmd_find(cards, term, max_chars=0):
+def cmd_find(cards, term, max_chars=0, log=None):
     """Поиск термином: одно совпадение — карточка целиком, несколько — таблица указателей."""
+    log = log or null_log()
     key = normalize_title(term)
     if not key:
         print("ОШИБКА: пустой термин; нужен адрес (`rules:…`) или слово, по которому ищут.")
+        log.missed(term, "пустой термин")
         return 1
     hits = []
     for card in cards:
@@ -411,10 +459,11 @@ def cmd_find(cards, term, max_chars=0):
         if matched:
             hits.append((card, "алиас: " + ", ".join(matched[:3])))
     if not hits:
-        return not_found(term)
+        return not_found(term, log)
     if len(hits) == 1:
         card, how = hits[0]
         print(f"ПО ТЕРМИНУ {term!r} найдена одна карточка ({how}) — читается целиком.")
+        log.loaded(card, note=f"найдено: {how}, термин {term!r}")
         print_card(card, max_chars)
         return 0
     print(f"ПО ТЕРМИНУ {term!r} — карточек: {len(hits)}. Выбор делают по назначению")
@@ -424,16 +473,23 @@ def cmd_find(cards, term, max_chars=0):
         print(f"{card['id']:>7}  {card['size']:>7}  {card['address']}  [{how}]")
         print(f"{'':>7}  {'':>7}    {first_line(card)}")
     print()
+    log.note(f"по термину {term!r} найдено карточек {len(hits)} — выбор по указателям, "
+             "целых текстов не печаталось")
     return 0
 
 
-def not_found(query):
+def not_found(query, log=None):
     """Негатив называется прямо и с подсказкой, чем осматривать дерево.
 
     Здесь же называется граница инструмента: он ищет адресом и алиасом, а по содержимому
     карточек правила ищет поиск MCP — путать эти два входа значит получить «правил нет»
     там, где правило есть, но называется другими словами.
+
+    Отрицательный ответ пишется в лог строкой `НЕ НАЙДЕНО`: молча не найденный адрес — это
+    ровно тот случай, который потом выглядит как «правила не читали».
     """
+    log = log or null_log()
+    log.missed(query, "карточка в дереве правил не найдена")
     print(f"ОШИБКА: по запросу {query!r} карточек в дереве правил нет.")
     print("Этот инструмент ищет адресом и алиасом; по содержимому карточек ищет "
           "search_docs_tool (категория `rules`).")
@@ -445,6 +501,7 @@ def not_found(query):
 
 # ------------------------------------------------------------------ точка входа
 def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
     parser = argparse.ArgumentParser(
         prog="rules_read.py",
         description="Чтение правил дерева `rules:` адресом: точный адрес — карточка целиком; "
@@ -471,31 +528,49 @@ def main(argv=None):
                         help="показать и помечённые к удалению (с причиной)")
     parser.add_argument("--max-chars", type=int, default=0,
                         help="ограничить вывод карточки (по умолчанию без ограничения)")
+    parser.add_argument("--no-log", action="store_true",
+                        help="не дописывать обращение в лог правил (logs/rules_load.log)")
+    parser.add_argument("--log-file", metavar="ИМЯ",
+                        help="писать обращение в другой файл каталога logs/ "
+                             "(замер не пачает рабочий лог)")
+    parser.add_argument("--full-log", "--full", dest="full_log", action="store_true",
+                        help="подробный формат лога: сессия с режимом вызова, объёмом и "
+                             "итогом (по умолчанию пишется краткий — дата и адрес карточки)")
     args = parser.parse_args(argv)
 
-    from database import get_cursor
+    # Сессия лога открывается после разбора аргументов: invocation, который не разобран
+    # (parser.error), инструментом не выполнен, и писать о нём нечего. `with` закрывает
+    # обращение и при удачном чтении, и при исключении — оборванный прогон в подробном формате
+    # остаётся в логе со своей причиной, а не без итога.
+    log = open_session("tools/rules_read.py", " ".join(argv) or "(без аргументов)",
+                       path=(log_path(args.log_file) if args.log_file else None),
+                       enabled=not args.no_log,
+                       fmt=(FORMAT_FULL if args.full_log else FORMAT_BRIEF))
+    with log:
+        from database import get_cursor
 
-    with get_cursor() as cur:
-        cards = load_cards(cur, include_marked=args.marked)
-    if not cards:
-        print("ОШИБКА: ни одной карточки дерева правил (`rules:`) в базе нет — "
-              "набор правил не загружен.")
-        return 1
+        with get_cursor() as cur:
+            cards = load_cards(cur, include_marked=args.marked)
+        if not cards:
+            print("ОШИБКА: ни одной карточки дерева правил (`rules:`) в базе нет — "
+                  "набор правил не загружен.")
+            log.note("в базе нет ни одной карточки дерева правил — набор не загружен")
+            return 1
 
-    if args.always:
-        return cmd_always(cards, args.max_chars)
-    if args.layers:
-        return cmd_layers(cards)
-    query = " ".join(args.query or []).strip()
-    if not query:
-        parser.error("нужен адрес, термин (`find <термин>`) или флаг --always/--layers")
-    if query.lower().startswith("find "):
-        return cmd_find(cards, query[5:].strip(), args.max_chars)
-    if args.tree:
-        return cmd_tree(cards, query)
-    if any(normalize_title(query).startswith(marker) for marker in TITLE_LAYER_MARKERS):
-        return cmd_read(cards, query, args.max_chars)
-    return cmd_find(cards, query, args.max_chars)
+        if args.always:
+            return cmd_always(cards, args.max_chars, log)
+        if args.layers:
+            return cmd_layers(cards, log)
+        query = " ".join(args.query or []).strip()
+        if not query:
+            parser.error("нужен адрес, термин (`find <термин>`) или флаг --always/--layers")
+        if query.lower().startswith("find "):
+            return cmd_find(cards, query[5:].strip(), args.max_chars, log)
+        if args.tree:
+            return cmd_tree(cards, query, log)
+        if any(normalize_title(query).startswith(marker) for marker in TITLE_LAYER_MARKERS):
+            return cmd_read(cards, query, args.max_chars, log)
+        return cmd_find(cards, query, args.max_chars, log)
 
 
 if __name__ == "__main__":

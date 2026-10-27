@@ -52,8 +52,25 @@ def normalize_title(value):
     Одно определение для предиката в SQL и для проверки загрузчика слоя: разные нормы у
     записи и поиска дали бы «заголовок есть, а не находится» — тот же класс дефекта, что
     разные формы ключа модуля до узла V19.
+
+    Узел MEM-INDEX (27.10.2026): та же норма закреплена порождённой колонкой
+    `question_norm` в src/schema.sql. Расхождение проверяется, а не предполагается:
+    `_norm_probe.py` сравнивает эту функцию с колонкой по всем строкам таблицы
+    (замер 27.10.2026 — 3 140 строк, расхождений 0).
     """
     return ' '.join(str(value or '').split()).lower()
+
+
+def like_prefix_pattern(value):
+    """LIKE-шаблон «начинается с» для нормализованного заголовка (узел MEM-INDEX).
+
+    Экранирование — символом '!', не обратным слэшем: в заголовках встречаются `_` и `%`,
+    которые без экранирования стали бы метасимволами шаблона, а литерал '\\' в SQL зависит
+    от standard_conforming_strings (на сервере он off), то есть двухзначный слэш в одном
+    месте стал бы одинарным в другом.
+    """
+    escaped = str(value).replace('!', '!!').replace('%', '!%').replace('_', '!_')
+    return escaped + '%'
 
 
 def add_snippet(question, answer, source_url=None, tags='bsl,code', confidence=0.9, groups_id=None, aliases=None):
@@ -564,22 +581,30 @@ def search_docs(query, category=None, limit=20, include_marked=False):
         # Шаг выполняется ТОЛЬКО для запроса, начинающегося со служебной метки слоя
         # (TITLE_LAYER_MARKERS): иначе обычное «Справочник» стало бы матчить заголовки
         # BSL-сниппетов и молча изменило бы поведение поиска по всей остальной документации.
-        # Один предикат — совпадение начала (LEFT): точное совпадение всего заголовка является
+        # Один предикат — совпадение начала: точное совпадение всего заголовка является
         # его частным случаем, а префикс additionally достаёт все части большой карточки
         # («core-rules: узел v43» -> ч. 1 и ч. 2 сразу).
-        # LIKE не используется: в заголовках есть '_' и '%', их пришлось бы экранировать, а
-        # сервер работает при standard_conforming_strings = off.
+        # Узел MEM-INDEX (27.10.2026): предикат идёт по порождённой колонке question_norm
+        # (src/schema.sql) и записан как LIKE по префиксу, а не как LEFT(выражение) =:
+        # выражение LEFT не обслуживается ни одним индексом схемы, и шаг обходил таблицу
+        # целиком — 28.4 мс на 3 140 строках, снято фильтром 3 139 (EXPLAIN ANALYZE).
+        # Та же выборка по колонке читает idx_snippets_question_norm: 0.49 мс, когда значение
+        # приходит параметром, то есть именно так, как работает сервер (замер _norm_sql.sql с
+        # PREPARE/EXECUTE — generic plan; предикат диапазона по этому индексу НЕ читается —
+        # 2.58 мс, поэтому выбран LIKE).
+        # Колонка порождена выражением, равным normalize_title выше; равенство нормы проверяется
+        # по всем строкам таблицы (_norm_probe.py), а не предполагается.
+        # LIKE экранируется символом '!' — см. like_prefix_pattern.
         # Категория и карантин — те же фильтры, что у алиасного шага: «поиск по заголовкам
         # с категорией» обязан означать ровно ту же изоляцию, что и поиск по алиасам.
         q_norm = normalize_title(query)
         prefix_ok = bool(q_norm) and any(q_norm.startswith(m) for m in TITLE_LAYER_MARKERS)
         if prefix_ok:
-            title_expr = "LOWER(REGEXP_REPLACE(BTRIM(question), '[[:space:]]+', ' ', 'g'))"
             cur.execute(
-                "SELECT id, question, answer, tags FROM knowledge_snippets WHERE LEFT("
-                + title_expr + ", LENGTH(%s)) = %s" + t_ks_cat + t_ks_mark
+                "SELECT id, question, answer, tags FROM knowledge_snippets"
+                " WHERE question_norm LIKE %s ESCAPE '!'" + t_ks_cat + t_ks_mark
                 + " ORDER BY question LIMIT %s",
-                (q_norm, q_norm) + cat_pair + ks_mark_params + (limit,))
+                (like_prefix_pattern(q_norm),) + cat_pair + ks_mark_params + (limit,))
             for row in cur.fetchall():
                 desc = row[2] if row[2] and isinstance(row[2], str) else ''
                 results.append({
