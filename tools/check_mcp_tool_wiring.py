@@ -133,15 +133,77 @@ EXPECTED_TOOLS = {
 # упоминать их как снятые (история), но живая карточка состояния always/optional/checks назвать
 # их не вправе — это сторожит tools/check_search_rules_sync.py.
 DELETED_TOOLS = [
+    # --- узел RULE-LAYER (24.10.2026): инструменты чтения правил ---
     "get_load_config_rules_tool",
     "get_load_rules_tool",
     "get_search_rules_tool",
+    # --- прежний export-сервер (14.10.2026): функции-источники отсутствовали ---
     "clear_modified_flag_tool",
     "count_modified_objects_tool",
     "export_config_changes_tool",
     "get_export_log_tool",
     "get_modified_objects_tool",
     "mark_object_modified_tool",
+    # --- узел П2-Ф-8 (29.10.2026): сюда перенесён REMOVED_SERVER_TOOLS из
+    # tools/check_search_rules_sync.py. Комментарий того файла требовал один список на два
+    # скрипта, а держались два; измеритель `_journal_code_history.py` сверялся только с этим,
+    # поэтому 8 имён прежнего состава enrichment-сервера (сняты 14.10.2026 коммитом a71e7b0d,
+    # узлы V17-V20.1) были для него «вне DELETED_TOOLS», хотя для правил они уже числились
+    # снятыми. Два списка одних имён — это и есть причина, по которой Ф-8 выглядел несделанным.
+    # Пары «прежнее имя → чем заменено» — узел `rules:enrich-rules:journal:node:naming-2026-10`.
+    "add_config_alias_tool",           # → add_config_aliases_tool (ед. ч. → мн. ч.)
+    "add_snippet_dependency_tool",     # → add_config_snippet_tool(dependencies=…)
+    "analyze_config_load_tool",
+    "batch_index_from_dump_tool",
+    "count_objects_by_config_tool",
+    "delete_config_tool",
+    "delete_objects_by_config_tool",
+    "find_config_by_name_uuid_tool",
+    "generate_aliases_for_object_tool",  # → generate_config_enrichment_tool
+    "get_alias_target_tool",           # → resolve_config_alias_tool
+    "get_bsl_module_code_tool",
+    "get_config_snippet_stats_tool",   # → config_enrichment_stats_tool
+    "get_configuration_tool",
+    "get_cross_references_tool",       # → get_config_cross_references_tool
+    "get_enum_values_tool",
+    "get_object_structure_tool",
+    "get_snippets_for_object_tool",    # → get_config_snippets_for_object_tool
+    "list_bsl_modules_tool",
+    "list_config_objects_tool",
+    "list_configurations_tool",
+    "read_config_file_tool",
+    "register_cross_reference_tool",
+    "register_external_report_tool",
+    "search_bsl_code_tool",
+    "search_config_by_alias_tool",     # → search_config_aliases_tool
+    "search_config_objects_tool",
+    "update_configuration_status_tool",
+    "update_dependent_snippets_tool",  # → generate_config_enrichment_tool
+    # --- узел П2-Ф-8: две прежние модели knowledge-base (`server.py`), которых ни один
+    # список не помнил. Модель «фрагментов» добавлена 30.09.2026 (207185f3), снята
+    # 02.10.2026 (342a213f) при переходе к группам и сниппетам; модель «элементов/групп»
+    # добавлена 02.10.2026 (8424a735), снята 07.10.2026 (e043843a) при переходе к
+    # комбинированному поиску. Узлы журнала: `rules:kb-rules:journal:node:fragments-2026-09`
+    # и `rules:kb-rules:journal:node:elements-2026-10`. Возвращать эти имена в регистр нельзя:
+    # теперешний состав сторожит EXPECTED_TOOLS. ---
+    "search_fragments_tool",
+    "get_fragment_by_name_tool",
+    "get_import_log_tool",
+    "import_html_files_tool",
+    "import_markdown_files_tool",
+    "detect_category_tool",
+    "fix_snippet_tool",                # → update_snippet_tool (появился 20.10.2026, узел P6)
+    "load_from_folder_tool",
+    "load_from_url_tool",
+    "create_element_tool",
+    "update_element_tool",
+    "create_group_tool",
+    "update_group_tool",
+    "search_elements_tool",
+    "search_groups_tool",
+    "search_snippets_tool",            # → search_docs_tool (добавлен тем же коммитом)
+    "get_element_details_tool",
+    "get_group_hierarchy_tool",
 ]
 
 BUILTIN_NAMES = set(dir(builtins)) | {

@@ -160,39 +160,15 @@ CONTRACT_NUMBER_RE = re.compile(
 
 TOOL_TOKEN_RE = re.compile(r"\b[a-z][a-z0-9_]*_tool\b")
 
-# Инструменты, снятые 14.10.2026 с core- и enrichment-серверов. Имена снятого export-сервера
-# и три имени инструментов чтения правил (узел RULE-LAYER) берутся из DELETED_TOOLS
-# tools/check_mcp_tool_wiring.py, чтобы два скрипта не держали по два списка одних и тех же
-# имён: расхождение списков дало бы «для одной проверки имя снятое, для другой — неизвестное».
-REMOVED_SERVER_TOOLS = [
-    "add_config_alias_tool",
-    "add_snippet_dependency_tool",
-    "analyze_config_load_tool",
-    "batch_index_from_dump_tool",
-    "count_objects_by_config_tool",
-    "delete_config_tool",
-    "delete_objects_by_config_tool",
-    "find_config_by_name_uuid_tool",
-    "generate_aliases_for_object_tool",
-    "get_alias_target_tool",
-    "get_bsl_module_code_tool",
-    "get_config_snippet_stats_tool",
-    "get_configuration_tool",
-    "get_enum_values_tool",
-    "get_object_structure_tool",
-    "get_snippets_for_object_tool",
-    "list_bsl_modules_tool",
-    "list_config_objects_tool",
-    "list_configurations_tool",
-    "read_config_file_tool",
-    "register_cross_reference_tool",
-    "register_external_report_tool",
-    "search_bsl_code_tool",
-    "search_config_by_alias_tool",
-    "search_config_objects_tool",
-    "update_configuration_status_tool",
-    "update_dependent_snippets_tool",
-]
+# Инструменты, снятые с серверов. Список один на два скрипта и живёт в
+# `DELETED_TOOLS` tools/check_mcp_tool_wiring.py: «удалено» и «не существует» — одно
+# состояние для правил. Узел П2-Ф-8 (29.10.2026) перенёс сюда прежний локальный перечень
+# `REMOVED_SERVER_TOOLS` (27 имён состава core/enrich до 14.10.2026): комментарий этого файла
+# предписывал один список, а держались два, и расхождение списков дало бы ровно тот дефект,
+# против которого он заводился — «для одной проверки имя снятое, для другой неизвестное».
+# Замер 28.10.2026 по `_journal_code_history.py`: 8 из 9 непокрытых имён enrich-слоя уже
+# числились снятыми здесь, но измеритель читал только `DELETED_TOOLS`.
+REMOVED_SERVER_TOOLS: list[str] = []
 
 # Состояния слоя формата 2, чьи карточки описывают действующее поведение. Индекс состояния
 # правилу не принадлежит — он таблица адресов.
