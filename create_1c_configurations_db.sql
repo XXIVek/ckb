@@ -268,7 +268,13 @@ CREATE TABLE IF NOT EXISTS config_extensions (
 -- --------------------------------------------
 CREATE TABLE IF NOT EXISTS bsl_modules (
     id SERIAL PRIMARY KEY,
-    configuration_id INT REFERENCES configurations(id),
+    -- узел V46 (П2, решение D5b): ссылка на заголовок конфигурации — uuid, а не числовой id.
+    -- Те же четыре таблицы модулей предопределённых программ корня (узел V44) ключуются
+    -- колонкой configuration_uuid; числовой id меняется при перезагрузке заголовка (узел V32),
+    -- то есть теряет смысл вместе со снятием строки. Внешнего ключа здесь нет осознанно
+    -- (прецедент V20.1): FK блокировал бы пересоздание заголовка, а очистка выполняется
+    -- явным DELETE в src/configuration_loader.py::_remove_rows.
+    configuration_uuid UUID,
     module_name VARCHAR(255) NOT NULL,
     file_path VARCHAR(500),
     code TEXT,
@@ -290,8 +296,9 @@ CREATE TABLE IF NOT EXISTS bsl_modules (
     created_at TIMESTAMP DEFAULT NOW(),
     -- узел V19 (M1): цепочка состояний модуля. Ключ состояния — (parent_uuid, file_path,
     -- revision_no): uuid у модуля нет, поэтому идентификатор модуля — путь внутри выгрузки.
-    -- Строки конфигураций (configuration_id) тоже получают revision_no = 1: индекс состава
-    -- пересоздаётся загрузчиком, а модули конфигурации историей не живут.
+    -- Строки конфигураций (configuration_uuid, parent_uuid IS NULL) тоже получают
+    -- revision_no = 1: индекс состава пересоздаётся загрузчиком, а модули конфигурации
+    -- историей не живут.
     revision_no INTEGER NOT NULL DEFAULT 1,
     changed_at TIMESTAMP,
     changed_by TEXT,
@@ -644,7 +651,11 @@ CREATE TABLE IF NOT EXISTS common_module_sources (
 -- --------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_configurations_name ON configurations(name);
 -- idx_external_processing_name удалён узлом V22 вместе с таблицей external_processing.
-CREATE INDEX IF NOT EXISTS idx_bsl_modules_config ON bsl_modules(configuration_id);
+-- узел V46 (П2): индекс по uuid-ссылке на заголовок вместо индекса по числовому id
+-- (idx_bsl_modules_config снят вместе с колонкой). Частичный: пустая ссылка — это модуль
+-- внешнего объекта, а не «модуль без конфигурации», и в индекс она не попадает.
+CREATE INDEX IF NOT EXISTS idx_bsl_modules_configuration_uuid
+    ON bsl_modules(configuration_uuid) WHERE configuration_uuid IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bsl_modules_parent_uuid ON bsl_modules(parent_uuid);
 CREATE INDEX IF NOT EXISTS idx_bsl_modules_module_type ON bsl_modules(module_type);
 -- Узел V19: частичный уникальный индекс V13 (parent_uuid, file_path) получает границу
@@ -654,6 +665,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_bsl_modules_parent_file_revision
     ON bsl_modules(parent_uuid, file_path, revision_no) WHERE parent_uuid IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bsl_modules_parent_uuid_revision
     ON bsl_modules(parent_uuid, revision_no) WHERE parent_uuid IS NOT NULL;
+-- узел V46 (П2): уникальности строк модулей конфигурации (`parent_uuid IS NULL`) в схеме не
+-- было вовсе — вторая строка того же модуля одной конфигурации не отклонялась (слепая зона,
+-- названная планом, раздел 12.4). Ключ цепочки той же модели, что у модулей внешнего
+-- объекта, но вместо parent_uuid — uuid заголовка; `revision_no` в составе обязателен,
+-- иначе индекс отклонял бы вторую ревизию того же модуля, то есть ломал модель истории M1.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_bsl_modules_config_module_revision
+    ON bsl_modules(configuration_uuid, module_type, module_name, revision_no)
+    WHERE parent_uuid IS NULL;
 -- Отдельный индекс по (parent_uuid, file_path) не заводится: разрешение модуля по пути
 -- из манифеста родителя всегда ищет строки с parent_uuid IS NOT NULL, и частичный
 -- уникальный индекс выше его обслуживает. Живая схема (замер 18.10.2026) его не содержит.
@@ -666,7 +685,7 @@ CREATE INDEX IF NOT EXISTS idx_bsl_modules_parent_uuid_revision
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE VIEW v_current_bsl_modules AS
 SELECT m.id,
-       m.configuration_id, m.module_name, m.file_path, m.code,
+       m.configuration_uuid, m.module_name, m.file_path, m.code,
        m.object_type, m.object_name, m.report_id, m.created_at,
        m.parent_uuid, m.parent_type, m.module_type, m.code_size,
        m.truncated, m.revision_no, m.changed_at, m.changed_by, m.is_committed

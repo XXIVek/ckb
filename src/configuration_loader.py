@@ -124,7 +124,7 @@ SELECT c.id, c.uuid::text AS uuid, c.name, c.synonym, c.version, c.vendor_name,
        (SELECT COUNT(*) FROM """ + current_view("external_report") + """ e
          WHERE e.configuration_id = c.id) AS bound_external_objects,
        (SELECT COUNT(*) FROM """ + current_view("bsl_modules") + """ b
-         WHERE b.configuration_id = c.id) AS bsl_modules_count,
+         WHERE b.configuration_uuid = c.uuid) AS bsl_modules_count,
        (SELECT COUNT(*) FROM config_extensions x
          WHERE x.configuration_id = c.id) AS extensions_count
 FROM configurations c
@@ -280,10 +280,13 @@ def bound_external_objects(cfg_id):
 def _remove_rows(cur, cfg_id, configuration_uuid=None):
     """Снять строку заголовка и связанные строки ВНУТРИ текущей транзакции.
 
-    Каскада нет: FK `bsl_modules.configuration_id` и `config_extensions.configuration_id`
-    объявлены без `ON DELETE` (шаг 2 установки), `external_report.configuration_id` —
-    ссылка без FK вовсе (узел V20.1). Поэтому модули и расширения снимаются явным
-    `DELETE` (иначе удаление упадёт FK), а привязки внешних объектов остаются числами.
+    Каскада нет: FK `config_extensions.configuration_id` и
+    `configuration_objects.configuration_id` объявлены без `ON DELETE` (шаг 2 установки),
+    `external_report.configuration_id` — ссылка без FK вовсе (узел V20.1). С узла V46 (П2)
+    FK нет и у `bsl_modules`: числовой `configuration_id` снят, строки модулей адресуются
+    uuid заголовка (тот же ключ, что у таблиц модулей предопределённых программ корня,
+    узел V44). Поэтому индекс, расширения и модули снимаются явным `DELETE` (для первых
+    двух иначе удаление падает на FK), а привязки внешних объектов остаются числами.
 
     Узел V33: строки индекса состава (`configuration_objects`) ссылаются на заголовок FK
     без `ON DELETE` (шаг 2 установки, тот же порядок, что у расширений и модулей), поэтому
@@ -311,10 +314,21 @@ def _remove_rows(cur, cfg_id, configuration_uuid=None):
     # Таблицы индекса может не быть в базе, где миграцию V33 не применяли: снимать нечего,
     # и отказывать загрузке заголовка из-за этого нельзя (заголовок — узел V32).
     tables = [OBJECTS_TABLE] if _table_present(cur, OBJECTS_TABLE) else []
-    tables += ["config_extensions", "bsl_modules"]
+    tables += ["config_extensions"]
     for table in tables:
         cur.execute(f"DELETE FROM {table} WHERE configuration_id = %s", [cfg_id])
         children[table] = cur.rowcount
+    # Узел V46 (П2): `bsl_modules` больше не снимается по числовому id заголовка — строки
+    # модулей адресуются его uuid (тот же ключ, что у таблиц модулей корня, узел V44),
+    # поэтому и снятие идёт по uuid. Модули внешнего объекта (`parent_uuid IS NOT NULL`) к
+    # конфигурации не относятся и сняты быть не должны. Пустой `configuration_uuid` — то же
+    # состояние, что ниже у V44: ключа нет, снимать нечем, и называет его вызывающий, а не
+    # этот код; ключа `bsl_modules` в `children` при этом нет — отсутствующий ключ и есть
+    # ответ «снимать было нечем», а не «снято ноль строк».
+    if configuration_uuid:
+        cur.execute("DELETE FROM bsl_modules WHERE configuration_uuid = %s::uuid",
+                    [str(configuration_uuid)])
+        children["bsl_modules"] = cur.rowcount
     # Узел V44: модули предопределённых программ корня снимются по uuid заголовка (снимок
     # имени не заводится, ключа нет), поэтому вызов здесь, а не в `configurations`-ветке
     # выше: этих таблиц в списке `tables` нет и по `configuration_id` они не снимаются.

@@ -48,7 +48,8 @@ MCP-инструментов нет), вариант определяется п
     (app_module_id, session_module_id, data_proc_module_id, ext_conn_module_id) и
     mobile_functionality TEXT[] из заголовка сняты: свойства таких модулей в
     <Properties> нет вовсе (узел V40), а направление связи задаёт
-    bsl_modules.configuration_id -> configurations.id. Механизм называния слепых зон
+    bsl_modules.configuration_uuid (колонка добавлена узлом V46, П2) и четыре таблицы
+    модулей предопределённых программ корня (узел V44). Механизм называния слепых зон
     сохранён: он обязан работать для любого свойства, которого нет в словаре (выгрузка
     будущего формата может дать и такие);
   * ChildObjects и InternalInfo корня (ClassId/ObjectId) — по-прежнему слепые зоны, они
@@ -187,7 +188,8 @@ CONFIGURATION_FIELDS = {
 #     свойств предопределённых модулей в <Properties> нет вовсе (узел V40 подтвердил
 #     индексом: модуль корня существует записью Configuration.<Имя>.SessionModule и файлом
 #     Ext/<Имя>.bsl). Разрешать ссылку было не из чего, а направление связи уже задаёт
-#     bsl_modules.configuration_id -> configurations.id;
+#     bsl_modules.configuration_uuid (узел V46, П2) и таблицы bsl_modules_* модулей
+#     предопределённых программ корня (узел V44);
 #   * mobile_functionality TEXT[] — признак use терялся; свойство отдаёт значение парами,
 #     поэтому узел V42 кладёт его в mobile_application_functionalities jsonb.
 # Пустой словарь — честное состояние: незаполненных колонок не осталось. Ключ контракта

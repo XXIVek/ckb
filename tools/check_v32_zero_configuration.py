@@ -9,8 +9,10 @@ Test3_Otchet_Null; эталонная пара (Test1_Otchet, Test2_Otchet) не
 Что проверяется и почему именно так:
   1. схема: `configurations` живая; колонок провенанса, версионирования и таблиц объектов
      метаданных узел V32 НЕ добавлял (решения D-C и D-D); UNIQUE по имени есть, уникальности
-     по uuid нет; ссылки `config_extensions`/`bsl_modules` на заголовок сохранены, а
-     `external_report.configuration_id` по-прежнему БЕЗ внешнего ключа (узел V20.1).
+     по uuid нет; ссылки `config_extensions`/`configuration_objects` на заголовок сохранены,
+     а `external_report.configuration_id` по-прежнему БЕЗ внешнего ключа (узел V20.1).
+     С узла V46 (П2) внешнего ключа нет и у `bsl_modules`: числовая колонка снята, строки
+     модулей адресуются uuid заголовка (тот же ключ, что у таблиц модулей корня, V44).
      Узел V42 (21.10.2026) снял пять колонок заголовка — `app_module_id`, `session_module_id`,
      `data_proc_module_id`, `ext_conn_module_id`, `mobile_functionality` (свойств
      предопределённых модулей в `<Properties>` нет, а `TEXT[]` терял признак `use`), поэтому
@@ -85,8 +87,9 @@ Test3_Otchet_Null; эталонная пара (Test1_Otchet, Test2_Otchet) не
      конфигурации в контракте — и НЕ советует `delete_external_report_tool` (он ищет в
      `external_report`); дубликат ищется по uuid, а не по пути;
   7. ♻️ force=True — одна транзакция: старая строка снята, новая вставлена, uuid тот же,
-     `id` новый, связанные `configuration_objects`/`config_extensions`/`bsl_modules` сняты
-     явно (каскада нет); журнала попыток в схеме нет — история не ведётся (решение D-C);
+     `id` новый, связанные `configuration_objects`/`config_extensions` сняты явно (каскада
+     нет), строки `bsl_modules` — по uuid заголовка (узел V46, П2); журнала попыток в схеме
+     нет — история не ведётся (решение D-C);
   8. name_conflict — отдельный исход: при занятом имени и новом uuid загрузка не выполнена,
      `force=True` НЕ предлагается (иначе удалили бы ДРУГУЮ конфигурацию);
   9. дубликаты uuid в `configurations` (уникальности нет — D-D) названы и в ответе
@@ -611,8 +614,12 @@ def check_schema():
     inbound = sql_rows(
         "SELECT conrelid::regclass::text FROM pg_constraint "
         "WHERE contype='f' AND confrelid = 'configurations'::regclass ORDER BY 1")
-    check("ссылки детей на заголовок сохранены (config_extensions, bsl_modules)",
-          len(inbound) >= 2, f"внешних ключей на configurations: {len(inbound)} {inbound}")
+    linked = {t for (t,) in inbound}
+    check("ссылки детей на заголовок сохранены (config_extensions, configuration_objects); "
+          "с узла V46 (П2) FK снят с bsl_modules — строки модулей адресуются uuid заголовка",
+          {"config_extensions", "configuration_objects"} <= linked
+          and "bsl_modules" not in linked,
+          f"внешних ключей на configurations: {len(inbound)} {sorted(linked)}")
 
     er_cols = {r[0] for r in sql_rows(
         "SELECT column_name FROM information_schema.columns "
@@ -1840,7 +1847,7 @@ def check_duplicate():
     check("числа привязок и связанных строк взяты из БД, а не выдуманы карточкой",
           f"Привязано внешних объектов: {existing.get('bound_external_objects')}" in text
           and f"Расширений в config_extensions: {existing.get('extensions_count')}" in text
-          and f"BSL-модулей с configuration_id={cfg_id}" in text, text[:500])
+          and f"BSL-модулей с configuration_uuid={cfg_uuid}" in text, text[:500])
     check("провенанс назван НЕ ведущимся (D-C), а не промолчан и не обещан",
           "Провенанс: для строк конфигурации НЕ ведётся" in text
           and "origin_*" in text, text[:500])

@@ -727,8 +727,10 @@ class ConfigurationRowWriter(TableRowWriter):
         `<Properties>` корневого `Configuration.xml` нет вовсе (узел V40 подтвердил это
         индексом состава: модуль корня существует записью `Configuration.<Имя>.SessionModule`
         и файлом `Ext/<Имя>.bsl`). Разрешать ссылку было не из чего, поэтому колонки были
-        вечно NULL и числились слепыми зонами не из лени. Направление связи уже задаёт
-        `bsl_modules.configuration_id -> configurations.id` — оно и остаётся единственным;
+        вечно NULL и числились слепыми зонами не из лени. Направление связи уже задают
+        `bsl_modules.configuration_uuid` (колонка — узел V46, П2) и четыре таблицы модулей
+        предопределённых программ корня `bsl_modules_*` (узел V44) — они и остаются
+        единственным направлением;
       * `mobile_functionality TEXT[]` — потому что значение
         `UsedMobileApplicationFunctionalities` отдаётся парами (`functionality` + `use`),
         и в массиве строк признак `use` терялся. То же значение теперь пишется в

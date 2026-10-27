@@ -289,7 +289,10 @@ def _configuration_card(existing):
         f"  Режим запуска / совместимость: {existing.get('main_mode') or '—'} / "
         f"{existing.get('compatibility_mode') or '—'}",
         f"  Дата загрузки: {existing.get('created_at', '')}",
-        f"  BSL-модулей с configuration_id={cfg_id}: {existing.get('bsl_modules_count', 0)} "
+        # узел V46 (П2): строки модулей адресуются uuid заголовка, а не его числовым id,
+        # поэтому карточка называет именно uuid — тот же ключ, что у счётчиков V44.
+        f"  BSL-модулей с configuration_uuid={existing.get('uuid', '')}: "
+        f"{existing.get('bsl_modules_count', 0)} "
         "(у XML-выгрузки конфигурации модулей нет: пары ClassId/ObjectId в InternalInfo корня — "
         "предопределённые ссылки платформы, строками bsl_modules они не являются)",
         f"  Расширений в config_extensions: {existing.get('extensions_count', 0)} "
@@ -397,10 +400,19 @@ def format_load_result(result):
                 # выдумывать его карточка не вправе. Про битые привязки говорит предупреждение
                 # загрузчика (оно же перечисляет объекты), здесь — только счётчики снятия.
                 children_deleted = replaced.get("children_deleted") or {}
+                # узел V46 (П2): строки модулей адресуются uuid заголовка, поэтому ключа
+                # `bsl_modules` в `children_deleted` нет, когда у снятой строки uuid не был
+                # заполнен: снимать было нечем, и «0» означало бы «нашли ноль строк», а не
+                # «ключ, по которому ищут строки модулей, отсутствует».
+                if "bsl_modules" in children_deleted:
+                    modules_note = f"BSL-модулей снято: {children_deleted['bsl_modules']}"
+                else:
+                    modules_note = ("BSL-модули не снимались: uuid снятой строки не заполнен, "
+                                    "а строки модулей ищутся по нему")
                 lines.append(
                     f"♻️ Удалена предыдущая запись ID={replaced.get('old_id')} "
                     f"(расширений снято: {children_deleted.get('config_extensions', 0)}, "
-                    f"BSL-модулей снято: {children_deleted.get('bsl_modules', 0)})"
+                    f"{modules_note})"
                 )
                 # Узел V32: привязки внешних объектов к снятой строке остаются числами
                 # configuration_id без строки — внешнего ключа нет (узел V20.1), значит они
