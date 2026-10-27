@@ -513,10 +513,15 @@ delete_external_report_tool, load_1c_catalog_tool, set_object_configuration_tool
 `rules:core-rules:journal:node:v31` (провенанс строки), `rules:export-rules:functional:workflow`."""),
 
     ("edit-mcp-code",
-     ["правка кода core-mcp", "изменить состав инструментов core", "переписать загрузчик"],
+     ["правка кода core-mcp", "изменить состав инструментов core", "переписать загрузчик"]
+     + list(RL.EDIT_CODE_INTENTS),
      """===WHEN===
-Меняют код сервера `1c-configurations-core` (`server_configurations_core.py`, загрузчики, DDL) или
-состав его инструментов.
+Задача звучит как «править код MCP», «изменить код MCP»,
+«добавить инструмент», «изменить инструмент», «убрать инструмент»,
+«снять инструмент», «изменить состав инструментов», «поправить шаг поиска»,
+«сменить формат выдачи», «правка DDL» — это намерение править код сервера
+`1c-configurations-core` (`server_configurations_core.py`, загрузчики, DDL) или состав его
+инструментов. Правка данных загруженного объекта или текста правила — не сюда.
 
 ===MUST===
 1. До правки проверяют, есть ли уже функция слоя под задачу:
@@ -530,25 +535,32 @@ delete_external_report_tool, load_1c_catalog_tool, set_object_configuration_tool
 3. Изменение схемы — строго парой «миграция + зеркало в DDL-источнике»; одинарная правка ловится
    `_cmp_ddl.py`.
 4. Тексты правил слоя обязаны называть все инструменты сервера и не называть снятые живыми — это
-   сторожит `tools/check_search_rules_sync.py` парой «файл правил ↔ сервер».
+   сторожит `tools/check_search_rules_sync.py` парой «карточки слоя из `local_doc` ↔ регистр
+   `@mcp.tool()` сервера»: с узла RESTRUCTURE-LAYERS сверка читает строки БД (`layer_sql`), а не
+   файл правил.
 5. Об изменении состава инструментов пишут узел журнала (для этого слоя —
    `rules:core-rules:journal:node:*`) и в тот же шаг обновляют карточки инструментов дерева.
 
 ===FORBID===
-Оставлять в правилах снятый инструмент как живой; править поведение файлом `.clinerules/*_Rule.md`
-(это исходник переноса и вход сверки, а не место правки); менять схему без зеркала в DDL.
+Оставлять в правилах снятый инструмент как живой; править поведение слоя прежним файлом правил —
+файлы правил четырёх слоёв сняты в `Arhiv_Rules/` и входом сверки больше не являются, правилом
+считается строка БД по адресу; называть число инструментов по памяти — его берёт прогон
+`check_mcp_tool_wiring.py`; менять схему без зеркала в DDL.
 
 ===TOOLS===
 load_1c_catalog_tool, load_external_object_file_tool, delete_external_report_tool,
 load_configuration_root_modules_tool
 
 ===CHECK===
-`python tools/check_mcp_tool_wiring.py`, `python validate_project.py`, `python _cmp_ddl.py`.
+`python tools/check_mcp_tool_wiring.py`, `python validate_project.py`, `python _cmp_ddl.py`,
+`python tools/check_rules_layer.py --layer core-rules` (узел EDIT-CALL: формулировки намерения
+править код MCP обязаны вести в эту карточку).
 
 ===SOURCE===
 `rules:core-rules:journal:pos:5` (правки Python требуют перезапуска),
 `rules:kb-rules:functional:edit-mcp-code`; узел V44; прежний лист `edit-core-code` снят узлом
-EDIT-ADDRESS-UNIFY (`_unify_edit_mcp_code.py`) во имя общего листа `edit-mcp-code`.
+EDIT-ADDRESS-UNIFY (`_unify_edit_mcp_code.py`) во имя общего листа `edit-mcp-code`; узел
+EDIT-CALL (28.10.2026) — формулировки намерения из `src/rules_layer.py`.
 """),
 ]
 
@@ -1003,10 +1015,15 @@ delete_config_cross_reference_tool
 `rules:enrich-rules:journal:ref:07` (узел V20.1), `ref:07:6`, `ref:06`; узлы E, V22."""),
 
     ("edit-mcp-code",
-     ["правка кода enrich-mcp", "изменить состав инструментов обогащения", "переписать генератор"],
+     ["правка кода enrich-mcp", "изменить состав инструментов обогащения", "переписать генератор"]
+     + list(RL.EDIT_CODE_INTENTS),
      """===WHEN===
-Меняют код сервера `1c-configurations-enrichment` (генератор, витрины, разрешение целей) или состав
-его инструментов.
+Задача звучит как «править код MCP», «изменить код MCP»,
+«добавить инструмент», «изменить инструмент», «убрать инструмент»,
+«снять инструмент», «изменить состав инструментов», «поправить шаг поиска»,
+«сменить формат выдачи», «правка DDL» — это намерение править код сервера
+`1c-configurations-enrichment` (генератор, витрины, разрешение целей) или состав его
+инструментов. Правка обогащающих строк конкретного объекта — не сюда.
 
 ===MUST===
 1. До правки проверяют, есть ли уже функция слоя под задачу:
@@ -1024,21 +1041,24 @@ delete_config_cross_reference_tool
    же шаг обновляют карточки инструментов дерева.
 
 ===FORBID===
-Оставлять в правилах снятый инструмент как живой; править поведение файлом
-`.clinerules/1c-configurations-enrichment_Rule.md` (это исходник переноса и вход сверки
-`tools/check_search_rules_sync.py`, а не место правки); менять витрины без проверки их живой схемы.
+Оставлять в правилах снятый инструмент как живой; править поведение слоя прежним файлом правил —
+файл правил этого слоя снят в `Arhiv_Rules/` и входом сверки `tools/check_search_rules_sync.py`
+больше не является, правилом считается строка БД по адресу; называть число инструментов по памяти —
+его берёт прогон `check_mcp_tool_wiring.py`; менять витрины без проверки их живой схемы.
 
 ===TOOLS===
 generate_config_enrichment_tool, config_enrichment_stats_tool
 
 ===CHECK===
-`python tools/check_mcp_tool_wiring.py`, `python validate_project.py`, `python _cmp_ddl.py`.
+`python tools/check_mcp_tool_wiring.py`, `python validate_project.py`, `python _cmp_ddl.py`,
+`python tools/check_rules_layer.py --layer enrich-rules` (узел EDIT-CALL: формулировки намерения
+править код MCP обязаны вести в эту карточку).
 
 ===SOURCE===
 `rules:enrich-rules:journal:ref:02` (правка Python требует перезапуска),
 `rules:kb-rules:functional:edit-mcp-code`. Прежний
 лист `edit-enrich-code` снят узлом EDIT-ADDRESS-UNIFY (`_unify_edit_mcp_code.py`) во имя общего листа
-`edit-mcp-code`."""),
+`edit-mcp-code`; узел EDIT-CALL (28.10.2026) — формулировки намерения из `src/rules_layer.py`."""),
 ]
 
 
@@ -1879,42 +1899,53 @@ export_readiness_tool, load_1c_catalog_tool, generate_config_enrichment_tool
 
     ("edit-mcp-code",
      ["правка кода export-mcp", "синхронизировать правила с регистром инструментов",
-      "docs/rules/export-rules.md мигратор"],
+      "реестр инструментов слоя экспорт"]
+     + list(RL.EDIT_CODE_INTENTS),
      """===WHEN===
-Меняют код `server_configurations_export.py` или тексты правил этого слоя.
+Задача звучит как «править код MCP», «изменить код MCP»,
+«добавить инструмент», «изменить инструмент», «убрать инструмент»,
+«снять инструмент», «изменить состав инструментов», «поправить шаг поиска»,
+«сменить формат выдачи», «правка DDL» — это намерение править код
+`server_configurations_export.py` или состав его инструментов. Правка текста правила этого слоя —
+строка БД по её адресу, а не файл.
 
 ===MUST===
 1. После правки кода: перезапустить `python server_configurations_export.py` (правки документов и SQL
    перезапуска не требуют); обновить `EXPECTED_TOOLS` в `tools/check_mcp_tool_wiring.py`; прогнать
    `check_mcp_tool_wiring.py` и `validate_project.py`.
 2. Синхронизировать сводку слоя с маршрутизатором `.clinerules/1C_Rule.md` (строка слоя
-   `export-rules`) и с исходником — иначе правила обещают инструмент, которого нет в регистре.
-3. Почему шаг 2 — отдельный пункт: 23.10.2026 контракт `server_configurations_core.py` стал
-   пятиинструментным (добавлен `load_configuration_root_modules_tool`, узел V44), а правила загрузки
-   остались четырёхинструментными — ни одна проверка не сравнивала тексты правил с регистрами.
-   Сейчас расхождение ловит `tools/check_search_rules_sync.py` парой «файл правил ↔ сервер»
-   (`DOCUMENTED_SERVERS`): тексты правил обязаны называть все инструменты документируемого сервера и
-   не называть снятые живыми.
+   `export-rules`) и с регистром `@mcp.tool()` — иначе правила обещают инструмент, которого нет в
+   регистре.
+3. Почему шаг 2 — отдельный пункт: 23.10.2026 контракт `server_configurations_core.py` вырос на
+   инструмент (добавлен `load_configuration_root_modules_tool`, узел V44), а правила загрузки
+   остались прежним числом — ни одна проверка не сравнивала тексты правил с регистрами.
+   Сейчас расхождение ловит `tools/check_search_rules_sync.py` парой «карточки слоя из `local_doc`
+   ↔ регистр инструментов» (`DOCUMENTED_SERVERS`): тексты правил обязаны называть все инструменты
+   документируемого сервера и не называть снятые живыми.
 4. Где править текст: правило дерева — строка БД (`knowledge_snippets.question` = адрес), её правят
-   строкой БД; прежний файл `docs/rules/export-rules.md` перенесён в архив и исходником больше не
+   строкой БД; прежний файл правил этого слоя перенесён в `Arhiv_Rules/` и исходником больше не
    является, поэтому `DOCUMENTED_SERVERS` называет слой, а состав инструментов сверяют по строкам БД.
 
 ===FORBID===
 Оставлять в правилах снятый инструмент как живой; править карточку дерева файлом мигратора так,
-чтобы следующий прогон перезаписал правку; молчать о расхождении правил и регистра.
+чтобы следующий прогон перезаписал правку; называть число инструментов по памяти — его берёт прогон
+`check_mcp_tool_wiring.py`; молчать о расхождении правил и регистра.
 
 ===TOOLS===
 export_readiness_tool
 
 ===CHECK===
 `python tools/check_mcp_tool_wiring.py`, `python validate_project.py`,
-`python tools/check_search_rules_sync.py`.
+`python tools/check_search_rules_sync.py`,
+`python tools/check_rules_layer.py --layer export-rules` (узел EDIT-CALL: формулировки намерения
+править код MCP обязаны вести в эту карточку).
 
 ===SOURCE===
 прежняя запись этого правила (переложена по формату, содержание сохранено);
 узел V44; `rules:kb-rules:functional:edit-mcp-code`. Адрес правки кода этого слоя был снят узлом EDIT-ADDRESS-UNIFY
 (`_unify_edit_mcp_code.py`) во имя общего листа `edit-mcp-code`: адрес карточки правки кода выводится
-из метки слоя, а не запоминается."""),
+из метки слоя, а не запоминается; узел EDIT-CALL (28.10.2026) — формулировки намерения из
+`src/rules_layer.py`."""),
 ]
 
 
