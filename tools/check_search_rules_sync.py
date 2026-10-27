@@ -84,15 +84,17 @@ LAYER_SERVERS = {
 # Карточки, которыми описан живой поиск. Список адресами, а не маркерами разделов: адрес —
 # единственное, чем правило находится, и именно адрес обязывает знание лежать в нужной
 # карточке, а не в произвольной строке слоя.
+# Узел RESTRUCTURE-LAYERS (27.10.2026): перечень переписан адресами дерева. Прежние адреса
+# состояний (`kb-rules:always:search-first`, `:optional:search-ranking`) в живой базе отсутствуют
+# — при переразвёртывании слоя механика поиска легла в карточку слоя и в `checks:search-sync`,
+# а проверка по несуществующему адресу означала бы «знание потеряно», хотя оно на месте. Гарантию
+# содержания держит не этот список, а перечень формулировок ниже: он обязан найтись в тексте слоя,
+# на каком бы карточке он ни лежал.
 REQUIRED_KB_CARDS = [
-    "kb-rules:index",
-    "kb-rules:always:index",
-    "kb-rules:always:search-first",
-    "kb-rules:always:two-phase-reading",
-    "kb-rules:optional:search-ranking",
-    "kb-rules:optional:alias-coverage",
-    "kb-rules:optional:quarantine",
-    "kb-rules:checks:search-sync",
+    "rules:kb-rules:",
+    "rules:kb-rules:checks:search-sync",
+    "rules:kb-rules:functional:alias-coverage",
+    "rules:kb-rules:functional:quarantine",
 ]
 
 # Формулировки, которые обязан содержать слой knowledge-base: каждая закрывает одно утверждение
@@ -122,7 +124,22 @@ FORBIDDEN_PHRASES = [
 ]
 
 # Строки истории: в них число инструментов — описание прежнего состояния, а не текущего.
-HISTORY_MARKERS = ("→", "прежн", "был", "удал", "сня", "ранее", "до перехода")
+# «не вводился» — описание несуществования: такое предложение называет имя, чтобы сказать, что его
+# нет, и обещанием контракта не является (замер 27.10.2026: FORBID-строка «звать
+# `get_rules_report_tool` как живой инструмент — он в регистр сервера не вводился» читалась как
+# живое утверждение).
+HISTORY_MARKERS = ("→", "прежн", "был", "удал", "сня", "ранее", "до перехода",
+                   "не вводился", "не вводили", "не введён")
+# Разделы карточки, которые историей являются целиком (снимок текстов, зарезервированные имена).
+HISTORY_SECTIONS = {"JOURNAL", "RESERVED"}
+# Ветка снятого функционала: называть снятые имена ей предписано (тот же приём, что в
+# `_named_artifacts_audit.py`).
+REMOVED_MARK = ":removed"
+
+# Границы разделов карточки и абзацев внутри раздела — для блочного разбора истории
+# (`live_tool_text`). Раздел карточки — `===NAME`, абзац — блок до пустой строки.
+_SECTION_HEADING_RE = re.compile(r"^===\s*([A-Za-z][A-Za-z0-9_]*)", re.MULTILINE)
+_BLOCK_SPLIT_RE = re.compile(r"\n[ \t]*\n")
 
 # Числа, названные словами: «контракт — четыре инструмента» проверяется наравне с цифрой,
 # иначе ровно такая форма и проскакивает (дефект 23.10.2026 — сводка осталась
@@ -210,23 +227,116 @@ def historical_tool_names():
     return set(REMOVED_SERVER_TOOLS) | set(check_mcp_tool_wiring.DELETED_TOOLS)
 
 
+def layer_cards_from_db(marker):
+    """Карточки слоя из живой БД — тем же условием отбора, что и проверка слоя (`RL.layer_sql`).
+
+    Путь нужен затем, что у подслоя дерева файла-исходника нет (узел RESTRUCTURE-LAYERS): текстом
+    правила являются строки БД, и сверять регистры MCP с прежним файлом, который этих карточек не
+    содержит, — значит проверять текст, который ассистент не читает. Карантин снимается тем же
+    условием, что и в поиске (`src/quarantine.py`), а не своей копией.
+    """
+    from database import get_cursor
+    from quarantine import MARK_ARRAY, sql_not_marked
+
+    where, params = RL.layer_sql(marker)
+    with get_cursor() as cur:
+        cur.execute("SELECT question, answer FROM knowledge_snippets "
+                    f"WHERE {where} AND source_url LIKE %s" + sql_not_marked(),
+                    (*params, RL.SOURCE_SCHEME + "%", MARK_ARRAY))
+        rows = [dict(r) for r in cur.fetchall()]
+    cards = []
+    for row in rows:
+        rel = RL.layer_relative(row["question"], marker)
+        cards.append({"address": row["question"], "answer": row["answer"],
+                      "state": RL.state_of(rel), "kind": RL.node_kind(rel)})
+    return cards
+
+
+def is_live_card(card):
+    """Карточка, живой текст которой обязан называть инструменты действующего контракта.
+
+    В модели состояний на это отвечает состояние карточки (always/optional/checks). В модели типов
+    узла состояний нет: живым правилом является любой узел, кроме журнала и его частей — снимок
+    прежних текстов называет снятые имена правомерно, он и есть история (замер 27.10.2026:
+    прежняя проверка по `card["state"]` не считала бы живыми ни одной карточка подслоя, и
+    расхождение правил с регистрами MCP перестало бы находиться вовсе).
+    """
+    kind = card.get("kind")
+    address = card.get("address") or ""
+    # Снимок текстов и ветка снятого функционала — история по адресу, а не по типу узла: называть
+    # снятые имена им предписано (замер 27.10.2026: карточка `…:functional:removed` давала
+    # расхождение «живой текст называет снятые инструменты» на собственный предмет разговора).
+    if f":{RL.STATE_JOURNAL}:" in address or REMOVED_MARK in address:
+        return False
+    if kind:
+        return kind not in (RL.KIND_JOURNAL, RL.KIND_PART)
+    return card.get("state") in LIVE_STATES
+
+
 def layer_document(marker):
     """Карточки исходника слоя + ошибки разбора. Путь берётся из RL.RULES_DIR, а не из
     литерала: каталог слоёв один в src/rules_layer.py, и здесь он обязан читаться тем же
-    знанием, иначе переезд каталога рассинхронизирует проверку с переносом."""
+    знанием, иначе переезд каталога рассинхронизирует проверку с переносом.
+
+    Отсутствующий файл — не отказ проверки: у слоя дерева источником является БД, и карточки
+    читаются оттуда (`layer_cards_from_db`). Прежний ответ «нет исходника» был верен для слоя
+    формата 1 и ложен для слоя дерева; что эта ветка не исполнялась никогда, показал падёж на
+    сборке сообщения (`str / str` в f-строке) — замера она не переживала.
+    """
     path = PROJECT_ROOT / RL.RULES_DIR / f"{marker}.md"
     if not path.exists():
-        return [], [], f"нет исходника слоя: {RL.RULES_DIR / marker!s}.md"
+        cards = layer_cards_from_db(marker)
+        if not cards:
+            return [], [], (f"нет ни исходника {RL.RULES_DIR}/{marker}.md, ни карточек слоя "
+                            f"в БД — сверять регистры MCP не с чем")
+        print(f"[{marker}] файла-исходника нет — карточки слоя читаются из БД "
+              f"(живых карточек: {len(cards)})")
+        return cards, [], None
     cards, errors, fatal = RL.load_document(path)
     if fatal:
         return [], [], fatal
     return cards, errors, None
 
 
-def is_history_line(line):
-    """Строка описывает прежнее состояние, а не действующее правило."""
-    low = line.lower()
+def is_history_text(text):
+    """Текст описывает прежнее состояние, а не действующее правило."""
+    low = (text or "").lower()
     return any(m in low for m in HISTORY_MARKERS)
+
+
+def is_history_line(line):
+    """Построчная проверка истории — для коротких строк сводки (`1C_Rule.md`)."""
+    return is_history_text(line)
+
+
+def live_tool_text(card):
+    """Действующие утверждения карточки — тот текст, что сравнивается с регистрами MCP.
+
+    Разбор блочный (раздел + абзац), а не построчный: историей считается предложение, где стоит
+    слово «сняты», а не только та его строка, где слово напечатано (замер 27.10.2026: перенос
+    строки внутри перечня «не звать снятые `get_load_rules_tool` / `get_search_rules_tool` как
+    живой» дал ложное расхождение). Разделы журнала и зарезервированных имён — история целиком,
+    они не участвуют в сравнении ни при каких условиях.
+    """
+    answer = card["answer"] or ""
+    bounds = [(m.start(), m.group(1)) for m in _SECTION_HEADING_RE.finditer(answer)]
+    segments = []
+    if not bounds:
+        segments = [("", answer)]
+    else:
+        if bounds[0][0] > 0:
+            segments.append(("", answer[:bounds[0][0]]))
+        for i, (pos, name) in enumerate(bounds):
+            end = bounds[i + 1][0] if i + 1 < len(bounds) else len(answer)
+            segments.append((name, answer[pos:end]))
+    live = []
+    for name, text in segments:
+        if name.upper() in HISTORY_SECTIONS:
+            continue
+        for block in _BLOCK_SPLIT_RE.split(text):
+            if not is_history_text(block):
+                live.append(block)
+    return "\n".join(live)
 
 
 def check_layer(marker, names, registered_all, historical):
@@ -245,7 +355,10 @@ def check_layer(marker, names, registered_all, historical):
 
     unknown_count = stale_count = 0
     for card in cards:
-        tokens = set(TOOL_TOKEN_RE.findall(card["answer"]))
+        # Разбор блочный (`live_tool_text`): имя в абзаце со словом «сняты» — описание прежнего
+        # состояния, а не обещание контракта (замер 27.10.2026: карточка `removed` export-слоя и
+        # перенос строки в перечне снятых имён давали 9 ложных расхождений).
+        tokens = set(TOOL_TOKEN_RE.findall(live_tool_text(card)))
         unknown = sorted(tokens - registered_all - historical)
         if unknown:
             unknown_count += len(unknown)
@@ -254,12 +367,13 @@ def check_layer(marker, names, registered_all, historical):
                 f"снятые: {', '.join(unknown)} — правила обещают то, чего сервер не "
                 f"регистрирует (класс дефекта 20.10.2026)"
             )
-        if card["state"] in LIVE_STATES:
+        if is_live_card(card):
             stale = sorted(tokens & historical)
             if stale:
                 stale_count += len(stale)
                 problems.append(
-                    f"[{marker}] {card['address']} (состояние {card['state']}): живой "
+                    f"[{marker}] {card['address']} "
+                    f"({card.get('state') or card.get('kind')}): живой "
                     f"текст называет снятые инструменты: {', '.join(stale)} — имя "
                     f"допустимо только в истории (journal/reserved) и в строке с явной "
                     f"пометкой снятия"

@@ -186,9 +186,13 @@ def tree_children(cur, marker):
 
 
 def journal_rows_count(cur, marker):
+    """Живые карточки журнала слоя. Помеченные к удалению (узел Q1) не считаются: генератор по
+    этому числу решает, называть ли индекс журнала в карточке слоя, и снятая строка журнала не
+    должна давать ссылку на несуществующее правило (замер 27.10.2026: у слоя export-rules индекс
+    журнала снят, но счётчик его видел, и карточка слоя осталась со ссылкой в никуда)."""
     prefix = f"{layer_prefix(marker)}{RL.STATE_JOURNAL}:"
-    cur.execute("SELECT count(*) AS n FROM knowledge_snippets WHERE question LIKE %s",
-                (prefix + "%",))
+    cur.execute("SELECT count(*) AS n FROM knowledge_snippets WHERE question LIKE %s"
+                + sql_not_marked(), (prefix + "%", MARK_ARRAY))
     return int(cur.fetchone()["n"])
 
 
@@ -208,11 +212,18 @@ def rebuild_layer_card(cur, marker, summary, general, pointer, dry=False):
     answer = summary
     answer = replace_section(answer, "MCP", f"{general}\n\n{pointer}")
     table, addrs, count = tree_children(cur, marker)
-    note = (f"\n\nжурнал (`{RL.STATE_JOURNAL}`, {journal_rows_count(cur, marker)} карточек) и "
+    journal_count = journal_rows_count(cur, marker)
+    note = (f"\n\nжурнал (`{RL.STATE_JOURNAL}`, {journal_count} карточек) и "
             f"проверки (`{RL.STATE_CHECKS}`) этого слоя — отдельные сущности дерева, в перечень "
             "правил не кладутся: снимок прежних текстов и способ проверки не являются действующим "
-            f"правилом. Индекс журнала — `{layer_prefix(marker)}{RL.STATE_JOURNAL}:index`; в дампе "
-            "их показывают варианты `-v 5` (журнал) и `-v 6` (проверки).")
+            "правилом.")
+    if journal_count:
+        # Индекс журнала называется только там, где журнал есть: ссылка на несуществующий адрес
+        # читается как потерянное знание, а не как «журнала нет» (у слоя export-rules журнала нет
+        # — индекс журнала второго уровня дублировал карточку слоя и снят узлом RESTRUCTURE-LAYERS;
+        # замер 27.10.2026: провал ссылки в карточке самого слоя).
+        note += (f" Индекс журнала — `{layer_prefix(marker)}{RL.STATE_JOURNAL}:index`;")
+    note += " в дампе их показывают варианты `-v 5` (журнал) и `-v 6` (проверки)."
     links = (f"карточки дерева — уровень 3, слой `{mcp_name_of(marker)}` ({count}):\n{table}{note}")
     answer = replace_section(answer, "LINKS", links)
     answer = replace_section(answer, "INDEX", "\n".join(addrs))
@@ -850,7 +861,7 @@ mark_config_snippet_tool, unmark_config_snippet_tool, list_marked_config_snippet
 
 ===SOURCE===
 `rules:enrich-rules:journal:ref:05` (узлы Q1, Q2), `ref:05:7`, `ref:10` (узел Q1), `ref:11`;
-перенос узла Q1 из `rules:kb-rules:functional:mark-for-deletion` в слой обогащения."""),
+перенос узла Q1 из слоя знаний (`rules:kb-rules:functional:quarantine`) в слой обогащения."""),
 
     ("object-card",
      ["карточка объекта обогащения", "что делает код отчёта", "состав выгруженного объекта",
@@ -976,7 +987,7 @@ list_marked_config_snippets_tool
    замусоривала анализ. Дубликат не создаётся.
 
 ===FORBID===
-Ссылаться на `configuration_id` — так делал старый `register_cross_reference_tool`, которого в схеме
+Ссылаться на `configuration_id` — так делал снятый `register_cross_reference_tool`, которого в схеме
 нет. Оставлять связь, не проверив её `get_config_cross_references_tool` (строка могла остаться после
 пересоздания базы документации, и отдавать её как валидную — значит врать).
 
@@ -1025,7 +1036,7 @@ generate_config_enrichment_tool, config_enrichment_stats_tool
 
 ===SOURCE===
 `rules:enrich-rules:journal:ref:02` (правка Python требует перезапуска),
-`rules:enrich-rules:journal:pos:5` того же слоя, `rules:kb-rules:functional:edit-mcp-code`. Прежний
+`rules:kb-rules:functional:edit-mcp-code`. Прежний
 лист `edit-enrich-code` снят узлом EDIT-ADDRESS-UNIFY (`_unify_edit_mcp_code.py`) во имя общего листа
 `edit-mcp-code`."""),
 ]
@@ -1634,8 +1645,10 @@ MCP именно для того, чтобы вместо шести падаю�
 `python tools/rules_functions.py 1c-configurations-export`; перечень детей в эту карточку не
 кладётся (узел FUNC-SEARCH).
 
-Прежние строки слоя перенесены в ветку `journal` (узел RESTRUCTURE-LAYERS) — это снимок, а не
-правило; индекс снимка — `rules:export-rules:journal:index`.
+Прежние тексты слоя — файлом-исходником переноса, снятым из репозитория (архив прежних текстов в
+репозиторий не входит); отдельной ветки журнала
+у этого слоя нет: индекс журнала второго уровня дублировал эту карточку слоя и снят узлом
+RESTRUCTURE-LAYERS, а снимка прежних правил в базе у слоя ноль (замер 27.10.2026).
 
 Состав слоя — перечень `===LINKS` и дамп `python src/rules_report.py --query "rules:export-rules:"`.
 Числа состава в тексте не хранятся."""
@@ -1655,8 +1668,9 @@ EXPORT_GENERAL = """### Реверс-инжиниринг: что делают �
    что…» — молчаливое исчезновение строки теряет историю так же, как и возврат имени в регистр.
 6. Правки Python-кода требуют перезапуска `python server_configurations_export.py` и обновления
    `EXPECTED_TOOLS`; состав инструментов сверяет `tools/check_mcp_tool_wiring.py`.
-7. Файл `.clinerules/1c-configurations-export_Rule.md` и `docs/rules/export-rules.md` — исходники
-   переноса и вход сверки `tools/check_search_rules_sync.py`; правила дерева читают адресом."""
+7. Прежние файлы `.clinerules/1c-configurations-export_Rule.md` и `docs/rules/export-rules.md`
+   перенесены в архив и исходником слоя больше не являются; правила дерева читают адресом, а
+   состав инструментов сверяет `tools/check_search_rules_sync.py` по строкам БД."""
 
 EXPORT_FUNCTIONAL = [
     ("status",
@@ -1882,8 +1896,8 @@ export_readiness_tool, load_1c_catalog_tool, generate_config_enrichment_tool
    (`DOCUMENTED_SERVERS`): тексты правил обязаны называть все инструменты документируемого сервера и
    не называть снятые живыми.
 4. Где править текст: правило дерева — строка БД (`knowledge_snippets.question` = адрес), её правят
-   строкой БД; `docs/rules/export-rules.md` остаётся исходником переноса и входом сверки, и если он
-   числится в `DOCUMENTED_SERVERS`, состав инструментов называют оба текста.
+   строкой БД; прежний файл `docs/rules/export-rules.md` перенесён в архив и исходником больше не
+   является, поэтому `DOCUMENTED_SERVERS` называет слой, а состав инструментов сверяют по строкам БД.
 
 ===FORBID===
 Оставлять в правилах снятый инструмент как живой; править карточку дерева файлом мигратора так,
@@ -1897,8 +1911,8 @@ export_readiness_tool
 `python tools/check_search_rules_sync.py`.
 
 ===SOURCE===
-прежний текст `rules:export-rules:functional:edit` (переложен по формату, содержание сохранено);
-узел V44; `rules:kb-rules:functional:edit-mcp-code`. Лист `edit` снят узлом EDIT-ADDRESS-UNIFY
+прежняя запись этого правила (переложена по формату, содержание сохранено);
+узел V44; `rules:kb-rules:functional:edit-mcp-code`. Адрес правки кода этого слоя был снят узлом EDIT-ADDRESS-UNIFY
 (`_unify_edit_mcp_code.py`) во имя общего листа `edit-mcp-code`: адрес карточки правки кода выводится
 из метки слоя, а не запоминается."""),
 ]

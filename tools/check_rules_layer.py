@@ -153,31 +153,11 @@ def layer_rows(cur, marker):
                "(SELECT string_agg(a.alias_name, '|' ORDER BY a.alias_name) FROM alias_targets a "
                "WHERE a.snippets_id = knowledge_snippets.id) AS aliases "
                "FROM knowledge_snippets")
-    source = " AND source_url LIKE %s"
-    tree = f"{RL.ROOT_MARKER}:"
-    if marker == RL.ROOT_MARKER:
-        # Карточки самого корня: узел `rules:` и его непосредственные ветки (`rules:always:...`,
-        # `rules:checks:...`, `rules:journal:...`). Поддеревья подслоёв отсекаются целиком —
-        # вторым сегментом у них стоит метка слоя, и строка такого subtree принадлежит слою,
-        # а не корню; без этого отсечения корневая проверка проверяла бы чужие слои своей
-        # категорией и своей грамматикой состояний.
-        subtrees = [f"{tree}{m}" for m in RL.markers() if m != RL.ROOT_MARKER]
-        where = ("(question = %s OR (question LIKE %s AND "
-                 + " AND ".join("question NOT LIKE %s" for _ in subtrees) + "))")
-        cur.execute(
-            f"{columns} WHERE {where}{source}" + sql_not_marked(),
-            (tree, tree + "%", *(s + "%" for s in subtrees),
-             RL.SOURCE_SCHEME + "%", MARK_ARRAY),
-        )
-    else:
-        # Слой дерева: его корневая карточка `rules:<метка>` (в записях она и с двоеточием на
-        # конце, и без него) и всё её поддерево.
-        prefix = f"{tree}{marker}"
-        cur.execute(
-            f"{columns} WHERE (question = %s OR question LIKE %s)"
-            f"{source}" + sql_not_marked(),
-            (prefix, prefix + ":%", RL.SOURCE_SCHEME + "%", MARK_ARRAY),
-        )
+    where, params = RL.layer_sql(marker)
+    cur.execute(
+        f"{columns} WHERE {where} AND source_url LIKE %s" + sql_not_marked(),
+        (*params, RL.SOURCE_SCHEME + "%", MARK_ARRAY),
+    )
     return [dict(row) for row in cur.fetchall()]
 
 
@@ -273,17 +253,23 @@ def check_layer_v2(marker):
     # за слой дала 21 провал «адрес вне состояний слоя» там, где состояния нет по модели (замер
     # 27.10.2026). Различие называется печатью, а не снимается молча: пропущенная проверка
     # отличается от пройденной тем, что читатель знает, чем итог не подтверждён.
+    # Модель состояний задаёт требования к карточке только там, где она записана, — этим слоем:
+    # корнем (`rules:always:*`, `rules:checks:*`, `rules:reserved:*`). Подслои записаны моделью
+    # типов узла, и сегменты `checks` / `journal` у них — служебные ветки дерева
+    # (RESERVED_SEGMENTS в src/rules_layer.py), а не состояния: решение по сегменту адреса
+    # потребовало бы от карточек подслоя разделов состояния и тега состояния, которых генератор
+    # дерева не пишет (замер 27.10.2026: после перевода подслоёв на формат 2 это дало ~100
+    # провалов вида «нет ===WHEN» и «тег состояния journal на карточке»). Теги вида узла для
+    # подслоя проверяет `_layer_tree_check.py`, разделы дерева — тоже он.
+    state_model = marker == RL.ROOT_MARKER
     states = {a: RL.state_of(RL.layer_relative(a, RL.layer_of(a) or marker)) for a in by_address}
-    index_cards = {a for a in by_address if RL.is_index_address(RL.layer_relative(a, marker))}
-    state_cards = {a for a in by_address if states[a] or a in index_cards}
-    if len(state_cards) < len(by_address):
-        print(f"[{marker}] карточек модели типов узла (состояния в адресе нет): "
-              f"{len(by_address) - len(state_cards)} из {len(by_address)} — требования разделов по "
-              f"состоянию, таблиц индекса состояния и бюджета `always` к ним НЕ ПРИМЕНЕНЫ, а не "
-              f"пройдены: их задаёт модель состояний, структуру дерева проверяет "
-              f"_layer_tree_check.py. Проверки, от модели не зависящие (грамматика адреса, ключ "
-              f"идемпотентности, тег категории, разрешаемость ссылок, достижимость), остаются для "
-              f"всех карточек.")
+    if not state_model:
+        print(f"[{marker}] слой записан моделью типов узла: состояния в адресах подслоя отсутствуют "
+              f"по построению ({len(by_address)} карточек) — разделы по состоянию, таблицы индекса "
+              f"состояния, тег состояния и бюджет `always` к слою НЕ ПРИМЕНЕНЫ, а не пройдены; их "
+              f"проверяет _layer_tree_check.py. Здесь остаются проверки, от модели не зависящие: "
+              f"грамматика адреса, ключ идемпотентности, тег категории, разрешаемость ссылок, "
+              f"достижимость своей категорией и изоляция чужой.")
 
     for address in sorted(by_address):
         row = by_address[address]
@@ -299,7 +285,7 @@ def check_layer_v2(marker):
         tags = set(row["tags"] or [])
         check(primary in tags, f"[{marker}] {address}: тег категории слоя на карточке",
               f"теги {sorted(tags)} — без него слой не изолируется фильтром")
-        if state:
+        if state_model and state:
             check(state in tags, f"[{marker}] {address}: тег состояния {state} на карточке",
                   f"теги {sorted(tags)}")
         if state != RL.STATE_JOURNAL:
@@ -324,7 +310,7 @@ def check_layer_v2(marker):
                 print(f"  ⚠️ {address}: алиасов в базе больше, чем объявлено в карточке: "
                       f"{extra[:5]} — следы переименований допустимы; снять лишний алиас можно "
                       f"только строкой alias_targets (инструмент их лишь добавляет)")
-        if state is not None:
+        if state_model and state is not None:
             # Требования к разделам задаются состоянием карточки, а у карточки модели типов узла
             # состояния нет (узел RULE-TREE). Разделы дерева — WHEN/CHECK/TOOL — проверяет
             # `_layer_tree_check.py`; здесь они не проверяются НИКАК, и это названо печатью выше,
@@ -339,12 +325,13 @@ def check_layer_v2(marker):
                       f"[{marker}] {address}: резервная карточка короткая",
                       f"{len(row['answer'] or '')} > {RL.RESERVED_MAX_CHARS}: длинный текст в "
                       f"reserved означает, что правило уже написано")
-    if state_cards:
+    if state_model:
         check_layer_v2_indexes(marker, by_address, cross)
-    # Ссылки карточек проверяются по всем строкам слоя там, где в слое есть карточки дерева:
-    # в модели типов узла ссылкой может быть любой узел, а не только индекс состояния.
-    check_index_links(marker, by_address, cross,
-                      all_cards=any(a not in state_cards for a in by_address))
+    # Ссылки проверяются во всех карточках слоя, а не только в индексах: в обеих моделях записи
+    # ссылкой может быть любой узел (замер 27.10.2026: ограничение индексными карточками сняло
+    # 24 проверки корня и перестало находить ссылки в несуществующие карточки, стоящие в
+    # обычных карточках).
+    check_index_links(marker, by_address, cross, all_cards=True)
     return by_address
 
 

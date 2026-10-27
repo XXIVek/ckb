@@ -202,9 +202,8 @@ search_docs_tool(query="<вопрос>", category="<категория>") — п
 
 ===SOURCE===
 src/mcp_tools_api.py (`add_snippet`); переложено по инструментам из
-`rules:kb-rules:functional:write-knowledge` (узел RULE-TREE → RULE-TOOLS), исходный текст —
-снят в карантин строкой `rules:kb-rules:always:edit-in-db` (узел RULE-TREE: сегмента состояния
-в адресах больше нет)`"""),
+`rules:kb-rules:functional:write-knowledge` (узел RULE-TREE → RULE-TOOLS), а прежняя запись этого
+правила состояния снята узлом RULE-TREE: сегмента состояния в адресах больше нет)`"""),
 ]
 
 
