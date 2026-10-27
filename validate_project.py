@@ -289,8 +289,17 @@ except Exception as e:
 #     вторую пару правил вместо одной.
 print("\n[10/10] Checking rules layers in local_doc (addresses, states, indexes)...")
 try:
-    from check_rules_layer import main as rules_layer_check
-    if rules_layer_check([]) != 0:
+    # Порядок важен. `check_rules_layer` сегодня отдаёт ненулевой код возврата на известной
+    # открытой позиции (отбор строк слоя префиксом — узел RESTRUCTURE-LAYERS), и всё, что стоит
+    # после него, не выполнялось бы вовсе: сторожи ниже были бы мёртвым кодом. Поэтому
+    # независимые проверки идут до него.
+    #
+    # Проза карточек под сторож `check_rule_tool_coverage.py` не попадает (тот читает разделы
+    # `CHECK` и `TOOLS`), и в ней осталась ссылка на проверку, которой никогда не было:
+    # `_layers_tree_probe.py` в `rules:core-rules:checks:index` (замер 27.10.2026). Аудит
+    # различает битую ссылку и рассказ о снятом — правило о прошлом провалом не считается.
+    from _named_artifacts_audit import main as named_artifacts_check
+    if named_artifacts_check() != 0:
         sys.exit(1)
     # Корневая карточка `rules:` входит в набор, который читают всегда, — её размер платит за себя
     # в каждом окне контекста (узел ROOT-ROUTER-COPY, 26.10.2026). В ней лежал раздел `===MCP` —
@@ -299,6 +308,9 @@ try:
     # отменённый двухшаговый поиск адресом. Сторож снимает копию и не даёт ей вернуться.
     from strip_root_router_copy import main as root_card_check
     if root_card_check([]) != 0:
+        sys.exit(1)
+    from check_rules_layer import main as rules_layer_check
+    if rules_layer_check([]) != 0:
         sys.exit(1)
 except SystemExit:
     raise

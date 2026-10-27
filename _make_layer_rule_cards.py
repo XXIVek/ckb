@@ -13,6 +13,14 @@
 (префикс `functional:` против суффикса `-tool`), и тем же префиксом их ищут: перечень функций в
 карточку слоя не кладётся (узел FUNC-SEARCH), их спрашивает `tools/rules_functions.py`.
 
+Карточка правки кода слоя имеет общий лист `edit-mcp-code`: `rules:<слой>:functional:edit-mcp-code`
+для четырёх слоёв (узел EDIT-ADDRESS-UNIFY, `_unify_edit_mcp_code.py`). Разные листья —
+`edit-core-code`, `edit-enrich-code`, `edit` — не выводятся из метки слоя: их нужно помнить или
+искать перечислением, а ссылка «правило правки кода MCP — <адрес>» в текстах других карточек
+расходится с реальным адресом. Теги от имени листа не зависят: вид карточки задаёт префикс
+`functional:` в адресе, а тег `functional` — его следствие (`card_tags`, `RL.tags_for`), поэтому
+приведение адресов теги не трогает.
+
 Откуда текст. Правила `core-rules` и `enrich-rules` написаны по живым нормативам и по сохранённому
 снимку (критические правила прежних карточек `…:journal:ref:07`, `…:journal:ref:08`, разделы
 контрактов, исходники `.clinerules/*_Rule.md`, docstring'и `@mcp.tool()`). Карточки `export-rules`
@@ -493,7 +501,7 @@ delete_external_report_tool, load_1c_catalog_tool, set_object_configuration_tool
 `rules:core-rules:journal:pos:19` (перезагрузка `force=True`), `rules:core-rules:journal:pos:20`,
 `rules:core-rules:journal:node:v31` (провенанс строки), `rules:export-rules:functional:workflow`."""),
 
-    ("edit-core-code",
+    ("edit-mcp-code",
      ["правка кода core-mcp", "изменить состав инструментов core", "переписать загрузчик"],
      """===WHEN===
 Меняют код сервера `1c-configurations-core` (`server_configurations_core.py`, загрузчики, DDL) или
@@ -503,8 +511,9 @@ delete_external_report_tool, load_1c_catalog_tool, set_object_configuration_tool
 1. До правки проверяют, есть ли уже функция слоя под задачу:
    `python tools/rules_functions.py 1c-configurations-core --term <термин>`. Функции нет — это
    отсутствие функции, а не пропущенный пункт; тогда пробуют создавать инструмент самому (регистр
-   `@mcp.tool()` назван в шапке ответа), а правило правки кода MCP —
-   `rules:kb-rules:functional:edit-mcp-code`.
+   `@mcp.tool()` назван в шапке ответа). Общее правило правки кода MCP —
+   `rules:kb-rules:functional:edit-mcp-code`, правило правки кода этого слоя — эта карточка: адрес
+   выводится из метки слоя общим листом `edit-mcp-code`.
 2. После правки — перезапуск `python server_configurations_core.py`, обновление `EXPECTED_TOOLS` в
    `tools/check_mcp_tool_wiring.py`, прогоны `check_mcp_tool_wiring.py` и `validate_project.py`.
 3. Изменение схемы — строго парой «миграция + зеркало в DDL-источнике»; одинарная правка ловится
@@ -527,7 +536,8 @@ load_configuration_root_modules_tool
 
 ===SOURCE===
 `rules:core-rules:journal:pos:5` (правки Python требуют перезапуска),
-`rules:kb-rules:functional:edit-mcp-code`; узел V44.
+`rules:kb-rules:functional:edit-mcp-code`; узел V44; прежний лист `edit-core-code` снят узлом
+EDIT-ADDRESS-UNIFY (`_unify_edit_mcp_code.py`) во имя общего листа `edit-mcp-code`.
 """),
 ]
 
@@ -646,13 +656,13 @@ CORE_CHECKS = (
 | `python _cmp_ddl.py` | живая схема `ckb_1c_configurations` совпадает с DDL-источниками установки и миграций |
 | `python tools/check_v32_zero_configuration.py` | границы нулевой конфигурации и перечень отсутствующих таблиц |
 | `sql/check_external_report_*.sql` | покрытие содержимого и поиска по эталонным выгрузкам |
-| `python _layer_tree_check.py` | живое дерево трёх слоёв: карточка на каждый инструмент регистра, разделы карточек, теги вида, отсутствие ссылок на прежние адреса, полнота `===INDEX` |
+| `python _layer_tree_check.py` | живое дерево трёх слоёв: карточка на каждый инструмент регистра, разделы карточек, теги вида, отсутствие ссылок на прежние адреса, полнота `===INDEX`, наличие карточки правки кода `functional:edit-mcp-code` (узел EDIT-CODE-TRIGGER, 27.10.2026) |
 | `python _layer_ls.py rules:core-rules:` | состав слоя: число карточек по видам, объём ответа, число алиасов |
 
 **Граница проверок.** `tools/check_rules_layer.py --layer core-rules` работает с прежним адресным
 пространством (`core-rules:<…>`) и со слоем формата 1; под адреса дерева `rules:core-rules:<правило>`
 он ещё не адаптирован — этот шаг отдельный и назван в `rules:reserved:layer-migration`. Живой
-проверкой дерева до того шага служит `_layers_tree_probe.py`."""
+проверкой дерева до того шага служит `_layer_tree_check.py` (в репозитории есть только он; имя `_layers_tree_probe.py` в строке 26.10.2026 было ошибкой генератора — файла с таким именем никогда не было, и аудит названных артефактов это показал)."""
 )
 
 
@@ -981,7 +991,7 @@ delete_config_cross_reference_tool
 ===SOURCE===
 `rules:enrich-rules:journal:ref:07` (узел V20.1), `ref:07:6`, `ref:06`; узлы E, V22."""),
 
-    ("edit-enrich-code",
+    ("edit-mcp-code",
      ["правка кода enrich-mcp", "изменить состав инструментов обогащения", "переписать генератор"],
      """===WHEN===
 Меняют код сервера `1c-configurations-enrichment` (генератор, витрины, разрешение целей) или состав
@@ -990,8 +1000,9 @@ delete_config_cross_reference_tool
 ===MUST===
 1. До правки проверяют, есть ли уже функция слоя под задачу:
    `python tools/rules_functions.py 1c-configurations-enrichment --term <термин>`. Функции нет — это
-   отсутствие функции, а не пропущенный пункт; тогда пробуют создавать инструмент самому, а правило
-   правки кода MCP — `rules:kb-rules:functional:edit-mcp-code`.
+   отсутствие функции, а не пропущенный пункт; тогда пробуют создавать инструмент самому. Общее
+   правило правки кода MCP — `rules:kb-rules:functional:edit-mcp-code`, правило правки кода этого
+   слоя — эта карточка: адрес выводится из метки слоя общим листом `edit-mcp-code`.
 2. После правки — перезапуск `python server_configurations_enrichment.py`, обновление `EXPECTED_TOOLS`
    в `tools/check_mcp_tool_wiring.py`, прогоны `check_mcp_tool_wiring.py` и `validate_project.py`.
 3. Авто-строки (пере)создаёт генератор: править их текстом в БД бессмысленно — источник в коде и в
@@ -1014,7 +1025,9 @@ generate_config_enrichment_tool, config_enrichment_stats_tool
 
 ===SOURCE===
 `rules:enrich-rules:journal:ref:02` (правка Python требует перезапуска),
-`rules:enrich-rules:journal:pos:5` того же слоя, `rules:kb-rules:functional:edit-mcp-code`."""),
+`rules:enrich-rules:journal:pos:5` того же слоя, `rules:kb-rules:functional:edit-mcp-code`. Прежний
+лист `edit-enrich-code` снят узлом EDIT-ADDRESS-UNIFY (`_unify_edit_mcp_code.py`) во имя общего листа
+`edit-mcp-code`."""),
 ]
 
 
@@ -1850,7 +1863,7 @@ export_readiness_tool, load_1c_catalog_tool, generate_config_enrichment_tool
 прежний текст `rules:export-rules:functional:workflow` (переложен по формату, порядок и ссылка на
 план сохранены дословно); узлы V25, V35, M7, правило 10."""),
 
-    ("edit",
+    ("edit-mcp-code",
      ["правка кода export-mcp", "синхронизировать правила с регистром инструментов",
       "docs/rules/export-rules.md мигратор"],
      """===WHEN===
@@ -1885,7 +1898,9 @@ export_readiness_tool
 
 ===SOURCE===
 прежний текст `rules:export-rules:functional:edit` (переложен по формату, содержание сохранено);
-узел V44; `rules:kb-rules:functional:edit-mcp-code`."""),
+узел V44; `rules:kb-rules:functional:edit-mcp-code`. Лист `edit` снят узлом EDIT-ADDRESS-UNIFY
+(`_unify_edit_mcp_code.py`) во имя общего листа `edit-mcp-code`: адрес карточки правки кода выводится
+из метки слоя, а не запоминается."""),
 ]
 
 

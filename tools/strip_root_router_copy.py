@@ -26,12 +26,18 @@ tools/rules_read.py), поэтому её содержимое платит за
     python tools/strip_root_router_copy.py --apply    # снять копию (повторный вызов — 0)
 """
 import argparse
-import io
 import re
 import sys
 from pathlib import Path
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+try:  # кириллица и эмодзи вывода не влазят в cp1251 — приём тот же, что в tools/check_rules_layer.py.
+    # Прежняя запись `sys.stdout = io.TextIOWrapper(sys.stdout.buffer, ...)` ломала импорт из
+    # validate_project.py: прежняя обёртка терялась из ссылок, сборщик мусора закрывал буфер, и
+    # первый print сторожа падал с «I/O operation on closed file» (замер 27.10.2026).
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:  # сбой настройки потока не имеет права менять итог проверки
+    pass
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from database import get_cursor  # noqa: E402

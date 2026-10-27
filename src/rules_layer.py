@@ -259,6 +259,44 @@ def marker_of(address):
     return (address or "").split(":", 1)[0]
 
 
+def layer_of(address):
+    """Слой, которому принадлежит строка дерева: 'rules:core-rules:functional:x' -> 'core-rules',
+    'rules:checks:index' -> 'rules', 'rules:' -> 'rules'; пустой адрес -> ''.
+
+    `marker_of` для дерева не годится: у всех его строк первая часть — корень `rules`, и меткой
+    оказался бы корень любого правила (замер 27.10.2026: тот же предикат, положенный в отбор
+    строк слоя, под меткой `rules` собирал разом 219 строк всех пяти слоёв, а под метками трёх
+    конфигурационных слоёв — ноль). Слой задаёт второй сегмент; если его нет среди меток,
+    карточка принадлежит самому корню — у его карточек вторым сегментом идёт состояние или
+    служебное имя, а не метка слоя.
+    """
+    parts = [p for p in str(address or "").split(":") if p]
+    if not parts:
+        return ""
+    if parts[0] != ROOT_MARKER:
+        return parts[0] if parts[0] in LAYERS else ""
+    if len(parts) > 1 and parts[1] in LAYERS and parts[1] != ROOT_MARKER:
+        return parts[1]
+    return ROOT_MARKER
+
+
+def layer_relative(address, marker):
+    """Адрес слоя без пути дерева до него: 'rules:core-rules:functional:x' ->
+    'core-rules:functional:x'; для карточек самого корня адрес не меняется.
+
+    Грамматика и производные от неё (`validate_address`, `state_of`, `is_index_address`,
+    `required_sections`) считают сегменты от метки слоя, а живые строки записаны под путём
+    `rules:`. Без этого шага одна карточка проходила бы проверку, будучи записанной прежней
+    плоской формой, и проваливала бы её, будучи записанной деревом, — два разных ответа на одно
+    правило. Разница моделей видна и в имени: прежняя форма звала состояние вторым сегментом
+    (`kb-rules:always:index`), дерево зовёт его по месту узла (`rules:kb-rules:<правило>`).
+    """
+    text = str(address or "")
+    if marker and marker != ROOT_MARKER and text.startswith(f"{ROOT_MARKER}:{marker}"):
+        return text[len(ROOT_MARKER) + 1:]
+    return text
+
+
 def address_parts(address):
     """Сегменты адреса после метки (для адреса без метки — все сегменты)."""
     for marker in LAYERS:
@@ -630,7 +668,12 @@ def validate_index_graph(marker, cards):
                                 f"назови скрипт, SQL-сверку или инструмент контракта"
                             )
         for token in address_tokens(card["answer"]):
-            if marker_of(token) != marker or address_resolves(token, by_address):
+            # Принадлежность слоя ссылке определяет `layer_of`, а не первая часть адреса: у строки
+            # дерева первая часть — корень `rules`, и ссылка на подслой (`rules:core-rules:`)
+            # показалась бы ссылкой текущего слоя, карточку которой требуют искать в этом же
+            # документе (замер 27.10.2026: мигратор корневой карточки отверг корректные ссылки на
+            # подслои дерева, потому что карточек подслоя нет в файле корня).
+            if layer_of(token) != marker or address_resolves(token, by_address):
                 continue
             if state_of(token) == STATE_JOURNAL:
                 # Карточки журнала намеренно не лежат в файле-исходнике: это снимок прежних
