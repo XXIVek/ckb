@@ -1,78 +1,62 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""Разбор непокрытых имён инструментов (основание для П2-Ф-8).
+"""П8: фактическое состояние журнальных оглавлений слоёв (только чтение).
 
-Измеритель `_journal_code_history.py` называет имена, которые не читаются слоем, но не говорит,
-чем они являются: снятым инструментом, прежним именем теперешнего или ссылкой на чужой контракт.
-Решение по каждому имени принимается по git: где имя появилось, где пропало и что появилось вместе
-с пропаданием.
-
-Запуск: python _p8_probe.py [kb-rules enrich-rules]
+Вопросы зонда:
+  1. есть ли у строк подслоя тег состояния `journal` — тем их отбирает `regen_journal_index.py`;
+  2. есть ли карточка-оглавление `rules:<слой>:journal:index` и чем её перечни правятся;
+  3. лежит ли файл-черновик `docs/rules/<метка>.md` — туда пишет `regen_journal_index.py`.
 """
-import subprocess
 import sys
+from pathlib import Path
 
-sys.path.insert(0, "src")
-sys.path.insert(0, "tools")
+ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT / "src"))
 
-try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
+from database import get_cursor  # noqa: E402
 
-import _journal_code_history as J  # noqa: E402
-from check_mcp_tool_wiring import DELETED_TOOLS  # noqa: E402
+MARKERS = ["rules", "core-rules", "kb-rules", "enrich-rules", "export-rules"]
 
+with get_cursor() as cur:
+    print("слой        | строк с тегом метки | с тегом journal | карточка journal:index | карточек журнала по адресу | черновик docs/rules")
+    for m in MARKERS:
+        cur.execute("SELECT count(*) AS n FROM knowledge_snippets WHERE %s = ANY(tags)", (m,))
+        tagged = cur.fetchone()["n"]
+        cur.execute(
+            "SELECT count(*) AS n FROM knowledge_snippets "
+            "WHERE %s = ANY(tags) AND 'journal' = ANY(tags)", (m,),
+        )
+        jrn = cur.fetchone()["n"]
+        cur.execute(
+            "SELECT id, length(answer) AS len FROM knowledge_snippets WHERE question = %s",
+            (f"{m}:journal:index" if m == "rules" else f"rules:{m}:journal:index",),
+        )
+        idx = cur.fetchone()
+        cur.execute(
+            "SELECT count(*) AS n FROM knowledge_snippets WHERE question LIKE %s",
+            (f"{m}:journal:%" if m == "rules" else f"rules:{m}:journal:%",),
+        )
+        by_addr = cur.fetchone()["n"]
+        draft = ROOT / "docs" / "rules" / f"{m}.md"
+        idx_text = f"id={idx['id']} len={idx['len']}" if idx else "НЕТ"
+        print(f"{m:<11} | {tagged:>17} | {jrn:>15} | {idx_text:>22} | {by_addr:>25} | "
+              f"{'есть' if draft.exists() else 'нет'}")
 
-def signs(sha, path):
-    """Имена, добавленные и снятые в изменённых строках коммита."""
-    res = subprocess.run(
-        ["git", "--no-pager", "show", "--format=", "--unified=0", sha, "--", path],
-        capture_output=True, text=True, encoding="utf-8", errors="replace")
-    added, removed = set(), set()
-    for line in res.stdout.splitlines():
-        if line.startswith("+++") or line.startswith("---"):
+    print("\nпервые строки оглавлений подслоёв")
+    for m in MARKERS[1:]:
+        cur.execute("SELECT answer FROM knowledge_snippets WHERE question = %s",
+                    (f"{m}:journal:index" if m == "rules" else f"rules:{m}:journal:index",))
+        row = cur.fetchone()
+        if not row:
+            print(f"  [{m}] карточки-оглавления нет")
             continue
-        if line.startswith("+"):
-            added.update(J.TOOL_NAME.findall(line))
-        elif line.startswith("-"):
-            removed.update(J.TOOL_NAME.findall(line))
-    return added, removed
+        print(f"  [{m}]")
+        for line in [l for l in row["answer"].splitlines() if l.strip()][:5]:
+            print("    ", line[:160])
 
-
-def main(argv=None):
-    markers = list(sys.argv[1:] if argv is None else argv) or ["kb-rules", "enrich-rules"]
-    for marker in markers:
-        server = J.LAYER_SERVER[marker]
-        commits = J.composition_commits(server) or []
-        signed = [(day, sha, *signs(sha, server)) for day, sha, _names in commits]
-        names = set()
-        for _day, _sha, added, removed in signed:
-            names |= added | removed
-        foreign = J.foreign_names(server)
-        live, journal = J.layer_texts(marker)
-        lf, jf = J.compact(live), J.compact(journal)
-        demanded = names - foreign
-        uncovered = sorted(n for n in demanded if n not in lf and n not in jf)
-        print(f"\n=== {marker} / {server}: имён в диффах {len(names)}, "
-              f"чужих {len(names & foreign)}, требуются {len(demanded)}, непокрытых {len(uncovered)}")
-        for name in uncovered:
-            where = []
-            for day, sha, added, removed in signed:
-                if name in removed:
-                    replaced_by = sorted(added - {name})
-                    where.append(f"{day} {sha} снято"
-                                 + (f" → добавлено: {', '.join(replaced_by)}" if replaced_by else ""))
-                elif name in added:
-                    where.append(f"{day} {sha} добавлено")
-            kind = "в DELETED_TOOLS" if name in DELETED_TOOLS else "вне DELETED_TOOLS"
-            print(f"\n{name}  [{kind}]")
-            for line in where[:6]:
-                print(f"    {line}")
-            if not where:
-                print("    коммитов регистра с этим именем нет (имя из текста, а не из регистра?)")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    print("\nкарточки, чей текст предписывает regen_journal_index (живые)")
+    cur.execute(
+        "SELECT id, question FROM knowledge_snippets "
+        "WHERE answer LIKE '%%regen_journal_index%%' "
+        "  AND NOT (tags::text LIKE '%%mark-for-deletion%%') ORDER BY question"
+    )
+    for r in cur.fetchall():
+        print("  ", r["id"], r["question"])
