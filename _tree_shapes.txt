@@ -1,4 +1,0 @@
-2|12|core-rules:index|rules:index
-3|57|core-rules:ref:01|rules:reserved:layer-migration
-4|35|core-rules:ref:02:2|kb-rules:journal:ref:10
-5|7|kb-rules:journal:ref:06:2|kb-rules:journal:ref:09:2
