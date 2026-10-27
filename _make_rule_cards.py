@@ -286,7 +286,9 @@ python tools/check_quarantine_round_trip.py — живой контракт ка
 ===SOURCE===
 src/quarantine.py, docs/CONFIGURATIONS_ENRICHMENT_PLAN.md раздел 14
 перенесено без правок формулировок с карточки прежнего состава этого правила — её адрес снят
-узлом RULE-TREE (25.10.2026), действующий адрес этот"""
+узлом RULE-TREE (25.10.2026), действующий адрес этот. История требования — снимок слоя:
+`rules:kb-rules:journal:ref:09`, `rules:kb-rules:journal:ref:09:2` (прежние критические правила,
+откуда растёт проверка дублей вторым прогоном)"""
 
 CARD_LOADING = """===WHEN===
 В базу загружают документ: HTML справки, PDF руководства, DOCX-статью, каталог файлов.
@@ -322,7 +324,10 @@ python tools/load_its_pdf.py --dry-run — состав разделов до з
 src/its_pdf_loader.py, _docx_extract.py, src/mcp_tools_api.py (`detect_tags`); прежний сплошной
 текст правил загрузки — архив `docs/rules/LOAD_RULES.md`, он больше не источник правки
 перенесено без правок формулировок с карточки прежнего состава этого правила — её адрес снят
-узлом RULE-TREE (25.10.2026), действующий адрес этот"""
+узлом RULE-TREE (25.10.2026), действующий адрес этот. История:
+`rules:kb-rules:journal:ref:07` (сценарии загрузки A/B/C), `rules:kb-rules:journal:ref:05`
+(категории документации и их источники), `rules:kb-rules:journal:ref:10` (путь к источникам и
+форматы, которых загрузка не понимает)"""
 
 CARD_WRITE = """===WHEN===
 Знание нужно создать, исправить или дополнить: найден конфликт двух строк, у строки неверный
@@ -362,7 +367,9 @@ python tools/check_quarantine_round_trip.py — пометка и снятие �
 src/mcp_tools_api.py (`add_snippet`, `update_snippet`, `add_aliases`, `snippet_audit_log`,
 `detect_tags`); прежняя запись состояния этого правила снята узлом RULE-TREE (сегмента состояния в
 адресах слоя нет), дополнено инструментами контракта `add_aliases_tool` и `detect_tags_tool`,
-которых живые карточки слоя не называли"""
+которых живые карточки слоя не называли. История: `rules:kb-rules:journal:ref:04` (прежний перечень
+инструментов сервера), `rules:kb-rules:journal:ref:09` (критическое правило добавления сниппетов:
+`groups_id = NULL` для не-BSL источников)"""
 
 CARD_STATE = """===WHEN===
 Нужны метаданные базы, а не знание: сколько строк какого вида, какие категории существуют, чем
@@ -394,7 +401,9 @@ python tools/check_category_filter.py — фильтр по категории �
 ===SOURCE===
 src/mcp_tools_api.py (`get_db_state`, `list_categories`), src/quarantine.py (строка карантина);
 находимость с категорией — отдельная карточка `rules:kb-rules:functional:alias-coverage`;
-правило о числах в ответе в дерево ещё не перенесено и адресом не называется"""
+правило о числах в ответе в дерево ещё не перенесено и адресом не называется. История:
+`rules:kb-rules:journal:ref:03` (структура таблиц `groups` / `knowledge_snippets`, по которым
+считается состояние), `rules:kb-rules:journal:ref:05` (перечень категорий)"""
 
 CARD_RULES_WORK = """===WHEN===
 Нужно найти, прочитать, развернуть, исправить или снять правило — этого слоя или любого другого.
@@ -436,7 +445,8 @@ python tools/check_rules_layer.py --layer kb-rules — формат карточ
 
 ===SOURCE===
 src/rules_report.py, src/rules_layer.py (`validate_address`, `node_marker`, `levels_of`),
-tools/check_mcp_tool_wiring.py (`DELETED_TOOLS`)"""
+tools/check_mcp_tool_wiring.py (`DELETED_TOOLS`). История: `rules:kb-rules:journal:ref:01`
+(назначение сервера), `rules:kb-rules:journal:ref:02` (архитектура слоя, из которой вырос отчёт)"""
 
 
 # Функциональная опция отчёта (узел RULE-REPORT-PARAMS, 26.10.2026). Заведена отдельной карточкой,
@@ -493,7 +503,9 @@ python src/rules_report.py --query "1c-configurations-core" — срез одн�
 
 ===SOURCE===
 src/rules_report.py (`VARIANTS`, `resolve_variant`, `select_cards`), узлы RULE-REPORT и
-RULE-REPORT-VARIANTS; правило уточнения параметров — узел RULE-REPORT-PARAMS (26.10.2026)"""
+RULE-REPORT-VARIANTS; правило уточнения параметров — узел RULE-REPORT-PARAMS (26.10.2026);
+снимок состава слоя и структуры, по которой строится отчёт, — `rules:kb-rules:journal:ref:02`,
+`rules:kb-rules:journal:ref:03`"""
 
 
 # ------------------------------------------------------------------ состав карточек
@@ -541,7 +553,9 @@ unmark_snippet_for_deletion_tool, list_marked_snippets_tool
 `python tools/check_quarantine_round_trip.py` — пометка и снятие в обоих контурах.
 
 ===SOURCE===
-src/mcp_tools_api.py (`add_snippet`, `update_snippet`, `snippet_audit_log`), src/quarantine.py"""
+src/mcp_tools_api.py (`add_snippet`, `update_snippet`, `snippet_audit_log`), src/quarantine.py.
+История: `rules:kb-rules:journal:hdr:01` (правка карточки по её ID, 22.10.2026),
+`rules:kb-rules:journal:ref:09:2` (отсутствие дублей проверяют вторым прогоном)"""
 
 CARDS = [
     ("functional:edit-in-db", CARD_EDIT_DB,

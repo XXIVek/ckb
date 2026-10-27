@@ -340,8 +340,8 @@ CORE_FUNCTIONAL = [
     ("load-catalog",
      ["загрузка внешнего отчёта", "загрузка каталога выгрузки", "что делать с force", "исходы загрузки"],
      """===WHEN===
-Берут каталог XML-выгрузки внешнего отчёта или обработки: загрузить впервые, перезагрузить, понять,
-почему загрузка не состоялась.
+Берут каталог XML-выгрузки: внешнего отчёта или обработки, либо конфигурации (первый слой загрузки).
+Загрузить впервые, перезагрузить, понять, почему загрузка не состоялась.
 
 ===MUST===
 1. Одна точка входа — `load_1c_catalog_tool(source_path, force=False)`. Тип каталога определяется по
@@ -350,8 +350,11 @@ CORE_FUNCTIONAL = [
 2. Исход называют целиком, вместе с причиной и подсказкой. `⚠️ уже загружено` — остановка: повторять
    с `force=True` можно только после вопроса оператору или по его явной команде.
 3. `❌` бывает от конкретных причин: нет каталога, каталог не подходит, пустой UUID, сценарий не
-   реализован (конфигурация и расширение), не получен ID записи, `uuid` занят строкой другого вида
-   (`kind_conflict`). Одна ошибка — одна причина и одна подсказка, ответ по-русски.
+   реализован (один вариант — расширение, `NOT_IMPLEMENTED_VARIANTS` в `src/config_load_router.py`),
+   не получен ID записи, `uuid` занят строкой другого вида (`kind_conflict`). Одна ошибка — одна
+   причина и одна подсказка, ответ по-русски. Конфигурация этим вариантом не является: она загружается
+   конвейером первого слоя (узел V45), состояние стадий —
+   `rules:core-rules:functional:goal-and-stages`.
 4. Дочерние строки уникальны в пределах родителя (правило R10); uuid формы и макета берут только из
    файлов регистрации `Forms/<Имя>.xml`, `Templates/<Имя>.xml`, имена из корневого XML — сверка.
 5. Модуль формы хранится в `form_ext.ext`, а не в `bsl_modules` (правило R9); в `bsl_modules` — только
@@ -360,7 +363,9 @@ CORE_FUNCTIONAL = [
 ===FORBID===
 Ставить `force=True` молча; считать пустой `ChildObjects` ошибкой (формы, макеты и модули могут быть
 нулевыми — это норма с предупреждением); выдавать `configuration_id` за данные выгрузки (это решение
-оператора, правило R11); обещать загрузку конфигурации или расширения — сценарий не реализован.
+оператора, правило R11); обещать загрузку расширения — вариант остаётся заглушкой; называть
+незагружаемым заголовок конфигурации — он загружается с узла V32, состояние стадий читается
+карточкой `rules:core-rules:functional:goal-and-stages`.
 
 ===TOOLS===
 load_1c_catalog_tool, load_external_object_file_tool, delete_external_report_tool
@@ -371,7 +376,21 @@ load_1c_catalog_tool, load_external_object_file_tool, delete_external_report_too
 
 ===SOURCE===
 `rules:core-rules:journal:ref:07` (критические правила), `rules:core-rules:journal:ref:14` (четыре
-исхода), docstring `load_1c_catalog_tool` в `server_configurations_core.py`; узлы V9, V22."""),
+исхода), docstring `load_1c_catalog_tool` в `server_configurations_core.py`. Прежняя проза «узлы V9,
+V22» заменена адресами снимка (узел П2-Ф-3 плана `docs/RULES_CONTEXT_PLAN.md`: номер узла адресом не
+является, и ссылка на него не проверяется):
+`rules:core-rules:journal:pos:22:1`, `rules:core-rules:journal:pos:22:2` (вариант «внешняя
+обработка» был заглушкой), `rules:core-rules:journal:node:v32` (заголовок конфигурации стал
+вариантом загрузки), `rules:core-rules:journal:node:v33` (индекс состава),
+`rules:core-rules:journal:node:v38`, `rules:core-rules:journal:node:v38:add1910` (эталон `MinCfg` и
+профиль свойств корня), `rules:core-rules:journal:node:v39`,
+`rules:core-rules:journal:node:v39:add2110` (многоязычные свойства заголовка),
+`rules:core-rules:journal:node:v42:1`, `rules:core-rules:journal:node:v42:2`,
+`rules:core-rules:journal:node:v42:3`, `rules:core-rules:journal:node:v42:add2110`,
+`rules:core-rules:journal:node:v42:add2210` (свойства корневого `Configuration.xml`),
+`rules:core-rules:journal:node:v43:1`, `rules:core-rules:journal:node:v43:2`,
+`rules:core-rules:journal:node:v43:add2210` (дочерние свойства стали данными),
+`rules:core-rules:journal:node:v45` (конвейер S1–S4 и закрытый контракт результата)."""),
 
     ("load-binary-file",
      ["загрузка erf", "загрузка epf", "разбор двоичного файла", "ibcmd для внешнего объекта"],
@@ -406,8 +425,10 @@ load_external_object_file_tool, load_1c_catalog_tool
 состав регистра.
 
 ===SOURCE===
-docstring `load_external_object_file_tool`; `rules:core-rules:journal:ref:13`; узел V25,
-`docs/CONFIGURATIONS_ENRICHMENT_PLAN.md` раздел 13."""),
+docstring `load_external_object_file_tool`; `rules:core-rules:journal:ref:13`;
+`rules:core-rules:journal:pos:23:1`, `rules:core-rules:journal:pos:23:2` (узел V25 — разбор
+двоичного файла), `rules:core-rules:journal:node:v31` (провенанс строки: чем подтверждается, откуда
+она загружена); `docs/CONFIGURATIONS_ENRICHMENT_PLAN.md` раздел 13."""),
 
     ("answer-and-evidence",
      ["чем отвечать про выгруженный объект", "нельзя ходить в psql", "формат ответа оператору"],
@@ -438,7 +459,10 @@ get_config_template_tool
 эталонной выгрузке.
 
 ===SOURCE===
-`rules:core-rules:journal:ref:07`, пункт 5 обязательных шагов; правило R7 контракта загрузки."""),
+`rules:core-rules:journal:ref:07`, пункт 5 обязательных шагов; правило R7 контракта загрузки;
+`rules:core-rules:journal:node:v38` (эталон `MinCfg`: по нему сверяют, что пустая выдача — норма
+выгрузки, а не потерянные данные), `rules:core-rules:journal:node:v38:add1910` (эталон широты
+видов: 34 каталога видов, индекс 196 записей)."""),
 
 
 
@@ -474,7 +498,13 @@ load_configuration_root_modules_tool, load_1c_catalog_tool
 Сверка строк с `configuration_objects` (индекс состава) и с дампом каталога `Ext/`.
 
 ===SOURCE===
-docstring `load_configuration_root_modules_tool`; узел V44 (23.10.2026)."""),
+docstring `load_configuration_root_modules_tool`;
+`rules:core-rules:journal:node:v40`, `rules:core-rules:journal:node:v40:add2110` (авторитетный
+словарь «вид метаданных → слот модуля», сведённый из файлов `Ext/*.bsl` и индекса состава),
+`rules:core-rules:journal:node:v44` (модули предопределённых программ корня, закрыт 23.10.2026
+коммитом `31b0722f`), `rules:core-rules:journal:node:v45` (стадия S3 конвейера — тот же код
+вызывается самим загрузчиком, отдельного инструмента для стадии не заводили),
+`rules:core-rules:journal:pos:12` (прежнее состояние: вариант «конфигурация» был частичным)."""),
 
     ("history-and-reload",
      ["перезагрузка снимает историю", "сохранить ручное обогащение", "удалить внешний объект",
@@ -510,7 +540,78 @@ delete_external_report_tool, load_1c_catalog_tool, set_object_configuration_tool
 
 ===SOURCE===
 `rules:core-rules:journal:pos:19` (перезагрузка `force=True`), `rules:core-rules:journal:pos:20`,
-`rules:core-rules:journal:node:v31` (провенанс строки), `rules:export-rules:functional:workflow`."""),
+`rules:core-rules:journal:pos:21` (внешний ключ на конфигурации и справочник заголовков),
+`rules:core-rules:journal:node:v31` (провенанс строки),
+`rules:core-rules:journal:node:v19:add1810` (версионность состояний внешнего объекта: что снимает и
+чего не снимает `force=True`), `rules:export-rules:functional:workflow`."""),
+
+    ("goal-and-stages",
+     ["на какой стадии загрузка конфигурации", "что уже умеет core-mcp",
+      "слои загрузки конфигурации", "матрица операций и видов объектов", "что делать следующим узлом"],
+     """===WHEN===
+Спрашивают, что этот MCP уже умеет, на какой стадии разработка функции (загрузка / обогащение /
+правка / обратная выгрузка по виду объекта) и что брать следующим узлом. Правка конкретной выгрузки
+или текста правила — не сюда.
+
+===MUST===
+1. Общая цель MCP — замкнутый цикл с выгрузкой 1С: загрузка → обогащение → правка → обратная
+   выгрузка. Отвечают о цикле ячейками матрицы «операция × вид объекта», а не словами «работает».
+2. Слои загрузки конфигурации называют теми же терминами, что код (`src/configuration_root_modules.py`,
+   шапка таблиц Е1…Е4 в `create_1c_configurations_db.sql`): слой 1 — заголовок и свойства
+   (`configurations`), индекс состава и перечни имён (`configuration_objects`), четыре модуля
+   предопределённых программ корня — реализован; слой 2 — модули объектов и общие модули
+   (`ObjectModule`, `ManagerModule`, `RecordSetModule`, `ValueManagerModule`, `CommandModule`) — не
+   реализован, по нему только зонды `_v46*`, `_v47*`; слой 3 — содержимое дочерних узлов объектов
+   (реквизиты, табличные части, формы, макеты, права, расписания) — не реализован.
+3. Конвейер первого слоя называют стадиями из `STAGES` модуля `src/configuration_load_contract.py`:
+   S1 разбор каталога → S2 заголовок → S3 модули корня → S4 содержимое дочерних объектов —
+   заглушка; S5 (анализ и снижение сниппетов) в `STAGES` нет. Стадия, которая не выполнялась,
+   читается статусом `not_run`, а не нулями (правило C2 закрытого контракта).
+4. Состояние ячейки берут прогоном, а не памятью: состав инструментов —
+   `python tools/rules_functions.py 1c-configurations-core` (регистр `@mcp.tool()` в шапке ответа);
+   реализован ли вариант выгрузки — `NOT_IMPLEMENTED_VARIANTS` в `src/config_load_router.py`;
+   стадии — `STAGES`; обратная выгрузка — `export_readiness_tool` (он отвечает, чего не хватает).
+5. Матрица на дату замера 28.10.2026 (прогон источников п. 4):
+
+   | вид объекта | загрузка | обогащение | правка | обратная выгрузка |
+   |---|---|---|---|---|
+   | конфигурация | слой 1 реализован (S1–S3); слои 2 и 3 не реализованы; S4 — заглушка | по объектам конфигурации — несогласованная S5 | нет: изменений объектов в схеме нет | нет (узел V18, `rules:export-rules:functional:removed`) |
+   | расширение | заглушка (`NOT_IMPLEMENTED_VARIANTS`) | нет | нет | нет |
+   | внешний отчёт | реализовано: каталог XML и двоичный `.erf` | реализовано (`rules:enrich-rules:`) | вне MCP: первый цикл правки выполнен 18.10.2026 через рабочую копию (узел V26), инструментов правки в регистре нет | только из Python (`src/ibcmd_bridge.py::import_from_layout`), MCP-инструмента нет |
+   | внешняя обработка | реализовано: каталог XML и двоичный `.epf` | реализовано | как у отчёта | как у отчёта |
+
+   Строки и числа матрицы обновляют прогоном п. 4: карточка без замера устаревает молча, и
+   расхождение правила с регистром ловит `tools/check_search_rules_sync.py`.
+
+===FORBID===
+Обещать загрузку расширения (заглушка); называть слой 2 или слой 3 реализованным; выдавать заглушку
+S4 за выполненную стадию; путать «стадия не выполнялась» (`not_run`) с «данных нет»; пересказывать
+состояние матрицы по памяти или по прежней карточке.
+
+===TOOLS===
+load_1c_catalog_tool, load_external_object_file_tool, load_configuration_root_modules_tool,
+delete_external_report_tool
+
+===CHECK===
+`python tools/rules_functions.py 1c-configurations-core` — регистр инструментов слоя;
+`python tools/check_v32_zero_configuration.py`, `python tools/check_v42_configuration_header.py` —
+границы заголовка конфигурации; `python _journal_code_history.py` — покрыта ли история изменений
+регистра записями слоя.
+
+===SOURCE===
+История стадий — разрешимыми адресами снимка слоя:
+`rules:core-rules:journal:node:v32` (заголовок конфигурации стал вариантом загрузки),
+`rules:core-rules:journal:node:v33` (индекс состава),
+`rules:core-rules:journal:node:v42:1` (свойства корневого `Configuration.xml`),
+`rules:core-rules:journal:node:v43:1` (дочерние свойства стали данными),
+`rules:core-rules:journal:node:v44` (модули предопределённых программ корня),
+`rules:core-rules:journal:node:v45` (конвейер S1–S4 и закрытый контракт результата),
+`rules:core-rules:journal:pos:12` (прежнее состояние: «расширение» не реализован, «конфигурация» —
+частично), `rules:core-rules:journal:pos:22:1` (внешняя обработка),
+`rules:core-rules:journal:pos:23:1` (двоичный файл). Фиксации следующего слоя:
+`_handoff_second_layer_2026-10-23.md`, `_handoff_object_modules_2026-10-24.md`; практика правки —
+`docs/EXTERNAL_OBJECT_EDIT_PLAN.md` (узел V26). Карточка закрыла остаток узла V44 — «описание слоёв
+загрузки в правилах отсутствует»; план: `docs/RULES_CONTEXT_PLAN.md` (П2)."""),
 
     ("edit-mcp-code",
      ["правка кода core-mcp", "изменить состав инструментов core", "переписать загрузчик"]
@@ -566,7 +667,11 @@ JOURNAL-COVERAGE: чем измеряется, что история измен�
 
 ===SOURCE===
 `rules:core-rules:journal:pos:5` (правки Python требуют перезапуска),
-`rules:kb-rules:functional:edit-mcp-code`; узел V44; прежний лист `edit-core-code` снят узлом
+`rules:kb-rules:functional:edit-mcp-code`;
+`rules:core-rules:journal:node:v44` (контракт слоя вырос на инструмент узла V44, а правила загрузки
+остались прежним числом — так появился `tools/check_search_rules_sync.py`),
+`rules:core-rules:journal:node:rule-tools` (снятие инструментов чтения правил: контракты 17 → 15 и
+5 → 4, имена держат в `DELETED_TOOLS`); прежний лист `edit-core-code` снят узлом
 EDIT-ADDRESS-UNIFY (`_unify_edit_mcp_code.py`) во имя общего листа `edit-mcp-code`; узел
 EDIT-CALL (28.10.2026) — формулировки намерения из `src/rules_layer.py`; узел JOURNAL-COVERAGE
 (28.10.2026) — шаг чтения журнала слоя и измеритель покрытия, план `docs/RULES_CONTEXT_PLAN.md`
@@ -580,8 +685,10 @@ CORE_TOOL_CARDS = {
     "load_1c_catalog_tool": (
         ["загрузка каталога 1с", "точка входа загрузки", "load 1c catalog"],
         """===WHEN===
-Загружают каталог XML-выгрузки: внешний отчёт, внешняя обработка; конфигурация и расширение при этом
-возвращают «сценарий не реализован».
+Загружают каталог XML-выгрузки: внешний отчёт, внешняя обработка, конфигурация (первый слой —
+заголовок, индекс состава, модули предопределённых программ корня). Расширение возвращает
+«сценарий не реализован»: вариант остаётся заглушкой (`NOT_IMPLEMENTED_VARIANTS` в
+`src/config_load_router.py`, узел V45).
 
 ===MUST===
 1. Единственная точка входа загрузки каталога; тип выгрузки определяется по файлам корневого каталога,

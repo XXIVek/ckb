@@ -396,7 +396,12 @@ KIND_CHECKS = "checks"
 # чтобы каждая формулировка настоящим `search_docs` своей категорией вела в карточку слоя) и
 # маршрутизатор `.clinerules/1C_Rule.md`. Расхождение списка с любым из трёх — провал проверки,
 # а не рассинхрон, который кто-то заметит глазами.
-EDIT_CODE_KIND = "functional"
+# Вид карточки задаётся сегментом дерева `functional` — тем же сегментом, что и лист правки кода.
+# Константа одна (узел П2-Ф-5): генераторы слоёв объявляли `KIND_FUNCTIONAL` каждый у себя
+# (`_make_rule_cards.py`, `_make_layer_rule_cards.py`), и третья копия в проверке разошлась бы
+# первым же переименованием сегмента.
+FUNCTIONAL_KIND = "functional"
+EDIT_CODE_KIND = FUNCTIONAL_KIND
 EDIT_CODE_LEAF = "edit-mcp-code"
 EDIT_CODE_INTENTS = (
     "править код mcp",
@@ -427,6 +432,16 @@ def journal_index_address(marker):
     раздельно в генераторе и в проверке — значит получить два разных адреса на один снимок.
     """
     return f"{ROOT_MARKER}:{marker}:{STATE_JOURNAL}:{INDEX_LEAF}"
+
+
+def functional_prefix(marker):
+    """Префикс адресов функциональных карточек слоя: `rules:<слой>:functional:`.
+
+    Узел П2-Ф-5. Им их отличают и генератор (пишет), и читатель функций
+    (`tools/rules_functions.py`), и проверка прослеживаемости — одной цепочкой, а не тремя
+    догадками о том, где кончается адрес слоя.
+    """
+    return f"{ROOT_MARKER}:{marker}:{FUNCTIONAL_KIND}:"
 
 
 # Признак того, что слой сознательно не ведёт снимка прежних текстов. Строка нужна не для красоты:

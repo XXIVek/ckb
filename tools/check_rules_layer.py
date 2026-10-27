@@ -672,6 +672,62 @@ def check_edit_code_trigger(marker, by_address, category):
           "где и снятый инструмент, названный живым")
 
 
+# ------------------------------------------------------------------ прослеживаемость функций
+
+def check_functional_journal_trace(marker, by_address):
+    """Узел П2-Ф-5 (план `docs/RULES_CONTEXT_PLAN.md`): функция слоя прослеживается до истории.
+
+    Две стороны одной границы:
+
+    (а) каждая функциональная карточка называет хотя бы один адрес журнала своего слоя — иначе
+        «функция есть, а чем она измерялась и что решалось по пути — неизвестно»; прозаический
+        номер узла («узел V22») адресом не является и потому проверке не разрешается;
+    (б) каждый узел `journal:node:*` назван живой карточкой или перечнем журнала — иначе снимок
+        перестаёт быть историей и остаётся строкой, которую никто не зовёт (замер 28.10.2026:
+        18 узлов core-слоя и одна ссылка из живых карточек).
+
+    Слой без карточек журнала проверке не предъявляется: это состояние, и оно названо текстом
+    карточки правки кода (константа `NO_SNAPSHOT_MARK`, узел JOURNAL-COVERAGE) — «истории нет»
+    обязано отличаться от «историю забыли».
+    """
+    journal = {a for a in by_address
+               if RL.state_of(RL.layer_relative(a, marker)) == RL.STATE_JOURNAL}
+    if not journal:
+        check(True, f"[{marker}] карточек журнала нет — прослеживаемость функций к слою не применяется",
+              "слой без снимка обязан назвать это текстом карточки правки кода; молчание проверки "
+              "здесь было бы тем же дефектом, что «истории нет» вместо «историю забыли»")
+        return
+    index_address = RL.journal_index_address(marker)
+
+    def journal_refs(row):
+        text = row["answer"] or ""
+        tokens = set(RL.address_tokens(text)) | set(quoted_addresses(text))
+        return {a for a in tokens if a in journal}
+
+    named = set()
+    for address, row in by_address.items():
+        rel = RL.layer_relative(address, marker)
+        if RL.state_of(rel) == RL.STATE_JOURNAL and address != index_address:
+            continue          # снимок сам себе историей не является; перечень журнала — является
+        named |= journal_refs(row)
+    nodes = sorted(a for a in journal if f":{RL.STATE_JOURNAL}:node:" in a)
+    for node in nodes:
+        check(node in named,
+              f"[{marker}] узел журнала {node} назван живой карточкой или перечнем журнала",
+              "снимок, на который не ссылается действующее правило, не читается: проверка "
+              "достижимости журнал намеренно исключает (узел RESTRUCTURE-LAYERS), а «что решалось "
+              "по пути» остаётся памятью автора правки")
+    functional = sorted(a for a in by_address if a.startswith(RL.functional_prefix(marker)))
+    for card in functional:
+        check(bool(journal_refs(by_address[card])),
+              f"[{marker}] {card}: функциональная карточка называет историю своего слоя",
+              "карточка предписывает поведение, источника которого в слое не читается: чем оно "
+              "измерялось и какой узел его породил — не назвать; ссылка обязана быть адресом "
+              "снимка, а не прозой «узел VNN»")
+    print(f"  [{marker}] прослеживаемость функций: карточек журнала {len(journal)}, "
+          f"узлов node:* {len(nodes)}, функциональных карточек {len(functional)}")
+
+
 # ------------------------------------------------------------------ маршрутизатор
 
 def quoted_addresses(text):
@@ -795,6 +851,7 @@ def main(argv=None):
                 # сервера ведут в карточку правки кода». Первая проверяется и без намерения,
                 # вторая без намерения не существует.
                 check_edit_code_trigger(marker, by_address, category)
+                check_functional_journal_trace(marker, by_address)
                 if by_address:
                     written.append(marker)
         check_router(written)
