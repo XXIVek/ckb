@@ -161,6 +161,37 @@ def layer_rows(cur, marker):
     return [dict(row) for row in cur.fetchall()]
 
 
+_MARKED_CACHE = {}
+
+
+def marked_layer_addresses(marker):
+    """Адреса строк слоя, помечённых к удалению (узел Q1).
+
+    Нужны отдельным набором, а не как часть `layer_rows`: та функция обязана отдавать только
+    живые карточки (их проверяют на разделы, индексы и бюджеты), а здесь спрашивается другое —
+    существует ли адрес, на который ведёт ссылка. Снятая строка остаётся в базе, это и есть смысл
+    карантина: адрес читается по id (`list_marked_snippets_tool`) и переживает перегенерацию,
+    поэтому ссылка на него не является ссылкой в никуда. Отрицать это — значит требовать от
+    снимка журнала, чтобы он не называл прежний адрес, то есть переставал быть снимком
+    (замер 27.10.2026, узел П5: после снятия резерва перевода слоёв его снимок дал три провала
+    «ссылка разрешается в карточку»). Строка, удалённая физически
+    (`tools/purge_marked_snippets.py --apply`), в этот набор не входит, и провал ссылки на неё
+    сохраняется.
+    """
+    if marker not in _MARKED_CACHE:
+        from database import get_cursor
+        from quarantine import MARK_ARRAY
+
+        where, params = RL.layer_sql(marker)
+        with get_cursor() as cur:
+            cur.execute(
+                f"SELECT question FROM knowledge_snippets WHERE {where} "
+                "AND source_url LIKE %s AND tags && %s",
+                (*params, RL.SOURCE_SCHEME + "%", MARK_ARRAY))
+            _MARKED_CACHE[marker] = {row["question"] for row in cur.fetchall()}
+    return _MARKED_CACHE[marker]
+
+
 def alias_names_of(row):
     """Множество алиасов строки из колонки `aliases` (string_agg через '|')."""
     return {name for name in (row.get("aliases") or "").split("|") if name}
@@ -368,6 +399,12 @@ def check_index_links(marker, by_address, cross, all_cards=False):
     у строки дерева первая часть — корень `rules`, и `marker_of` отправил бы ссылку
     `rules:core-rules:functional:x` на разрешение в корневой слой, где её нет (замер 27.10.2026
     на прежнем коде: межслойные ссылки разрешались не в тот слой).
+
+    Строка, помеченная к удалению (узел Q1), считается разрешимой целью: она остаётся в базе, и
+    снимок журнала обязан называть прежний адрес, иначе он перестаёт быть снимком. Разрешимость
+    даёт отдельный набор `marked_layer_addresses`, а не расслабление отбора `layer_rows` —
+    живые карточки по-прежнему читаются без снятых (замер 27.10.2026: снятие резерва перевода
+    слоёв дало три провала ссылок из его снимка).
     """
     for address in sorted(by_address):
         row = by_address[address]
@@ -379,7 +416,8 @@ def check_index_links(marker, by_address, cross, all_cards=False):
             if other not in RL.LAYERS:
                 continue
             if other == marker:
-                check(RL.address_resolves(token, by_address),
+                check(RL.address_resolves(token, by_address)
+                      or token in marked_layer_addresses(marker),
                       f"[{marker}] {address}: ссылка {token} разрешается в карточку",
                       "карточка обещает правило, которого нет — та же дыра, что ссылка в никуда")
             else:
@@ -393,8 +431,9 @@ def check_index_links(marker, by_address, cross, all_cards=False):
 
         with get_cursor() as cur:
             theirs = {row["question"] for row in layer_rows(cur, other)}
+        marked = marked_layer_addresses(other)
         for token, source in sorted({(t, s) for t, s in pairs}):
-            check(RL.address_resolves(token, theirs),
+            check(RL.address_resolves(token, theirs) or token in marked,
                   f"[{marker}] {source}: межслойная ссылка {token} разрешается",
                   f"в слое {other!r} такой карточки нет: маршрут обрывается на середине")
 
