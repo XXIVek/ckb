@@ -31,7 +31,13 @@ text[] и text различаются». Неотловленная ошибка
      существующий дефект, а не выдуманное ограничение;
   6. если в базе нет ни одного объекта с записанным манифестом (только снимки до V19),
      скрипт грузит временный предмет (TSD_0), проверяет строгий путь на нём и снимает его
-     за собой: без предмета строгий путь не был бы проверен вовсе.
+     за собой: без предмета строгий путь не был бы проверен вовсе;
+  7. признак коммита строки версии (узел V46: решение D11, словарь значений — поправка
+     D12 от 28.10.2026): значение выводит точка доступа `src/current_revision.py`, строки
+     загрузки подтверждены, строка правки подтверждена не бывает, и признак не участвует в
+     отборе текущей ревизии (решение A1). Без этой группы колонка жила бы только за счёт
+     `DEFAULT` из DDL — ровно так и было до поправки (замер 28.10.2026: 49 строк,
+     подтверждённых — ноль).
 
 Чего скрипт НЕ проверяет: цепочки ревизий (M1), снятие ребёнка новой ревизией (M4), сброс
 истории при `force=True` (M7). Полная регрессия ревизий добавляется вместе с завершением
@@ -61,7 +67,9 @@ except Exception:
 import psycopg2  # noqa: E402
 
 from current_revision import (  # noqa: E402
-    CURRENT_VIEWS, MANIFEST_VIEW, MODULE_KEY_EXPR, current_child_count_sql, current_view,
+    CHANGED_BY_EDIT, CHANGED_BY_LOAD, CHANGED_BY_RESTORE, CURRENT_VIEWS, MANIFEST_VIEW,
+    MODULE_KEY_EXPR, COMMIT_FLAG_COLUMN, REVISION_COLUMNS, VERSIONED_TABLES,
+    commit_flag_for, current_child_count_sql, current_view,
     manifest_array_sql, manifest_member_set_sql, uuid_literal,
 )
 from config_load_router import load_catalog  # noqa: E402
@@ -221,6 +229,89 @@ def load_subject():
     return res
 
 
+def commit_flag_section():
+    """Признак коммита строки версии (узел V46: решение D11, значение — поправка D12).
+
+    Предмет проверки — значение, которого раньше не заявлял ни один писатель: колонка в
+    общий реестр ревизионных колонок не входила, и во всех одиннадцати версионных таблицах
+    лежал `false` из `DEFAULT` (замер 28.10.2026, раздел 2.8 плана: 49 строк, все
+    `changed_by='load'`, подтверждённых — ноль). После поправки значение выводит точка
+    доступа `src/current_revision.py`, поэтому проверяются три факта, каждый из которых без
+    проверки остаётся необнаруженным:
+
+      1. статика — вывод значения из события строки (`load` подтверждает, `edit` оставляет
+         незакоммиченной, `restore` требует явного значения) и то, что колонка входит в
+         общий реестр: иначе её снова не проставит никто, и дефект будет молчаливым;
+      2. живая БД — у строк загрузки признак стоит, и ни одна строка не подтверждена
+         правкой: `edit` обязан оставлять её незакоммиченной, иначе флаг начнёт врать о
+         совпадении с источником;
+      3. решение A1 — признак не участвует в отборе текущей строки: в определениях
+         `v_current_*` он не встречается в части `WHERE`.
+
+    Числа называются по каждой таблице отдельно: один общий счётчик скрыл бы таблицу, в
+    которой признак не проставлен, за счёт другой (тот же класс дефекта, что половина круга
+    версионных таблиц).
+    """
+    print("5. ПРИЗНАК КОММИТА (D11; словарь значений — поправка D12 от 28.10.2026)")
+    check("вывод значения: загрузка подтверждает строку ('load')",
+          commit_flag_for(CHANGED_BY_LOAD) is True)
+    check("вывод значения: правка оставляет строку незакоммиченной ('edit')",
+          commit_flag_for(CHANGED_BY_EDIT) is False)
+    try:
+        guessed = commit_flag_for(CHANGED_BY_RESTORE)
+        check("вывод значения: для 'restore' оно не выдумывается, а требует явного аргумента",
+              False, "почему-то вернул " + repr(guessed))
+    except ValueError as exc:
+        check("вывод значения: для 'restore' оно не выдумывается, а требует явного аргумента",
+              True, first_line(exc)[:90])
+    check("колонка признака входит в общий реестр ревизионных колонок",
+          COMMIT_FLAG_COLUMN in REVISION_COLUMNS, str(REVISION_COLUMNS))
+    writer_src = (Path(ROOT / "src") / "external_table_writer.py").read_text(encoding="utf-8")
+    check("писатель объявляет колонку признака (вид bool), а не отдаёт её DEFAULT из DDL",
+          ('"%s": "bool"' % COMMIT_FLAG_COLUMN) in writer_src)
+
+    unconfirmed_load = 0
+    confirmed_edit = 0
+    unclaimed_event = 0
+    listed = []
+    for table in VERSIONED_TABLES:
+        bad_load = int(one("SELECT count(*) FROM " + table
+                           + " WHERE changed_by = %s AND NOT " + COMMIT_FLAG_COLUMN,
+                           (CHANGED_BY_LOAD,)) or 0)
+        bad_edit = int(one("SELECT count(*) FROM " + table
+                           + " WHERE changed_by = %s AND " + COMMIT_FLAG_COLUMN,
+                           (CHANGED_BY_EDIT,)) or 0)
+        no_event = int(one("SELECT count(*) FROM " + table
+                           + " WHERE changed_by IS NULL") or 0)
+        total = int(one("SELECT count(*) FROM " + table) or 0)
+        unconfirmed_load += bad_load
+        confirmed_edit += bad_edit
+        unclaimed_event += no_event
+        listed.append(table + " " + str(total) + "/" + str(total - bad_load - bad_edit)
+                      + ("/no-event:" + str(no_event) if no_event else ""))
+    note("строк/подтверждено по каждой из " + str(len(VERSIONED_TABLES)) + " таблиц: "
+         + ", ".join(listed))
+    check("строки загрузки подтверждены (changed_by='load' ⇒ is_committed)",
+          unconfirmed_load == 0, "неподтверждённых: " + str(unconfirmed_load))
+    check("ни одна строка не подтверждена правкой ('edit' обязан оставлять false)",
+          confirmed_edit == 0, "подтверждённых правок: " + str(confirmed_edit))
+    if unclaimed_event:
+        note("строк с незаписанным событием (changed_by IS NULL, снимки до V19): "
+             + str(unclaimed_event) + " — подтверждать их нельзя, события не было")
+
+    views = q("SELECT viewname, definition FROM pg_views WHERE schemaname = 'public'"
+              " AND viewname LIKE 'v_current%%' ORDER BY viewname")
+    leaked = []
+    for row in views:
+        definition = (row["definition"] or "").lower()
+        where_at = definition.find(" where ")
+        if where_at != -1 and COMMIT_FLAG_COLUMN in definition[where_at:]:
+            leaked.append(row["viewname"])
+    check("признак не участвует в отборе текущей ревизии (решение A1)", not leaked,
+          str(leaked) if leaked else "витрин проверено: " + str(len(views)))
+    print("")
+
+
 def main():
     print("ПРОВЕРКА V19 — РАЗРЕШЕНИЕ СОСТАВА ЧЕРЕЗ МАНИФЕСТ ТЕКУЩЕЙ РЕВИЗИИ")
     print("Модель: docs/CONFIGURATIONS_ENRICHMENT_PLAN.md, раздел 11 (M5, A1, S3, S4)")
@@ -337,7 +428,9 @@ def main():
     note("это как «строки нет» — идемпотентность загрузки пропадала молча")
     print("")
 
-    print("5. УБОРКА ЗА СОБОЙ")
+    commit_flag_section()
+
+    print("6. УБОРКА ЗА СОБОЙ")
     for uid in created:
         res = delete_external_object(uuid_val=uid, obj_type="external_processing")
         check("временный предмет снят", isinstance(res, dict) and bool(res.get("success")),

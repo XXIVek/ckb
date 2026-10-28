@@ -302,9 +302,14 @@ CREATE TABLE IF NOT EXISTS bsl_modules (
     revision_no INTEGER NOT NULL DEFAULT 1,
     changed_at TIMESTAMP,
     changed_by TEXT,
-    -- узел V46 (D11): признак коммита строки версии. Заявляет загрузчик значением FALSE;
-    -- TRUE ставит событие коммита. Это не признак «текущей строки»: их круг разрешает
-    -- манифест родителя (решение A1), и от значения флага членство в манифесте не зависит.
+    -- узел V46 (D11, словарь значений — поправка D12 от 28.10.2026): признак коммита
+    -- строки версии. TRUE означает «строка соответствует загруженному источнику, локальных
+    -- правок поверх неё нет» — его заявляет загрузка (src/current_revision.py,
+    -- commit_flag_for); FALSE появляется только у ревизии, созданной правкой в базе, и
+    -- снимается событием коммита. DEFAULT FALSE в схеме остаётся маркером
+    -- «значение не заявлено точкой доступа»: обход current_revision.py становится видимым,
+    -- а не молчаливым. Это не признак «текущей строки»: их круг разрешает манифест
+    -- родителя (решение A1), и от значения флага членство в манифесте не зависит.
     is_committed BOOLEAN NOT NULL DEFAULT FALSE,
     CONSTRAINT bsl_modules_revision_no_positive CHECK (revision_no >= 1),
     CONSTRAINT bsl_modules_changed_by_known
@@ -633,9 +638,10 @@ CREATE TABLE IF NOT EXISTS common_module_sources (
     CONSTRAINT common_module_sources_module_type_check CHECK (module_type = 'Module'),
     CONSTRAINT common_module_sources_content_state_check
         CHECK (content_state IN ('file', 'bin_only', 'indexed_no_file', 'file_not_in_index')),
-    -- путь есть — состояние обязано называть текст; «пути нет» и «текста нет» — одно и то же
+    -- путь есть — состояние обязано называть текст (поправка C-V46-1: текстом являются
+    -- два состояния, 'file' и 'file_not_in_index'; «пути нет» и «текста нет» — одно и то же)
     CONSTRAINT common_module_sources_path_state_check
-        CHECK (file_path IS NULL OR content_state = 'file'),
+        CHECK (file_path IS NULL OR content_state IN ('file', 'file_not_in_index')),
     CONSTRAINT common_module_sources_revision_no_positive CHECK (revision_no >= 1),
     CONSTRAINT common_module_sources_changed_by_known
         CHECK (changed_by IS NULL OR changed_by IN ('load', 'edit', 'restore')),

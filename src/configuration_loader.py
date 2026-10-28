@@ -89,8 +89,17 @@ from configuration_meta_parser import parse_configuration_meta
 # права держать свой перечень, иначе снятие и загрузка назвали бы разные таблицы.
 from configuration_root_modules import TABLES as ROOT_MODULE_TABLES
 from configuration_root_module_loader import load_root_modules, remove_root_modules
+# Узел V46 (стадия S4): свойства подсистем и общих модулей. Точка входа одна — тот же
+# слой, что отдельный инструмент `load_configuration_object_properties_tool`; контракт и
+# форматёр текста тоже общие (прецедент V45: карточка и инструмент описывают слой одинаково).
+from configuration_object_properties_loader import (
+    load_object_properties,
+    remove_object_properties,
+)
 from configuration_load_contract import (
+    CHILD_SECTION_HEADER,
     ROOT_MODULES_SECTION_HEADER,
+    child_objects_defaults,
     root_modules_defaults,
 )
 from external_db import connect, transaction
@@ -336,6 +345,14 @@ def _remove_rows(cur, cfg_id, configuration_uuid=None):
     # обёртки-словаря у неё нет.
     if configuration_uuid:
         children.update(remove_root_modules(cur, configuration_uuid))
+    # Узел V46 (стадия S4): строки свойств подсистем и общих модулей тоже адресуются uuid
+    # заголовка, а внешнего ключа и каскада в схеме нет осознанно (прецедент V20.1). Значит
+    # снятие обязан выполнить этот же явный DELETE: без него `force=True` оставил бы в базе
+    # строки, которые ни к какой конфигурации не относятся и не читаются ни одной карточкой.
+    # Здесь снимаются ВСЕ четыре таблицы, а не таблицы «запрошенных видов»: запрошенных видов
+    # в этом пути нет — снимается сама конфигурация целиком (круг задаёт CONTRACT-слой).
+    if configuration_uuid:
+        children.update(remove_object_properties(cur, configuration_uuid))
     cur.execute("DELETE FROM configurations WHERE id = %s", [cfg_id])
     children["configurations"] = cur.rowcount
     return children
@@ -703,6 +720,36 @@ def register_configuration(source_path, force=False, xml_path=None):
             f"configuration_uuid={row['uuid']})."
         )
 
+    # Узел V46 (стадия S4): свойства дочерних объектов — подсистемы и общие модули.
+    # Порядок вызова повторяет стадию V44: ПОСЛЕ коммита транзакции заголовка (соединение
+    # стадии не увидело бы незакоммиченного заголовка и строк индекса состава), ключ — uuid,
+    # а не id (`force=True` меняет id, uuid остаётся). Каталог тот же `root_source`: если XML
+    # передан явно, файлы ищутся рядом с ним.
+    # Тексты модулей общих модулей стадия НЕ читает (решение D-S4: замер 2.6 плана даёт
+    # 188 МБ на BGU2 и 294 МБ на BP3): S4 отвечает свойства и дескрипторы, содержимое модулей
+    # запрашивается явно — `with_module_content=True` у отдельного инструмента. Разница названа
+    # и в ответе стадии (строка форматёра про тексты), а не молчанием.
+    try:
+        child_objects = load_object_properties(root_source, configuration_uuid=row["uuid"])
+    except Exception as exc:  # noqa: BLE001 — отказ стадии называется, а не бросается
+        child_objects = child_objects_defaults()
+        child_objects["configuration_id"] = new_id
+        child_objects["configuration_uuid"] = row["uuid"]
+        child_objects["configuration_name"] = row["name"]
+        child_objects["error"] = f"исключение слоя свойств дочерних объектов: {exc}"
+    if not child_objects.get("success"):
+        # Заголовок, индекс и модули корня уже записаны, и отказ этой стадии их не отменяет
+        # (C5). Молчать нельзя по той же причине, что у V44: после force=True прежние строки
+        # сняты, и «загружено» без этой строки читалось бы как полный состав.
+        warnings.append(
+            "Свойства подсистем и общих модулей не загружены — причина названа строкой "
+            "«Стадия не выполнена» в разделе «" + CHILD_SECTION_HEADER
+            + "» карточки. Заголовок, индекс состава и модули предопределённых программ "
+            "записаны; повторить стадию отдельно: "
+            f"load_configuration_object_properties_tool(source_path=..., "
+            f"configuration_uuid={row['uuid']})."
+        )
+
     result = {
         "success": True,
         "id": new_id,
@@ -733,6 +780,9 @@ def register_configuration(source_path, force=False, xml_path=None):
         # текст отдаёт общий форматёр контракта (configuration_load_contract),
         # карточка и отдельный инструмент описывают один слой одинаково.
         "root_modules": root_modules,
+        # узел V46: машинная часть стадии S4 — полная (тот же закрытый контракт, что отдаёт
+        # отдельный инструмент); текст раздела даёт общий форматёр контракта.
+        "child_objects": child_objects,
     }
     if index_info is not None:
         index_counts = index_info.get("counts") or {}

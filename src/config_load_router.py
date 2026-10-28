@@ -35,7 +35,9 @@ from configuration_loader import OBJECTS_TABLE, register_configuration
 # модуль (src/configuration_load_contract.py) — тот же, что и для ответа отдельного
 # инструмента: карточка и инструмент обязаны рассказывать об одном слое одинаково.
 from configuration_load_contract import (
+    CHILD_SECTION_HEADER,
     ROOT_MODULES_SECTION_HEADER,
+    format_child_object_lines,
     format_root_modules_lines,
 )
 # Узел V31: формулировки провенанса принадлежат модулю провенанса, а не карточке. Карточка
@@ -494,19 +496,34 @@ def format_load_result(result):
         if result.get("variant") == VARIANT_CONFIGURATION:
             child_counts = counts.get("child_objects") or {}
             if child_counts:
+                # Узел V33: различать надо по источнику: `<ChildObjects>` Configuration.xml
+                # раньше никуда не раскладывался (таблиц объектов метаданных по ним нет,
+                # узел V18), а перечень состава из ConfigDumpInfo.xml пишется в
+                # configuration_objects — про него ниже своя строка с фактическими числами.
+                # Узел V46 (П5) снимает формулировку «не раскладывается» для двух видов
+                # стадии S4: их содержимое пишется в таблицы стадии. Молча смешивать их с
+                # остальными значило бы сказать, что подсистем и общих модулей в БД нет, —
+                # карточка противоречила бы собственному разделу СОДЕРЖИМОЕ ДОЧЕРНИХ ОБЪЕКТОВ.
+                from configuration_object_properties_loader import LOADED_META_TABLES
+                loaded = {tag: count for tag, count in child_counts.items()
+                          if tag in LOADED_META_TABLES}
+                rest = {tag: count for tag, count in child_counts.items()
+                        if tag not in LOADED_META_TABLES}
                 by_type = ", ".join(
-                    f"{tag} {count}" for tag, count in sorted(child_counts.items())
+                    f"{tag} {count}" for tag, count in sorted(rest.items())
                 )
-                # Узел V33: фраза «состав конфигурации в БД не сохраняется» после появления
-                # configuration_objects стала неверной целиком — различать надо по источнику.
-                # `<ChildObjects>` Configuration.xml по-прежнему никуда не раскладывается
-                # (таблиц объектов метаданных по ним нет, узел V18), а перечень состава из
-                # ConfigDumpInfo.xml пишется в configuration_objects — про него ниже своя
-                # строка с фактическими числами.
+                loaded_detail = ", ".join(
+                    f"{tag} {count}" for tag, count in sorted(loaded.items())
+                )
                 lines.append(
                     f"Состав из <ChildObjects> Configuration.xml: объектов "
-                    f"{sum(child_counts.values())} — по типам: {by_type}; эти записи в БД не "
-                    "раскладываются (таблиц объектов метаданных по ним в схеме нет, узел V18)"
+                    f"{sum(child_counts.values())}"
+                    + (f"; видов с загруженным содержимым (узел V46): {loaded_detail} — их "
+                       "свойства и ссылки лежат в таблицах стадии S4, раздел «"
+                       + CHILD_SECTION_HEADER + "» ниже" if loaded_detail else "")
+                    + (f"; остальных объектов {sum(rest.values())} — по типам: {by_type}; "
+                       "эти записи в БД не раскладываются (таблиц объектов метаданных по ним "
+                       "в схеме нет, узел V18)" if by_type else "")
                 )
             # Узел V33: что реально легло в configuration_objects. Карточка обязана назвать
             # и индекс: «✅ Загружено» без этой строки читается как «записан только
@@ -560,6 +577,16 @@ def format_load_result(result):
             if root_part:
                 lines.append(f"{ROOT_MODULES_SECTION_HEADER}:")
                 lines.extend(format_root_modules_lines(root_part, indent="   "))
+            # Узел V46 (стадия S4): свойства подсистем и общих модулей. Раздел печатается и
+            # при отказе стадии — по той же причине, что у S3: «✅ загружено» без него
+            # читалось бы как «состав конфигурации в БД есть весь», хотя содержимое
+            # объектов не записано. Граница «что из содержимого дочерних объектов не загружено»
+            # печатается и при успехе: подсистемы и общие модули — только часть этого содержимого
+            # (по модели A–H узла V38 — группы B и E, а не всё, что перечисляет индекс состава).
+            child_part = result.get("child_objects") or {}
+            if child_part:
+                lines.append(f"{CHILD_SECTION_HEADER}:")
+                lines.extend(format_child_object_lines(child_part, indent="   "))
 
         if counts.get("properties_total"):
             # Что из Properties не имеет колонки в схеме, называется числом, а не молчанием:

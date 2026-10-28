@@ -184,8 +184,11 @@ CREATE TABLE IF NOT EXISTS external_report (
     revision_no INTEGER NOT NULL DEFAULT 1,
     changed_at TIMESTAMP,
     changed_by TEXT,
-    -- узел V46 (D11): строка версии, не помеченная коммитом. Признак заявляет
-    -- загрузчик значением FALSE; TRUE ставит событие коммита. Это не признак
+    -- узел V46 (D11, словарь значений — поправка D12 от 28.10.2026): признак коммита
+    -- строки версии. TRUE заявляет загрузка: строка соответствует источнику, локальных
+    -- правок поверх неё нет; FALSE появляется только у ревизии, созданной правкой в базе.
+    -- Значение выводит src/current_revision.py (commit_flag_for), а не писатель; DEFAULT
+    -- FALSE остаётся маркером «значение не заявлено точкой доступа». Это не признак
     -- «текущей строки» — их круг разрешает манифест родителя (решение A1).
     is_committed BOOLEAN NOT NULL DEFAULT FALSE,
     CONSTRAINT external_report_uuid_revision_no_key UNIQUE (uuid, revision_no),
@@ -258,8 +261,11 @@ CREATE TABLE attributes (
     revision_no INTEGER NOT NULL DEFAULT 1,
     changed_at TIMESTAMP,
     changed_by TEXT,
-    -- узел V46 (D11): строка версии, не помеченная коммитом. Признак заявляет
-    -- загрузчик значением FALSE; TRUE ставит событие коммита. Это не признак
+    -- узел V46 (D11, словарь значений — поправка D12 от 28.10.2026): признак коммита
+    -- строки версии. TRUE заявляет загрузка: строка соответствует источнику, локальных
+    -- правок поверх неё нет; FALSE появляется только у ревизии, созданной правкой в базе.
+    -- Значение выводит src/current_revision.py (commit_flag_for), а не писатель; DEFAULT
+    -- FALSE остаётся маркером «значение не заявлено точкой доступа». Это не признак
     -- «текущей строки» — их круг разрешает манифест родителя (решение A1).
     is_committed BOOLEAN NOT NULL DEFAULT FALSE,
     CONSTRAINT attributes_uuid_revision_no_key UNIQUE (uuid, revision_no),
@@ -292,8 +298,11 @@ CREATE TABLE tabular_sections (
     revision_no INTEGER NOT NULL DEFAULT 1,
     changed_at TIMESTAMP,
     changed_by TEXT,
-    -- узел V46 (D11): строка версии, не помеченная коммитом. Признак заявляет
-    -- загрузчик значением FALSE; TRUE ставит событие коммита. Это не признак
+    -- узел V46 (D11, словарь значений — поправка D12 от 28.10.2026): признак коммита
+    -- строки версии. TRUE заявляет загрузка: строка соответствует источнику, локальных
+    -- правок поверх неё нет; FALSE появляется только у ревизии, созданной правкой в базе.
+    -- Значение выводит src/current_revision.py (commit_flag_for), а не писатель; DEFAULT
+    -- FALSE остаётся маркером «значение не заявлено точкой доступа». Это не признак
     -- «текущей строки» — их круг разрешает манифест родителя (решение A1).
     is_committed BOOLEAN NOT NULL DEFAULT FALSE,
     CONSTRAINT tabular_sections_uuid_revision_no_key UNIQUE (uuid, revision_no),
@@ -328,8 +337,11 @@ CREATE TABLE forms (
     revision_no INTEGER NOT NULL DEFAULT 1,
     changed_at TIMESTAMP,
     changed_by TEXT,
-    -- узел V46 (D11): строка версии, не помеченная коммитом. Признак заявляет
-    -- загрузчик значением FALSE; TRUE ставит событие коммита. Это не признак
+    -- узел V46 (D11, словарь значений — поправка D12 от 28.10.2026): признак коммита
+    -- строки версии. TRUE заявляет загрузка: строка соответствует источнику, локальных
+    -- правок поверх неё нет; FALSE появляется только у ревизии, созданной правкой в базе.
+    -- Значение выводит src/current_revision.py (commit_flag_for), а не писатель; DEFAULT
+    -- FALSE остаётся маркером «значение не заявлено точкой доступа». Это не признак
     -- «текущей строки» — их круг разрешает манифест родителя (решение A1).
     is_committed BOOLEAN NOT NULL DEFAULT FALSE,
     CONSTRAINT forms_uuid_revision_no_key UNIQUE (uuid, revision_no),
@@ -368,8 +380,11 @@ CREATE TABLE templates (
     revision_no INTEGER NOT NULL DEFAULT 1,
     changed_at TIMESTAMP,
     changed_by TEXT,
-    -- узел V46 (D11): строка версии, не помеченная коммитом. Признак заявляет
-    -- загрузчик значением FALSE; TRUE ставит событие коммита. Это не признак
+    -- узел V46 (D11, словарь значений — поправка D12 от 28.10.2026): признак коммита
+    -- строки версии. TRUE заявляет загрузка: строка соответствует источнику, локальных
+    -- правок поверх неё нет; FALSE появляется только у ревизии, созданной правкой в базе.
+    -- Значение выводит src/current_revision.py (commit_flag_for), а не писатель; DEFAULT
+    -- FALSE остаётся маркером «значение не заявлено точкой доступа». Это не признак
     -- «текущей строки» — их круг разрешает манифест родителя (решение A1).
     is_committed BOOLEAN NOT NULL DEFAULT FALSE,
     CONSTRAINT templates_uuid_revision_no_key UNIQUE (uuid, revision_no),
@@ -426,8 +441,11 @@ CREATE TABLE form_ext (
     revision_no INTEGER NOT NULL DEFAULT 1,
     changed_at TIMESTAMP,
     changed_by TEXT,
-    -- узел V46 (D11): строка версии, не помеченная коммитом. Признак заявляет
-    -- загрузчик значением FALSE; TRUE ставит событие коммита. Это не признак
+    -- узел V46 (D11, словарь значений — поправка D12 от 28.10.2026): признак коммита
+    -- строки версии. TRUE заявляет загрузка: строка соответствует источнику, локальных
+    -- правок поверх неё нет; FALSE появляется только у ревизии, созданной правкой в базе.
+    -- Значение выводит src/current_revision.py (commit_flag_for), а не писатель; DEFAULT
+    -- FALSE остаётся маркером «значение не заявлено точкой доступа». Это не признак
     -- «текущей строки» — их круг разрешает манифест родителя (решение A1).
     is_committed BOOLEAN NOT NULL DEFAULT FALSE,
     CONSTRAINT form_ext_revision_no_positive CHECK (revision_no >= 1),

@@ -70,9 +70,10 @@
 |---|---|---|---|
 | таблиц в `public` | 30 | 38 ¹ | 38 ¹ |
 | представлений в `public` | 12 (из них `v_current_*` — 8) | 16 (из них `v_current_*` — 12) | 16 |
-| колонок `bsl_modules` | 17 (есть `configuration_id`) | 17 | 17 (есть `configuration_uuid`, `configuration_id` нет) |
+| колонок `bsl_modules` | 17 (есть `configuration_id`) | 18 — П1 добавляет `is_committed` | 18 (есть `configuration_uuid`, `configuration_id` нет): 17 + 1 (признак) − 1 (числовая ссылка) + 1 (uuid-ссылка). **Прежняя строка «17 → 17» противоречила собственному шагу П1; исправлено замером 28.10.2026, он же назвал фактическое число — 18** |
 | колонок `configurations` | 107 | 107 — признак коммита в заголовок не добавляется (D11) | 107 |
 | версионных таблиц (с колонкой `revision_no`) / из них с `is_committed` | 7 / 0 (строки в них: 36, 3, 2, 2, 2, 2, 2) | 11 / 11 | 11 / 11 |
+| строк загрузки без признака коммита / подтверждённых правок (значение — D12) | — (признак проставлял только `DEFAULT`, замер 2.8 плана: 49 / 0) | 0 / 0 — загрузка подтверждает свою строку, `false` остаётся у ревизии правки | 0 / 0 |
 | записей в `VERSIONED_TABLES` и в словаре `CURRENT_VIEWS` | 7 и 7 (витрин `v_current_*` в базе 8 — восьмая, `v_current_object_manifest`, в словарь не входит) | 11 и 11 (витрин — 12) | 11 и 11 |
 | инструментов в реестре core | 4 (`load_1c_catalog_tool`, `load_external_object_file_tool`, `delete_external_report_tool`, `load_configuration_root_modules_tool`); столько же в `EXPECTED_TOOLS` | 4 | 4 |
 | строк `bsl_modules` | 2 (внешние объекты), `configuration_id` во всех NULL | 2 | 2, `configuration_uuid` во всех NULL ² |
@@ -114,16 +115,35 @@ C:\Postgres\bin\psql.exe -U postgres -h localhost -d ckb_1c_configurations -tA -
 
 # круг версионных таблиц и круг таблиц с признаком коммита (D11): числа обязаны совпасть;
 # без table_type='BASE TABLE' запрос даёт шум — information_schema.columns отдаёт и колонки
-# витрин, то есть 14 строк вместо 7
+# витрин. Мера исправлена прогоном 28.10.2026: прежний вариант держал
+# c.column_name='revision_no' в WHERE, из-за чего bool_or(is_committed) не мог дать true и
+# вторая колонка отвечала «нет» у всех таблиц — то есть не отвечала на вопрос D11.
 C:\Postgres\bin\psql.exe -U postgres -h localhost -d ckb_1c_configurations -tA -P footer=off -P pager=off `
-  -c "SELECT t.table_name,
-         bool_or(c.column_name='revision_no')  AS has_revision,
-         bool_or(c.column_name='is_committed') AS has_commit_flag
-       FROM information_schema.tables t
-       JOIN information_schema.columns c ON c.table_name = t.table_name
-       WHERE t.table_schema='public' AND t.table_type='BASE TABLE'
-         AND c.column_name='revision_no'
-       GROUP BY t.table_name ORDER BY t.table_name;"
+  -c "SELECT count(*) FILTER (WHERE has_revision) AS tables_with_revision,
+         count(*) FILTER (WHERE has_revision AND has_commit) AS revision_and_commit
+       FROM (SELECT t.table_name,
+               bool_or(c.column_name='revision_no')  AS has_revision,
+               bool_or(c.column_name='is_committed') AS has_commit
+             FROM information_schema.tables t
+             JOIN information_schema.columns c ON c.table_name = t.table_name
+             WHERE t.table_schema='public' AND t.table_type='BASE TABLE'
+             GROUP BY t.table_name) s;"
+
+# значение признака (D12): строки загрузки подтверждены, подтверждённых правок нет;
+# по каждой таблице отдельно — общий счётчик скрыл бы половину круга
+C:\Postgres\bin\psql.exe -U postgres -h localhost -d ckb_1c_configurations -tA -P footer=off -P pager=off `
+  -c "SELECT 'attributes' tb, count(*) tot, count(*) FILTER (WHERE is_committed) cm FROM attributes
+       UNION ALL SELECT 'bsl_modules', count(*), count(*) FILTER (WHERE is_committed) FROM bsl_modules
+       UNION ALL SELECT 'external_report', count(*), count(*) FILTER (WHERE is_committed) FROM external_report
+       UNION ALL SELECT 'form_ext', count(*), count(*) FILTER (WHERE is_committed) FROM form_ext
+       UNION ALL SELECT 'forms', count(*), count(*) FILTER (WHERE is_committed) FROM forms
+       UNION ALL SELECT 'tabular_sections', count(*), count(*) FILTER (WHERE is_committed) FROM tabular_sections
+       UNION ALL SELECT 'templates', count(*), count(*) FILTER (WHERE is_committed) FROM templates
+       UNION ALL SELECT 'subsystems', count(*), count(*) FILTER (WHERE is_committed) FROM subsystems
+       UNION ALL SELECT 'subsystem_content', count(*), count(*) FILTER (WHERE is_committed) FROM subsystem_content
+       UNION ALL SELECT 'common_modules', count(*), count(*) FILTER (WHERE is_committed) FROM common_modules
+       UNION ALL SELECT 'common_module_sources', count(*), count(*) FILTER (WHERE is_committed) FROM common_module_sources
+       ORDER BY 1;"
 
 # места кода, которых касается П2 (число называть своим прогоном, а не обещанием):
 python -c "import glob,pathlib; [print(f,'::',l.strip()[:120]) for f in glob.glob('src/*.py') for l in pathlib.Path(f).read_text(encoding='utf-8').splitlines() if 'bsl_modules' in l and 'configuration_id' in l]"
@@ -144,14 +164,23 @@ python -c "import glob,pathlib; [print(f,'::',l.strip()[:120]) for f in glob.glo
    подключение отвечает отказом аутентификации, и этот отказ читают как «в базе ничего нет»;
 9. в отчёт попало число колонок или таблиц из памяти прошлой сессии: снимок 27.10.2026 говорит
    «таблиц 30», и повторный запрос обязан назвать то же число либо расхождение;
-10. круг версионных таблиц и круг таблиц с `is_committed` разошлись (запрос выше): D11 нарушен,
-    и половина круга отвечает на вопрос о коммите иначе, чем вторая;
+10. круг версионных таблиц и круг таблиц с `is_committed` разошлись (первый запрос выше): D11
+    нарушен, и половина круга отвечает на вопрос о коммите иначе, чем вторая;
 11. колонка добавлена, а определение витрины `v_current_*` не переопределено — колонки не видно
     через единственный законный канал чтения, и `_cmp_ddl.py`, который сверяет определения
     витрин, это фиксирует;
 12. правка DDL сделана в порождённых файлах (`src/ddl_external_report.sql`,
     `src/ddl_enrichment.sql`) вместо источника `src/generate_ddl.py` — следующий прогон
     генератора сотрёт её.
+13. значение признака коммита ставит `DEFAULT` из DDL, а не точка доступа (второй запрос выше
+    называет строки загрузки без признака): D12 нарушен, колонка читается константой, и D11
+    исполнен только наполовину — ровно этот случай нашёл замер 2.8 плана (49 строк загрузки,
+    подтверждённых ноль). Тот же признак в обратную сторону: если значение никогда не меняется,
+    константа `true` бесполезна так же, как константа `false`, — `false` обязана оставаться
+    состоянием ревизии, созданной правкой в базе;
+14. признак начали читать как «текущность» или как «выгружено обратно в XML/в git»: текущую
+    строку выбирает максимальная `revision_no` (A1), а обратной выгрузки нет (узел V18 не
+    реализован).
 
 ---
 

@@ -47,6 +47,14 @@ M8) этих колонок не объявляют, и `versioned()` для н�
 детей (`children_manifest`) - колонка только строки заголовка: формат собирает
 `current_revision.build_children_manifest`, а не вызывающий код.
 
+Узел V46 (шаг П4, 28.10.2026): четыре писателя свойств объектов конфигурации —
+`SubsystemsRowWriter`, `SubsystemContentRowWriter`, `CommonModulesRowWriter`,
+`CommonModuleSourcesRowWriter` (словарь `CONFIGURATION_OBJECT_WRITERS`). Таблицы версионируются
+цепочкой `(configuration_uuid, full_name, revision_no)` (решение D8), поэтому спецификация
+собрана `versioned_columns()`. `configuration_uuid` им не задаётся — его знает загрузчик, а не
+разбор (тот же порядок, что у V44). Норматив —
+docs/CONFIGURATION_OBJECT_PROPERTIES_PLAN.md (раздел 4 модель, раздел 6 шаги П3/П4).
+
 """
 import json
 
@@ -72,14 +80,23 @@ from configuration_child_properties import header_array_columns
 from configuration_root_modules import MODULE_BY_KIND, TABLE_BY_KIND
 
 # Ревизионные колонки в спецификациях версионированных писателей (M1). Порядок -
-# тот же, что в DDL (шаг 1 src/generate_ddl.py): integer / timestamp / text.
+# тот же, что в DDL (шаг 1 src/generate_ddl.py): integer / timestamp / text / boolean.
 # Манифест состава детей (M3) - отдельная колонка строки заголовка
 # (`children_manifest`), он добавлен только в ExternalReportRowWriter: у детей
 # манифеста нет, их состав разрешают манифест родителя и `form_ext`/`column_uuids`.
+#
+# Узел V46 (поправка D12 от 28.10.2026): сюда же входит `is_committed`. Вид `bool` берётся
+# из общей таблицы, потому что значение строки выводит `src/current_revision.py`
+# (`commit_flag_for`), а не писатель: до поправки колонку не заявлял никто и во всех
+# одиннадцати таблицах лежал `false` из DEFAULT (замер 28.10.2026 — 49 строк, 0
+# подтверждённых). Писатель неверсионируемой таблицы (`configurations`,
+# `configuration_objects`, `config_*`) эту колонку по-прежнему не объявляет: строк версии у
+# них нет, поэтому и признака коммита у них быть не может (следствие D11).
 REVISION_COLUMNS_KINDS = {
     "revision_no": "int",
     "changed_at": "timestamp",
     "changed_by": "text",
+    "is_committed": "bool",
 }
 
 # Манифест состава детей (M3) — колонка только строки заголовка. Вид `jsonb_nullable`
@@ -618,10 +635,20 @@ class BslModuleRowWriter(TableRowWriter):
     Формат задаёт src/current_revision.py::module_key_sql — переписывать его здесь нельзя.
     Модули конфигураций (parent_uuid IS NULL) историей не живут: индекс состава пересоздаётся
     загрузчиком, поэтому у таких строк остаётся ревизия 1 без штампа события.
+
+    Узел V46 (П5): в спецификацию добавлена `configuration_uuid` — колонка существует с П2,
+    но ни один писатель её не объявлял, потому что до V46 в эту таблицу писали только внешние
+    объекты (у них владелец — строка `external_report`, а привязка к конфигурации отделена).
+    Тексты модулей общих модулей владельца-строки не имеют: родителем выступает uuid секции
+    `CommonModule` (`parent_uuid`), и без `configuration_uuid` такие строки нельзя было ни
+    снять вместе с конфигурацией, ни отличить от строк другой конфигурации — загрузчик писал
+    значение, а писатель его отбрасывал (проверено пробой П5: строки легли с NULL).
+    Для внешних объектов колонка остаётся NULL, если привязка к конфигурации не заявлена.
     """
 
     TABLE = "bsl_modules"
     COLUMNS = versioned_columns({
+        "configuration_uuid": "uuid",
         "module_name": "text",
         "file_path": "text",
         "code": "text",
@@ -1041,6 +1068,196 @@ ROOT_MODULE_WRITERS = {
     "managed_application": BslModulesManagedApplicationRowWriter,
     "ordinary_application": BslModulesOrdinaryApplicationRowWriter,
     "external_connection": BslModulesExternalConnectionRowWriter,
+}
+
+
+# ── узел V46 (шаг П4): свойства объектов конфигурации — подсистемы и общие модули ──────
+#
+# Четыре таблицы версионируются: цепочка состояния идёт по (configuration_uuid, full_name),
+# а не по object_uuid (решение D8 — пересоздание объекта с новым uuid продолжает ту же
+# цепочку). Спецификация собирается через `versioned_columns()`: колонки
+# `revision_no`/`changed_at`/`changed_by`/`is_committed` объявляет `src/current_revision.py`,
+# а не этот файл; круг меряется `VERSIONED_TABLES` (четыре таблицы внесены шагом П1),
+# проверку ведёт `tools/check_v19_revisions.py`.
+#
+# `configuration_uuid` в контракт разбора НЕ входит — тот же порядок, что у V44:
+# идентификатор заголовка знает загрузчик, а не XML объекта
+# (`collect_subsystems`/`collect_common_modules` отдают строки без него, вызывающий
+# подставляет до вставки). Писатель его не выдумывает: колонка NOT NULL, и отсутствие
+# значения читается отказом вставки, а не NULL-строкой.
+#
+# `synonym`, `content`, `content_unresolved`, `picture` — `jsonb_nullable`, а не
+# `jsonb_object`: «свойства в выгрузке нет» и «свойство есть, но пустое» — разные состояния,
+# и `'{}'::jsonb` стёр бы границу (тот же контракт, что `origin_manifest` узла V31). Для
+# `content` это ещё и порядок детей: перечень читается из jsonb-массива в исходной позиции
+# (правило D8), поэтому сортировать или менять его писатель не вправе.
+
+
+class SubsystemsRowWriter(TableRowWriter):
+    """Строка подсистемы конфигурации (таблица `subsystems`, узел V46).
+
+    Имена колонок совпадают с полями контракта разбора
+    (`src/configuration_object_properties.py::collect_subsystems`) намеренно — чтобы
+    маппинг был виден по тексту, а не по памяти (приём узла V33).
+
+    Колонки, смысл которых не выводится из имени:
+
+      * `tree_depth` считается ОТ 1 (замер 2.2: глубина 1…5), а не от 0, как `depth`
+        индекса состава; CHECK диапазона в схеме это закрепляет;
+      * `ordinal` — позиция ребёнка в `<ChildObjects>` файла-родителя (замер 2.4: индекс
+        состава отдаёт алфавит в 24/24 и 47/47 случаев, каталог порядка не даёт вовсе).
+        `0` — значение по умолчанию для объекта, которого родитель не объявлял
+        (`ORDINAL_NOT_DECLARED`): «порядка нет», а не «первый»;
+      * `parent_source` называет, ЧЕМ получено родительство — раскладкой файлов, объявлением
+        родителя или именем записи индекса. В замере три способа дают одно дерево, при
+        расхождении — разные ответы, и по колонке видно, какому источнику верить;
+      * `declaration_state` CHECK в схеме не имеет: словарь состояний задаёт разбор
+        (раздел 4 плана), повторять его в DDL — значит разъезжать с кодом (прецедент
+        48 имён перечней до узла V43).
+
+    Строки без `object_uuid` разбор не отдаёт: без него строка не является ключом цепочки
+    содержимого, и это называется предупреждением разбора, а не NULL-колонкой.
+    """
+
+    TABLE = "subsystems"
+    COLUMNS = versioned_columns({
+        "configuration_uuid": "uuid",
+        "object_uuid": "uuid",
+        "parent_object_uuid": "uuid",
+        "full_name": "text",
+        "parent_full_name": "text",
+        "object_name": "text",
+        "tree_depth": "int",
+        "ordinal": "int",
+        "parent_source": "text",
+        "declaration_state": "text",
+        "comment": "text",
+        "synonym": "jsonb_nullable",
+        "explanation": "text",
+        "include_help_in_contents": "bool",
+        "include_in_command_interface": "bool",
+        "use_one_command": "bool",
+        "content": "jsonb_nullable",
+        "content_unresolved": "jsonb_nullable",
+        "picture": "jsonb_nullable",
+    })
+
+
+class SubsystemContentRowWriter(TableRowWriter):
+    """Ссылка включения `<Content>` подсистемы (таблица `subsystem_content`, узел V46).
+
+    Одна строка на ссылку: `ref_text` — исходный текст ссылки, `ref_form` — её форма
+    (`qualified_name` | `uuid`, CHECK в схеме), `resolved` — найдена ли цель индексом
+    состава. Неразрешённая ссылка остаётся строкой с `resolved = false` и пустыми целевыми
+    колонками: «ссылки нет» и «ссылка есть, цель не найдена» — разные состояния (D9), и
+    молчать о втором нельзя.
+
+    Ревизия строки относится к ревизии подсистемы-родителя, а не живёт своей цепочкой —
+    тот же порядок, что у `form_ext` (`uq_form_ext_form_id_revision`): вызывающий обязан
+    передать `revision_no` строки родителя, иначе `revision_defaults()` даст единицу и
+    ссылки оторвутся от своего состояния. Текущее состояние выбирает витрина
+    `v_current_subsystem_content` через `v_current_subsystems`.
+
+    `ordinal` — позиция в исходном перечне `<Content>` (начиная с `ORDINAL_BASE`);
+    уникальность `(subsystem_object_uuid, revision_no, ordinal)` в схеме и есть обещание
+    порядка, поэтому писатель порядок не меняет.
+    """
+
+    TABLE = "subsystem_content"
+    COLUMNS = versioned_columns({
+        "configuration_uuid": "uuid",
+        "subsystem_object_uuid": "uuid",
+        "subsystem_full_name": "text",
+        "ordinal": "int",
+        "ref_text": "text",
+        "ref_form": "text",
+        "resolved": "bool",
+        "target_object_type": "text",
+        "target_object_uuid": "uuid",
+        "target_full_name": "text",
+    })
+
+
+class CommonModulesRowWriter(TableRowWriter):
+    """Строка свойств общего модуля (таблица `common_modules`, узел V46).
+
+    Набор свойств замкнут замером 2.5: у `CommonModule` их ровно 11, других ни в одной из
+    трёх выгрузок нет. Текста модуля здесь нет намеренно (решение D6): 188–294 МБ на
+    выгрузку (замер 2.6) — строка свойств не должна читать файл, для этого есть
+    `common_module_sources`.
+
+    `return_values_reuse` — перечислимое значение (`DontUse` | `DuringSession` |
+    `DuringRequest`), а не булево: словарь снят замером (`_v46e_cm_values_probe.py`), а не
+    взят из справочника по памяти; NULL означает «в выгрузке не задано».
+    `declaration_state` для общих модулей принимает только состояния «файл ↔ индекс»:
+    родитель их не объявляет, и `declared_no_file`/`file_not_declared` для них не выразимы
+    (разбор называет это предупреждением, а не молчит в словаре состояний).
+    """
+
+    TABLE = "common_modules"
+    COLUMNS = versioned_columns({
+        "configuration_uuid": "uuid",
+        "object_uuid": "uuid",
+        "full_name": "text",
+        "object_name": "text",
+        "comment": "text",
+        "synonym": "jsonb_nullable",
+        "global": "bool",
+        "privileged": "bool",
+        "server": "bool",
+        "server_call": "bool",
+        "external_connection": "bool",
+        "client_managed_application": "bool",
+        "client_ordinary_application": "bool",
+        "return_values_reuse": "text",
+        "declaration_state": "text",
+    })
+
+
+class CommonModuleSourcesRowWriter(TableRowWriter):
+    """Дескриптор текста общего модуля (таблица `common_module_sources`, узел V46).
+
+    Дескриптор, а не текст (решение D6): `file_path` — путь относительно КОРНЯ выгрузки
+    (`CommonModules/<Имя>/Ext/Module.bsl`), `file_size` — размер с диска. Текст загружает
+    отдельная процедура вторым коммитом (решение D7), и её отказ не откатывает свойства;
+    поэтому `content_loaded` при первом коммите всегда `false` — это названное состояние, а
+    не недосказанность.
+
+    Пара «путь ↔ состояние» закрыта CHECK'ом схемы: путь разрешён состояниям с текстом
+    модуля — `file` и `file_not_in_index` (поправка C-V46-1,
+    `migrate_v46_module_source_path_state_check.sql`: предикат `content_state = 'file'` был
+    уже собственного комментария DDL, потому что `file_not_in_index` — это файл, которого нет
+    в индексе состава, и путь к нему является ровно тем знанием, ради которого строка
+    существует). `bin_only` и `indexed_no_file` пути не несут: «пути нет» и «текста нет» —
+    одно и то же состояние, а путь `Module.bin` выводится из каталога объекта
+    детерминированно и в колонку не кладётся.
+
+    `module_type` — слот вида `Module` (словарь V40). Значение задаёт разбор, а не
+    `CONSTANTS` писателя: словарь слотов живёт в разборе и повторяться здесь не должен; CHECK
+    схемы оставляет значение единственным. Слоты предопределённых программ корня здесь не
+    дублируются — у них таблицы узла V44.
+    """
+
+    TABLE = "common_module_sources"
+    COLUMNS = versioned_columns({
+        "configuration_uuid": "uuid",
+        "object_uuid": "uuid",
+        "module_name": "text",
+        "module_type": "text",
+        "file_path": "text",
+        "file_size": "int",
+        "content_state": "text",
+        "content_loaded": "bool",
+    })
+
+
+# Контракт разбора → писатель: выбор по словарю, а не по имени таблицы (приём
+# ROOT_MODULE_WRITERS: ошибка выбора превращается в запись не в ту таблицу).
+CONFIGURATION_OBJECT_WRITERS = {
+    "subsystems": SubsystemsRowWriter,
+    "subsystem_content": SubsystemContentRowWriter,
+    "common_modules": CommonModulesRowWriter,
+    "common_module_sources": CommonModuleSourcesRowWriter,
 }
 
 

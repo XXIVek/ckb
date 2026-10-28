@@ -148,6 +148,11 @@ CHANNEL_FUNCS = {
     "revision_defaults": "write",
     "build_children_manifest": "write",
     "stamp_revision_rows": "write",
+    # Узел V46 (поправка D12, 28.10.2026): значение признака коммита строки выводит точка
+    # доступа, а не писатель, — функция относится к письму состояния вместе с
+    # revision_defaults/stamp_revision_rows. Без записи в словаре её вызовы остались бы
+    # несчитанными (S1): нулевой счёт выглядел бы как пройденная проверка.
+    "commit_flag_for": "write",
 }
 CHANNEL_KINDS = ("current", "chain", "key", "write", "sql")
 CHANNEL_LABELS = {

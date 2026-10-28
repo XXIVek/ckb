@@ -79,9 +79,16 @@ DEFAULT_TARGETS = [
 # контракт 17 → 15 — держать их здесь нельзя, потому что проверка требовала бы инструмента,
 # который правила слоя называют снятым (замер 27.10.2026: сервер даёт 15, список требовал 17 —
 # провал «нет инструментов контракта: get_load_rules_tool, get_search_rules_tool»).
+# Узел V46 (П5, 28.10.2026) добавил load_configuration_object_properties_tool: core 4 → 5.
+# Отдельная точка входа нужна по той же причине, что у V44: свойства подсистем и общих
+# модулей меняются вместе с файлами регистрации, а заголовок и индекс состава при этом не
+# меняются — пересоздавать конфигурацию force=True ради них значило бы снять историю
+# состояний (M7). Стадия S4 конвейера вызывает тот же слой, поэтому отдельного контракта у
+# инструмента нет: закрытый словарь и текст даёт configuration_load_contract.
 EXPECTED_TOOLS = {
     "server_configurations_core.py": [
         "delete_external_report_tool", "load_1c_catalog_tool",
+        "load_configuration_object_properties_tool",
         "load_configuration_root_modules_tool", "load_external_object_file_tool",
     ],
     "server_configurations_enrichment.py": [
