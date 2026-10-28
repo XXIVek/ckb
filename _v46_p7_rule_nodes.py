@@ -201,7 +201,13 @@ def main(argv=None):
         # Оба перечня упорядочены по адресу, поэтому строка ставится перед соседом
         # `load-configuration-root-modules-tool`; в таблице id называется строкой карточки,
         # а не числом состава в тексте (правило карточки слоя: числа состава словами не хранят).
-        row_id = new_id if new_id else "(после записи)"
+        # id карточки нужен и в сухом прогоне: строка перечня `===LINKS` опознаётся по нему,
+        # и без уже записанного id прогон обещал бы фантомную вставку там, где строка есть
+        # (после закрытия узла карточка в базе всегда, поэтому запрос читает её, а не создаёт).
+        cur.execute("SELECT id FROM knowledge_snippets WHERE source_url=%s",
+                    (RL.source_url(TOOL_ADDRESS),))
+        known_row = cur.fetchone()
+        row_id = new_id if new_id else (known_row["id"] if known_row else "(после записи)")
         append_after(cur, LAYER_CARD,
                      f"| 6157 | `rules:core-rules:load-configuration-root-modules-tool`",
                      f"| {row_id} | `{TOOL_ADDRESS}` | Нужны свойства подсистем и общих модулей "
@@ -347,8 +353,19 @@ def main(argv=None):
                    [JOURNAL_ADDRESS, f"{MARKER}:{RL.STATE_JOURNAL}:node:v46"]
                    + level_aliases(JOURNAL_ADDRESS), dry)
         append_after(cur, JOURNAL_INDEX, "`rules:core-rules:journal:node:v45`",
-                     f"| `{JOURNAL_ADDRESS}` | план `docs/CONFIGURATION_OBJECT_PROPERTIES_PLAN.md`"
-                     f" (28.10.2026) | {JOURNAL_SECTION} |", dry, "строка индекса журнала")
+                     f"| `{JOURNAL_ADDRESS}` | git:a7386264 (28.10.2026) | V46 — {JOURNAL_SECTION} |",
+                     dry, "строка индекса журнала")
+
+        # При закрытии узла строка перечня журнала меняет носителя: пока узел шёл, им был план,
+        # закрытым он называется коммитом — тот же формат, что у строк V44 и V45. Переход
+        # помечен optional: на свежей базе строка создаётся сразу закрытой (шаг выше), поэтому
+        # отсутствия прежнего текста здесь быть не должно, но и отказом это назвать нельзя.
+        ok &= patch(cur, JOURNAL_INDEX,
+                    f"| `{JOURNAL_ADDRESS}` | план `docs/CONFIGURATION_OBJECT_PROPERTIES_PLAN.md`"
+                    f" (28.10.2026) | {JOURNAL_SECTION} |",
+                    f"| `{JOURNAL_ADDRESS}` | git:a7386264 (28.10.2026) | V46 — {JOURNAL_SECTION} |",
+                    dry, "строка индекса журнала: закрытие узла", optional=True)
+
 
         print("\n" + ("⚠️ ничего не записано (нет --write)" if dry else "✅ записи выполнены"))
         if not ok:
