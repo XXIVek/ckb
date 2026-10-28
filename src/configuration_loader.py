@@ -334,9 +334,21 @@ def _remove_rows(cur, cfg_id, configuration_uuid=None):
     # состояние, что ниже у V44: ключа нет, снимать нечем, и называет его вызывающий, а не
     # этот код; ключа `bsl_modules` в `children` при этом нет — отсутствующий ключ и есть
     # ответ «снимать было нечем», а не «снято ноль строк».
+    # Узел V47 (П1): та же граница становится ЯВНОЙ в запросе. До миграции
+    # migrate_v47_bsl_modules_totality.sql строки внешнего контура имели пустой
+    # configuration_uuid, и фильтр по uuid заголовка их не касался — требование абзаца выше
+    # держалось самими данными, а не запросом. По решению оператора (28.10.2026) у строки
+    # внешнего контура оба uuid совпадают и равны uuid самого объекта, поэтому фикстура
+    # проверки V32, где uuid конфигурации совпадает с uuid внешнего объекта, снесла модуль
+    # чужого контура (замер 28.10.2026: пропала строка id 306 модуля внешнего объекта
+    # «СравнениеУСНИ90_2»; инвариант чистоты check_v32_zero_configuration.py это и поймал).
+    # Тот же приём с границей по parent_type держит узел V46 (`remove_common_module_texts`).
     if configuration_uuid:
-        cur.execute("DELETE FROM bsl_modules WHERE configuration_uuid = %s::uuid",
-                    [str(configuration_uuid)])
+        cur.execute(
+            "DELETE FROM bsl_modules WHERE configuration_uuid = %s::uuid "
+            "AND parent_type NOT IN ('external_report', 'external_processing')",
+            [str(configuration_uuid)],
+        )
         children["bsl_modules"] = cur.rowcount
     # Узел V44: модули предопределённых программ корня снимются по uuid заголовка (снимок
     # имени не заводится, ключа нет), поэтому вызов здесь, а не в `configurations`-ветке

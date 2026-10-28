@@ -274,9 +274,20 @@ CREATE TABLE IF NOT EXISTS bsl_modules (
     -- то есть теряет смысл вместе со снятием строки. Внешнего ключа здесь нет осознанно
     -- (прецедент V20.1): FK блокировал бы пересоздание заголовка, а очистка выполняется
     -- явным DELETE в src/configuration_loader.py::_remove_rows.
-    configuration_uuid UUID,
+    -- Узел V47 (П1, решение оператора от 28.10.2026): колонка становится NOT NULL. Любая
+    -- строка таблицы обязана называть конфигурацию, а снятие строк круга узла идёт парой
+    -- (configuration_uuid, parent_type) — прецедент V46. Для строк внешнего контура оба uuid
+    -- совпадают и равны uuid самого объекта (миграция
+    -- migrate_v47_bsl_modules_totality.sql, шаг 1).
+    configuration_uuid UUID NOT NULL,
     module_name VARCHAR(255) NOT NULL,
-    file_path VARCHAR(500),
+    -- Узел V47 (П1, раздел 5.2 плана): путь есть у каждой строки. Ключ текущего состояния
+    -- (uq_bsl_modules_parent_file_revision) и витрина v_current_bsl_modules различают
+    -- ревизии пары (parent_uuid, file_path); при NULL-пути правило выродится — строки всех
+    -- ревизий останутся текущими сразу. Отсутствующий файл модуля объекта строки не даёт
+    -- вовсе (решение Q2), поэтому конвенция V46 «путь NULL при отсутствии текста» здесь не
+    -- появляется; различие двух конвенций в двух таблицах называется в нормативах.
+    file_path VARCHAR(500) NOT NULL,
     code TEXT,
     object_type VARCHAR(50),
     object_name VARCHAR(255),
@@ -288,7 +299,14 @@ CREATE TABLE IF NOT EXISTS bsl_modules (
     -- Узел V19: при двух ревизиях объекта id родителя меняется, поэтому report_id — только
     -- подсказка, а связь состояния читает манифест родителя по file_path.
     report_id INT,
-    parent_uuid UUID,
+    -- Узел V47 (П1, решение оператора от 28.10.2026, пункт 1 раздела 5.1 плана): NOT NULL.
+    -- Модуль принадлежит объекту-владельцу: внешний объект (V13), общий модуль (V46), объект
+    -- конфигурации (V47). Строки «модуль принадлежит конфигурации как таковой» в таблице нет
+    -- с того же шага — предикат `parent_uuid IS NULL` больше не может быть истинным, поэтому
+    -- частичный индекс V46 uq_bsl_modules_config_module_revision снят этой же миграцией.
+    -- Значение по умолчанию у parent_type остаётся (чужие загрузчики), но писатель V47
+    -- обязан называть родителя явно — позиция названа в migrate_v47_bsl_modules_totality.sql.
+    parent_uuid UUID NOT NULL,
     parent_type TEXT NOT NULL DEFAULT 'external_report',
     module_type VARCHAR(50),
     code_size INTEGER,
@@ -671,14 +689,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_bsl_modules_parent_file_revision
     ON bsl_modules(parent_uuid, file_path, revision_no) WHERE parent_uuid IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bsl_modules_parent_uuid_revision
     ON bsl_modules(parent_uuid, revision_no) WHERE parent_uuid IS NOT NULL;
--- узел V46 (П2): уникальности строк модулей конфигурации (`parent_uuid IS NULL`) в схеме не
--- было вовсе — вторая строка того же модуля одной конфигурации не отклонялась (слепая зона,
--- названная планом, раздел 12.4). Ключ цепочки той же модели, что у модулей внешнего
--- объекта, но вместо parent_uuid — uuid заголовка; `revision_no` в составе обязателен,
--- иначе индекс отклонял бы вторую ревизию того же модуля, то есть ломал модель истории M1.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_bsl_modules_config_module_revision
-    ON bsl_modules(configuration_uuid, module_type, module_name, revision_no)
-    WHERE parent_uuid IS NULL;
+-- узел V46 (П2) добавлял частичный уникальный индекс uq_bsl_modules_config_module_revision
+-- (configuration_uuid, module_type, module_name, revision_no) WHERE parent_uuid IS NULL —
+-- уникальности строк модулей конфигурации в схеме не было вовсе. Узел V47 (П1) снимает его:
+-- после NOT NULL на parent_uuid предикат `parent_uuid IS NULL` ложен на любой строке, и
+-- индекс не совпал бы ни с одной из них. Мёртвый индекс в схеме — обещание правила, которое
+-- больше не действует; следствие для пробы `_v46_p2_probe.sql` (группа P3) названо в шаге 3
+-- миграции migrate_v47_bsl_modules_totality.sql, а не промолчано.
 -- Отдельный индекс по (parent_uuid, file_path) не заводится: разрешение модуля по пути
 -- из манифеста родителя всегда ищет строки с parent_uuid IS NOT NULL, и частичный
 -- уникальный индекс выше его обслуживает. Живая схема (замер 18.10.2026) его не содержит.
