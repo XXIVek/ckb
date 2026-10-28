@@ -37,6 +37,10 @@ CONTAINER_DIR = {"Command": "Commands", "Form": "Forms", "Subsystem": "Subsystem
 # (прогон `_v47x_kinds.py` 26.10.2026, разделы A-B: только эти три вида и
 # разрешаются иначе, чем даёт обратная эвристика V40 — плюрал внутри составного
 # слова: Chart -> Charts).
+# Повторный прогон 28.10.2026 (шаг П0 узла V47, состав четырёх загруженных строк,
+# 19 428 записей шести слотов) полноту подтвердил: раздел A даёт ровно эти три вида
+# и 71 запись, раздел C с тремя парами — `kind_unresolved` 0 и `container_unmapped` 0.
+# План узла: `docs/CONFIGURATION_OBJECT_MODULES_PLAN.md`.
 CONFIRMED_EXCEPTIONS = {
     "ChartOfAccounts": "ChartsOfAccounts",
     "ChartOfCharacteristicTypes": "ChartsOfCharacteristicTypes",
