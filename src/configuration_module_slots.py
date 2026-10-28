@@ -473,10 +473,17 @@ def module_row_spec(record: Dict, derived: Dict, configuration_uuid: str) -> Dic
     адаптировать существующую запись, а не писать заново), с двумя изменениями из шага
     П3 плана: `parent_type` = `configuration_objects` и добавлена `configuration_uuid`.
 
-    `object_type`/`object_name` описывают прямого владельца — то же, на что указывает
-    `parent_uuid`: для модуля команды это вид `Command` и имя команды. Верхний объект
-    остаётся в `derived["group"]` (атом полноты, Q4) — дублировать его в колонках
-    строки смысла нет, он выводится из `parent_uuid` тем же индексом.
+    `object_type`/`object_name` берутся у самой записи индекса — это вид и имя ВЕРХНЕГО
+    объекта конфигурации, которые пишет разбор индекса (у записи модуля команды они те
+    же, что у каталога: `Catalog.Товары.Command.Провести.CommandModule` даёт
+    `Catalog`/`Товары`). Отдельной колонкой прямой владелец не выводится: он уже указан
+    `parent_uuid` (для модуля команды — запись команды), а имя команды видно из
+    `file_path`. Выведенный вид владельца колонками не становится по трём причинам:
+    он расходится с колонками той же записи индекса (проверка П5 сверял бы строку с
+    выводом, а не с источником); он расходится с узлом V46, который пишет в эти колонки
+    вид метаданных и имя владельца (`COMMON_MODULE_OBJECT_TYPE`); и он создал бы третье
+    значение одного понятия в одной таблице (внешний контур пишет туда слот модуля).
+    Верхний объект остаётся в `derived["group"]` — атоме полноты (Q4).
 
     `code_size` здесь не вычисляется: он равен числу символов раскодированного текста и
     относится к чтению (П3), а не к выводу пути. `report_id` остаётся None: колонка
@@ -490,17 +497,24 @@ def module_row_spec(record: Dict, derived: Dict, configuration_uuid: str) -> Dic
         "module_name": derived["slot"],
         "module_type": derived["slot"],
         "file_path": derived["rel_path"],
-        "object_type": derived["owner_type"],
-        "object_name": (derived["container_name"] if derived["container_type"]
-                        else derived["object_name"]),
+        "object_type": str(record.get("object_type") or ""),
+        "object_name": str(record.get("object_name") or ""),
         "report_id": None,
         "truncated": False,
     }
 
 
 def iter_module_rows(cur, configuration_uuid: str, dump_root,
-                     cache: Optional[Dict] = None) -> Iterable[Dict]:
+                     cache: Optional[Dict] = None,
+                     dump_dir: Optional[str] = None) -> Iterable[Dict]:
     """Обход модулей круга узла: записи индекса → состояние и спецификация строки.
+
+    Каталог выгрузки берётся одним из двух способов: `dump_dir` назван вызывающему
+    известен (загрузчик П4 открыл `source_path` сам — сканировать каталог выгрузок и
+    читать `Configuration.xml` каждого незачем), иначе его ищет `resolve_dump_dir` по
+    uuid корня. Совпадение uuid с заголовком проверяет вызывающий (писатель называет
+    для этого причину `dump_dir_mismatch`), а не обход: каталог здесь назван тем, кто
+    его открыл, и второй проверки от этого меньше не становится.
 
     Каждый словарь результата содержит:
       `state` — `file` / `empty_file` / `indexed_no_file` либо None (был отказ);
@@ -517,8 +531,11 @@ def iter_module_rows(cur, configuration_uuid: str, dump_root,
     по правилу C5, а не потерянной строкой.
     """
     cache = {} if cache is None else cache
-    resolved = resolve_dump_dir(configuration_uuid, dump_root)
-    dump_dir = resolved.get("path", "")
+    if dump_dir:
+        resolved = {"path": str(dump_dir)}
+    else:
+        resolved = resolve_dump_dir(configuration_uuid, dump_root)
+    resolved_dir = resolved.get("path", "")
     for record in iter_index_records(cur, configuration_uuid):
         name = str(record.get("name") or "")
         base = {
@@ -530,11 +547,11 @@ def iter_module_rows(cur, configuration_uuid: str, dump_root,
             "state": None, "refusal": None, "row": None, "derived": None,
             "size_bytes": None, "bin_side": False,
         }
-        if not dump_dir:
+        if not resolved_dir:
             base["refusal"] = REFUSAL_NO_DUMP_FOR_CONFIG
             yield base
             continue
-        derived = derive_module_path(record, dump_dir, cache)
+        derived = derive_module_path(record, resolved_dir, cache)
         base["derived"] = derived
         if not derived["ok"]:
             base["refusal"] = derived["reason"]
