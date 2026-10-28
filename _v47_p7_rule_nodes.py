@@ -191,6 +191,18 @@ def append_after(cur, address, anchor, line, dry, label="", exact=False, before=
     return True
 
 
+def journal_section(leaf):
+    """Описание раздела для строки перечня журнала — по листовому имени адреса."""
+    return JOURNAL_V47_SECTION if leaf == "node:v47" else JOURNAL_RULEFILE_SECTION
+
+
+def has_row(cur, card_address, address):
+    """Строка перечня по адресу есть в ЛЮБОЙ форме: плановой или закрытой (`git:<hash>`)."""
+    cur.execute("SELECT answer FROM knowledge_snippets WHERE question=%s", (card_address,))
+    row = cur.fetchone()
+    return bool(row and f"`{address}`" in (row["answer"] or ""))
+
+
 def close_index_rows(cur, sha, dry):
     """Строки перечня журнала меняют носителя: закрытый узел называется коммитом (формат V44/V45)."""
     ok = True
@@ -349,15 +361,19 @@ def main(argv=None):
                    journal_aliases(JOURNAL_V47_ADDRESS, "node:v47", V47_ALIASES_RU), dry)
         # Порядок строк: v46 → v47 → rule-file-removal. Обе строки вставляют после строки v46,
         # поэтому вторая вставляется первой (в dry-записи строки v47 ещё нет, и вторым образцом
-        # она быть не может).
-        append_after(cur, JOURNAL_INDEX, "`rules:core-rules:journal:node:v46` | git:a7386264",
-                     f"| `{JOURNAL_RULEFILE_ADDRESS}` | план `{PLAN_DOC}` (28.10.2026) | "
-                     f"{JOURNAL_RULEFILE_SECTION} |",
-                     dry, "строка индекса журнала: снятый файл правил")
-        append_after(cur, JOURNAL_INDEX, "`rules:core-rules:journal:node:v46` | git:a7386264",
-                     f"| `{JOURNAL_V47_ADDRESS}` | план `{PLAN_DOC}` (28.10.2026) | "
-                     f"{JOURNAL_V47_SECTION} |",
-                     dry, "строка индекса журнала: узел V47")
+        # она быть не может). Признак внесения — адрес в перечне ЛЮБОЙ формы: после `--close`
+        # строка выглядит как `git:<hash>`, и повторный прогон не должен добавлять вторую строку
+        # того же узла (два перечня одного правила расходятся молча).
+        for address, leaf, label in (
+                (JOURNAL_RULEFILE_ADDRESS, "node:rule-file-removal", "снят файл правил"),
+                (JOURNAL_V47_ADDRESS, "node:v47", "узел V47")):
+            if has_row(cur, JOURNAL_INDEX, address):
+                print(f"без изменений  {JOURNAL_INDEX}  строка перечня уже есть — {label}")
+                continue
+            append_after(cur, JOURNAL_INDEX, "`rules:core-rules:journal:node:v46` | git:a7386264",
+                         f"| `{address}` | план `{PLAN_DOC}` (28.10.2026) | "
+                         f"{journal_section(leaf)} |",
+                         dry, f"строка индекса журнала: {label}")
 
         print("\n" + ("⚠️ ничего не записано (нет --write)" if dry else "✅ записи выполнены"))
         if not ok:
