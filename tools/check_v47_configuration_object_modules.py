@@ -778,11 +778,17 @@ def check_aggregate(totals, run_tags, skipped_tags=()):
               f"{V46_MODULE_RECORDS} и они вне круга",
               totals["v46_module_records"] == V46_MODULE_RECORDS,
               f"факт: {totals['v46_module_records']}, план: {V46_MODULE_RECORDS}")
-    elif skipped_tags:
+    else:
+        # Одиночный прогон тоже обязан сказать, чего он не проверяет: молчание
+        # читалось бы как «число предместа сошлось». Называются и те каталоги плана,
+        # которых не было в этом прогоне, — их снимает сам вызов по scope.
+        not_compared = sorted(set(PLAN_EXPECTATIONS) - set(run_tags))
         info(f"записей слота `Module` общих модулей (предмет V46) посчитано по "
              f"сравненным конфигурациям {totals['v46_module_records']}; сверка с числом "
-             f"плана {V46_MODULE_RECORDS} требует прогона по всем выгрузкам плана, а "
-             f"без них: {', '.join(skipped_tags)}")
+             f"плана {V46_MODULE_RECORDS} требует прогона по всем выгрузкам плана "
+             f"({len(PLAN_EXPECTATIONS)}), в этом прогоне сравнены {len(run_tags)}; "
+             f"вне сравнения: {', '.join(not_compared) if not_compared else 'нет'}"
+             + (f"; не сравнивались: {', '.join(skipped_tags)}" if skipped_tags else ""))
     info(f"проверено конфигураций: {len(run_tags)}; записей круга "
          f"{totals['records']}, файлов {totals['files']}, строк узла "
          f"{totals['rows']} (решение Q2), без текста {totals['no_text']}, без файла "
