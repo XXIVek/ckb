@@ -5,11 +5,22 @@
 (V44) → S4 содержимое дочерних объектов (с узла V46 — свойства подсистем, их ссылки `Content`,
 свойства и дескрипторы общих модулей; по модели A–H узла V38 это часть групп B и E, а не
 группа C — группой C в той модели названы модули предопределённых программ корня, закрытые V44;
-тексты модулей — второй транзакцией по решению D7 и только по явной просьбе вызывающего).
+тексты модулей — второй транзакцией по решению D7 и только по явной просьбе вызывающего)
+→ S4b модули объектов конфигурации (с узла V47 — шесть слотов `Ext/` в `bsl_modules`,
+`parent_type = 'configuration_objects'`; второй транзакцией после фиксации содержимого и БЕЗ
+флага просьбы: конфигурация без модулей — такая же битая, как без свойств, решения Q4 и Q6
+плана `docs/CONFIGURATION_OBJECT_MODULES_PLAN.md`; отдельного инструмента у стадии нет — Q4.1).
 Каждая стадия
 возвращает состояние выполнения и текст ошибки. Отказ стадии S3 или S4 не отменяет уже
 записанный заголовок и называется в ответе отдельно (решения V45 и V46): конвейер
-останавливают только отказы разбора каталога и записи заголовка (C5).
+останавливают только отказы разбора каталога и записи заголовка (C5). Отказ стадии S4b —
+исключение из этого правила: незавершённая группа объектов загруженной не называется
+(решение Q4), поэтому ответ такой загрузки помечен `load_incomplete` и требует полной
+перезагрузки `load_1c_catalog_tool(source_path=…, force=True)` (Q4.1). При этом уже
+зафиксированные S1–S4 остаются зафиксированными — смысл границы D7 не отменяется.
+
+Номер S4b, а не S5: S5 остаётся за планируемой стадией анализа (см. ниже), и занятый номер
+заставил бы карточку стадий и план обогащения называть S5 реализованной.
 
 Запланированная S5 (дополнение оператора 23.10.2026 — НЕ реализована, в `STAGES` её нет): анализ
 загруженной конфигурации по уже сохранённым строкам БД, построение необходимых сниппетов по
@@ -73,12 +84,19 @@ STAGE_LAYOUT = "s1_layout"
 STAGE_HEADER = "s2_header"
 STAGE_ROOT_MODULES = "s3_root_modules"
 STAGE_CHILD_OBJECTS = "s4_child_objects"
+# Узел V47 (28.10.2026): тексты модулей объектов конфигурации. Номер S4b, а не S5:
+# S5 остаётся за планируемой стадией анализа (дополнение оператора 23.10.2026), которой
+# в `STAGES` нет. Стадия идёт сразу за S4 и является второй транзакцией загрузки (Q6,
+# граница D7) — в отличие от S3/S4 её отказ останавливает загрузку (Q4), а повторить её
+# отдельным инструментом нельзя (Q4.1).
+STAGE_OBJECT_MODULES = "s4b_object_modules"
 
 STAGES: Tuple[Tuple[str, str], ...] = (
     (STAGE_LAYOUT, "Разбор каталога выгрузки (Configuration.xml)"),
     (STAGE_HEADER, "Запись заголовка: свойства, перечни состава, индекс состава"),
     (STAGE_ROOT_MODULES, "Модули предопределённых программ корня"),
     (STAGE_CHILD_OBJECTS, "Содержимое дочерних объектов конфигурации"),
+    (STAGE_OBJECT_MODULES, "Модули объектов конфигурации (тексты Ext/, вторая транзакция)"),
 )
 
 STATUS_NOT_RUN = "not_run"
@@ -98,9 +116,11 @@ STATUS_ERROR = "error"
 # ошибкой, ни успехом, сохраняется для неотзакрытой части).
 CHILD_NOT_IMPLEMENTED = (
     "содержимое дочерних объектов загружено частично: закрыты свойства подсистем и общих "
-    "модулей (узел V46, по модели V38 — часть групп B и E); не реализованы реквизиты и "
+    "модулей (узел V46, по модели V38 — часть групп B и E) и тексты модулей объектов "
+    "конфигурации — шесть слотов Ext/ (узел V47, стадия S4b, раздел «"
+    "МОДУЛИ ОБЪЕКТОВ КОНФИГУРАЦИИ» ниже); не реализованы реквизиты и "
     "табличные части объектов "
-    "конфигурации, формы, макеты, модули объектов, значения перечислений, роли и команды — "
+    "конфигурации, формы и их модули, макеты, значения перечислений, роли и команды — "
     "остальные группы A–H "
     "модели V38, узел V18 остаётся открытым"
 )
@@ -459,6 +479,142 @@ def format_child_object_lines(result: Dict[str, Any],
     for warning in result.get("warnings") or []:
         lines.append(f"{indent}⚠️ {warning}")
     lines.append(f"{indent}Граница: {CHILD_NOT_IMPLEMENTED}")
+    return lines
+
+
+# ── стадия S4b: модули объектов конфигурации (узел V47, 28.10.2026) ──────────────────
+
+# Таблица одна и она же — цель узла: отдельного реестра таблиц здесь быть не может, его
+# задаёт словарь `src/configuration_module_slots.py` (`TARGET_TABLE`, `PARENT_TYPE`).
+# Импорт этого словаря в данный модуль закрыт циклом: словарь опирается на
+# `configuration_root_module_loader`, который импортирует контракт. Значит имена таблицы
+# и слотов называются здесь текстом границы, а числовые ключи ответа приходят от писателя
+# (`configuration_module_writer.result_defaults`) — второго перечня ключей в проекте нет.
+OBJECT_MODULE_TABLE = "bsl_modules"
+
+# Заголовок раздела карточки `load_1c_catalog_tool` (вариант `configuration`). Отдельного
+# инструмента с этим текстом нет (решение Q4.1), поэтому форматёр один — карточный.
+OBJECT_MODULES_SECTION_HEADER = "МОДУЛИ ОБЪЕКТОВ КОНФИГУРАЦИИ (узел V47)"
+
+# Что обязан сказать ответ при отказе стадии. Отдельного входа для повтора нет — правило
+# оператора одно: «ошибка загрузки влечёт перезагрузку всей конфигурации» (Q4.1).
+OBJECT_MODULES_RELOAD_HINT = (
+    "Отдельного входа для модулей объектов нет (решение Q4.1, реестр инструментов core "
+    "остаётся пятью): ошибка загрузки влечёт полную перезагрузку конфигурации — "
+    "load_1c_catalog_tool(source_path=…, force=True)"
+)
+
+# Граница круга называется и при успехе: «строки модулей записаны» не равно «других
+# модулей конфигурации в базе нет». Перечень слотов повторяет словарь П2 текстом.
+OBJECT_MODULES_BOUNDARY = (
+    "круг узла — шесть слотов Ext/ записей индекса состава (ObjectModule, ManagerModule, "
+    "RecordSetModule, ValueManagerModule, CommandModule; Module — только для WebService, "
+    "HTTPService, IntegrationService, Bot, WebSocketClient). Общие модули (CommonModule) "
+    "ведёт узел V46, модули форм индексом не моделируются вовсе (узел V40), слоты "
+    "вторичных объектов вне предмета (решение Q5). Строка в bsl_modules есть только там, "
+    "где файл существует и раскодирован строго (решение Q2), поэтому «пустой модуль» и "
+    "«файла нет» в схеме не различимы — их различает только ответ стадии. Машинный код "
+    ".bin рядом с отсутствующим исходником остаётся открытой позицией O1"
+)
+
+
+def format_object_module_lines(result: Dict[str, Any],
+                               indent: str = "") -> List[str]:
+    """Текст стадии S4b по её контракту (C1, C2).
+
+    Отказ форматёр называет сам и обязательно называет группу: атомом полноты является
+    группа объектов (решение Q4), а «конфигурация загружена» без строки о незакрытой
+    группе утверждало бы состав, которого в базе нет. Нули без статуса успехом не
+    читаются: `not_run` (индекс состава не разобран — круг не определён) и `error`
+    (круг читался и отказал) — разные факты (C2).
+    """
+    lines: List[str] = []
+    if not result:
+        return lines
+
+    if not result.get("success"):
+        reason = result.get("error") or result.get("reason") or "загрузчик не назвал причину"
+        prefix = ("Стадия не выполнена" if result.get("status") in (None, STATUS_NOT_RUN)
+                  else "Стадия не удалась")
+        lines.append(f"{indent}{prefix}: {reason}")
+        group = result.get("failed_group")
+        if group:
+            record = result.get("failed_record")
+            lines.append(
+                f"{indent}Группа объектов не загружена: {group}"
+                + (f" (запись: {record})" if record else "")
+                + " — атом полноты (решение Q4), конфигурация неполная"
+            )
+        compensated = int(result.get("compensated_rows") or 0)
+        if compensated:
+            lines.append(
+                f"{indent}Снято строк, вставленных до отказа: {compensated} — "
+                "незавершённая группа не оставляет частичных строк независимо от того, "
+                "фиксирует вызывающий транзакцию или откатывает"
+            )
+        removed = int(result.get("removed_previous") or 0)
+        if removed:
+            lines.append(
+                f"{indent}Прежние строки круга узла сняты и остаются снятыми: {removed} — "
+                "индекс состава пересоздан этой же загрузкой, старые строки больше не "
+                "описывают текущий состав"
+            )
+        lines.append(f"{indent}{OBJECT_MODULES_RELOAD_HINT}")
+        for warning in result.get("warnings") or []:
+            lines.append(f"{indent}⚠️ {warning}")
+        return lines
+
+    groups = result.get("groups") or {}
+    lines.append(
+        f"{indent}Записано строк модулей ({OBJECT_MODULE_TABLE}, parent_type = "
+        f"'configuration_objects'): {int(result.get('written') or 0)}; символов кода "
+        f"{int(result.get('code_chars') or 0)}; время стадии "
+        f"{float(result.get('seconds') or 0)} с; групп круга "
+        f"{int(groups.get('seen') or 0)}, из них с записанными модулями "
+        f"{int(groups.get('with_rows') or 0)}; снято прежних строк узла "
+        f"{int(result.get('removed_previous') or 0)}"
+    )
+    counts = result.get("counts_by_state") or {}
+    lines.append(
+        f"{indent}Состояния записей круга: "
+        + ", ".join(f"{state}={int(count)}" for state, count in sorted(counts.items()))
+        + " — «пустой модуль» (empty_file) и «файла нет» (indexed_no_file) строки не "
+          "имеют (решение Q2); undecoded — отказ стадии по правилу C5, а не строка"
+    )
+    empty_after_strip = int(result.get("empty_after_strip") or 0)
+    if empty_after_strip:
+        lines.append(
+            f"{indent}  Файлов без текста после нормализации (одна BOM или пробелы): "
+            f"{empty_after_strip} — состояние выгрузки, а не потерянная строка; поэтому "
+            "число записанных строк меньше числа файлов круга (замер раздела 2.3 плана)"
+        )
+    for reason, count in sorted((result.get("refusals") or {}).items()):
+        if int(count or 0):
+            lines.append(f"{indent}  ⚠️ отказ вывести путь ({reason}): {int(count)}")
+    for reason, count in sorted((result.get("defects") or {}).items()):
+        if int(count or 0):
+            lines.append(f"{indent}  ⚠️ дефект данных ({reason}): {int(count)}")
+    bin_side = int(result.get("bin_side") or 0)
+    if bin_side:
+        examples = ", ".join(str(item) for item in (result.get("bin_side_examples") or []))
+        lines.append(
+            f"{indent}  Машинный код .bin рядом с отсутствующим исходником: {bin_side} "
+            "(открытая позиция O1 — решения о таких модулях узлом не приняты, строк у них "
+            "нет)"
+            + (f"; примеры: {examples}" if examples else "")
+        )
+    for sample in result.get("samples") or []:
+        lines.append(f"{indent}  ⚠️ запись круга: {sample}")
+    refreshed = int(result.get("statistics_refreshed") or 0)
+    if refreshed:
+        lines.append(
+            f"{indent}Статистика таблицы {OBJECT_MODULE_TABLE} пересобрана (ANALYZE): "
+            f"{refreshed} — без неё читатели витрин текущего состояния платят минутами "
+            "(мера V46)"
+        )
+    for warning in result.get("warnings") or []:
+        lines.append(f"{indent}⚠️ {warning}")
+    lines.append(f"{indent}Граница: {OBJECT_MODULES_BOUNDARY}")
     return lines
 
 

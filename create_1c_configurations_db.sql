@@ -283,8 +283,10 @@ CREATE TABLE IF NOT EXISTS bsl_modules (
     module_name VARCHAR(255) NOT NULL,
     -- Узел V47 (П1, раздел 5.2 плана): путь есть у каждой строки. Ключ текущего состояния
     -- (uq_bsl_modules_parent_file_revision) и витрина v_current_bsl_modules различают
-    -- ревизии пары (parent_uuid, file_path); при NULL-пути правило выродится — строки всех
-    -- ревизий останутся текущими сразу. Отсутствующий файл модуля объекта строки не даёт
+    -- ревизии тройки (configuration_uuid, parent_uuid, file_path) — узел V47 (П1.1) добавил
+    -- размерность конфигурации, потому что uuid владельца общий для конфигураций, выросших
+    -- из общей базы; при NULL-пути правило выродится — строки всех ревизий останутся
+    -- текущими сразу. Отсутствующий файл модуля объекта строки не даёт
     -- вовсе (решение Q2), поэтому конвенция V46 «путь NULL при отсутствии текста» здесь не
     -- появляется; различие двух конвенций в двух таблицах называется в нормативах.
     file_path VARCHAR(500) NOT NULL,
@@ -312,11 +314,14 @@ CREATE TABLE IF NOT EXISTS bsl_modules (
     code_size INTEGER,
     truncated BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT NOW(),
-    -- узел V19 (M1): цепочка состояний модуля. Ключ состояния — (parent_uuid, file_path,
-    -- revision_no): uuid у модуля нет, поэтому идентификатор модуля — путь внутри выгрузки.
-    -- Строки конфигураций (configuration_uuid, parent_uuid IS NULL) тоже получают
-    -- revision_no = 1: индекс состава пересоздаётся загрузчиком, а модули конфигурации
-    -- историей не живут.
+    -- узел V19 (M1): цепочка состояний модуля. Ключ состояния — (configuration_uuid,
+    -- parent_uuid, file_path, revision_no) — размерность конфигурации добавляет узел V47
+    -- (П1.1): uuid у модуля нет, идентификатор модуля — путь внутри выгрузки, а uuid
+    -- владельца и путь одинаковы в двух конфигурациях, выросших из общей базы.
+    -- Строки «модуль принадлежит конфигурации как таковой» в таблице нет с шага П1
+    -- (NOT NULL на parent_uuid); такие строки узла V46 получали revision_no = 1, потому
+    -- что индекс состава пересоздаётся загрузчиком, а модули предопределённых программ
+    -- корня историей живут в таблицах узла V44.
     revision_no INTEGER NOT NULL DEFAULT 1,
     changed_at TIMESTAMP,
     changed_by TEXT,
@@ -586,8 +591,13 @@ CREATE TABLE IF NOT EXISTS subsystem_content (
     is_committed BOOLEAN NOT NULL DEFAULT FALSE,
     CONSTRAINT subsystem_content_ref_form_known
         CHECK (ref_form IN ('qualified_name', 'uuid')),
+    -- Узел V47 (шаг П1.1, решение оператора от 28.10.2026): ключ получает границу по
+    -- конфигурации. subsystem_object_uuid — uuid метаданных, а он общий для конфигураций,
+    -- выросших из общей базы (замер 28.10.2026: 42 349 общих uuid). Без первой колонки
+    -- ссылка включения второй конфигурации падала на ключ первой — на BP3 это и уронило
+    -- стадию S4. Та же размерность, что у uq_bsl_modules_parent_file_revision.
     CONSTRAINT subsystem_content_object_revision_ordinal_key
-        UNIQUE (subsystem_object_uuid, revision_no, ordinal),
+        UNIQUE (configuration_uuid, subsystem_object_uuid, revision_no, ordinal),
     CONSTRAINT subsystem_content_revision_no_positive CHECK (revision_no >= 1),
     CONSTRAINT subsystem_content_changed_by_known
         CHECK (changed_by IS NULL OR changed_by IN ('load', 'edit', 'restore')),
@@ -685,8 +695,15 @@ CREATE INDEX IF NOT EXISTS idx_bsl_modules_module_type ON bsl_modules(module_typ
 -- Узел V19: частичный уникальный индекс V13 (parent_uuid, file_path) получает границу
 -- revision_no — цепочка состояний модуля идентифицируется путём внутри выгрузки (у модуля
 -- нет uuid, M1/M3). Старый индекс uq_bsl_modules_parent_file снимает migrate_v19_revisions.sql.
+-- Узел V47 (шаг П1.1, решение оператора от 28.10.2026): ключ получает первую колонку
+-- configuration_uuid. parent_uuid — uuid метаданных, общий для конфигураций, выросших из
+-- общей базы (замер: 42 349 общих uuid), поэтому пара (родитель, путь) различает модуль
+-- только внутри одной конфигурации; на второй конфигурации вставка падала на этом ключе.
+-- Частичный предикат WHERE parent_uuid IS NOT NULL не переносится: после NOT NULL
+-- (migrate_v47_bsl_modules_totality.sql) он истинен на каждой строке и только скрывает,
+-- что индекс полный. Миграция — migrate_v47_module_key_configuration_scope.sql.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_bsl_modules_parent_file_revision
-    ON bsl_modules(parent_uuid, file_path, revision_no) WHERE parent_uuid IS NOT NULL;
+    ON bsl_modules(configuration_uuid, parent_uuid, file_path, revision_no);
 CREATE INDEX IF NOT EXISTS idx_bsl_modules_parent_uuid_revision
     ON bsl_modules(parent_uuid, revision_no) WHERE parent_uuid IS NOT NULL;
 -- узел V46 (П2) добавлял частичный уникальный индекс uq_bsl_modules_config_module_revision
@@ -702,8 +719,14 @@ CREATE INDEX IF NOT EXISTS idx_bsl_modules_parent_uuid_revision
 
 -- ---------------------------------------------------------------------------
 -- Узел V19: v_current_bsl_modules — текущее состояние модулей (M1).
---   * модули внешнего объекта: max(revision_no) в цепочке (parent_uuid, file_path);
---   * модули конфигурации (parent_uuid IS NULL) историей не живут — отдаются как есть.
+-- Узел V47 (шаг П1.1): цепочка состояния разрешается внутри конфигурации — витрина
+-- сравнивает те же четыре колонки, что и ключ uq_bsl_modules_parent_file_revision.
+-- Иначе расширение ключа перенесло бы дефект из записи в чтение: две «текущие» строки
+-- одной пары (parent_uuid, file_path) из разных конфигураций витрина смешала бы.
+-- Мёртвая ветвь m.parent_uuid IS NULL снята: после NOT NULL на parent_uuid
+-- (migrate_v47_bsl_modules_totality.sql) она ложна на каждой строке, а для
+-- гипотетической NULL-строки NOT EXISTS отдал бы её и без ветви (шаг П1 назвал
+-- следствием то, что строк модулей конфигурации в таблице больше быть не может).
 -- Читается только src/current_revision.py (единая точка доступа S1–S5).
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE VIEW v_current_bsl_modules AS
@@ -713,13 +736,13 @@ SELECT m.id,
        m.parent_uuid, m.parent_type, m.module_type, m.code_size,
        m.truncated, m.revision_no, m.changed_at, m.changed_by, m.is_committed
 FROM bsl_modules m
-WHERE m.parent_uuid IS NULL
-   OR NOT EXISTS (
-        SELECT 1 FROM bsl_modules n
-        WHERE n.parent_uuid = m.parent_uuid
-          AND n.file_path = m.file_path
-          AND n.revision_no > m.revision_no
-   );
+WHERE NOT EXISTS (
+      SELECT 1 FROM bsl_modules n
+      WHERE n.configuration_uuid = m.configuration_uuid
+        AND n.parent_uuid = m.parent_uuid
+        AND n.file_path = m.file_path
+        AND n.revision_no > m.revision_no
+);
 
 -- Витрина текущего состояния подсистем (узел V46). Ключ цепочки — (configuration_uuid,
 -- full_name): full_name является естественным ключом объекта (замер 2.3 плана), цепочка

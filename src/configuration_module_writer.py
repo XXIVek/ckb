@@ -68,8 +68,9 @@ READ_STATES = STATES + (STATE_UNDECODED,)
 # запись индекса о нём говорит.
 REASON_FILE_DISAPPEARED = "file_disappeared"
 # Две записи индекса вывелись в один путь. Это дефект вывода (или данных индекса), а
-# не состояние выгрузки: уникальность `(parent_uuid, file_path, revision_no)` — ключ
-# цепочки состояния (узел V19), и падать на нём посреди транзакции значило бы потерять
+# не состояние выгрузки: уникальность `(configuration_uuid, parent_uuid, file_path,
+# revision_no)` — ключ цепочки состояния (узел V19, размерность конфигурации — узел V47
+# П1.1), и падать на нём посреди транзакции значило бы потерять
 # имя группы, которую обязан назвать ответ (Q4).
 DEFECT_DUPLICATE_PATH = "duplicate_path"
 # Причина отказа принять переданный каталог выгрузки. Загрузчик П4 знает `source_path`
@@ -300,6 +301,16 @@ def write_object_modules(cur, configuration_uuid: str, dump_root=None,
         # ответить «строк узла нет» честно.
         result["written"] = inserted
 
+    def tally_groups() -> None:
+        """Заполнить число групп круга текущим состоянием обхода.
+
+        Вызывается и перед каждым отказом обхода, и по его завершении. Нули `groups` при
+        отказе читались бы как «модульных записей в конфигурации нет», тогда как обход их
+        видел: проба П4 (28.10.2026) остановилась на 39-й записи и показала в ответе
+        нули — то есть отказ называл группу, но молчал о том, сколько их круг содержит.
+        """
+        result["groups"] = {"seen": len(seen_groups), "with_rows": len(groups_with_rows)}
+
     for item in iter_module_rows(cur, configuration_uuid, dump_root, cache,
                                  dump_dir=dump_dir):
         name = str(item.get("name") or "")
@@ -318,6 +329,7 @@ def write_object_modules(cur, configuration_uuid: str, dump_root=None,
                 result["refusals"][refusal] = result["refusals"].get(refusal, 0) + 1
             if len(result["samples"]) < MAX_EXAMPLES:
                 result["samples"].append(f"{name}: {refusal}")
+            tally_groups()
             return _failure(
                 result, str(refusal),
                 f"Не выведен путь модуля для записи индекса {name} (причина: "
@@ -355,6 +367,7 @@ def write_object_modules(cur, configuration_uuid: str, dump_root=None,
             # запись индекса круг подтверждает, а строки нет — значит группа не закрыта.
             result["refusals"][REASON_FILE_DISAPPEARED] = (
                 result["refusals"].get(REASON_FILE_DISAPPEARED, 0) + 1)
+            tally_groups()
             return _failure(
                 result, REASON_FILE_DISAPPEARED,
                 f"Модуль {name} ({derived.get('rel_path')}) исчез между проверкой и "
@@ -363,6 +376,7 @@ def write_object_modules(cur, configuration_uuid: str, dump_root=None,
         if read_state != STATE_FILE:
             result["counts_by_state"][STATE_UNDECODED] += 1
             detail = str(read.get("reason") or "файл модуля не прочитан")
+            tally_groups()
             return _failure(
                 result, detail,
                 f"Модуль {name} ({derived.get('rel_path')}) не записан: {detail}. "
@@ -371,15 +385,22 @@ def write_object_modules(cur, configuration_uuid: str, dump_root=None,
         result["counts_by_state"][STATE_FILE] += 1
 
         row = dict(item["row"])
+        # Граница контроля — пара (родитель, путь): вызов идёт в круге ОДНОЙ
+        # конфигурации (scope_where()), поэтому размерность конфигурации в ключе
+        # не нужна — её уже задал вызов. Табличный ключ шире (configuration_uuid,
+        # parent_uuid, file_path, revision_no — узел V47 П1.1): он защищает и от
+        # совпадения двух конфигураций, а этот контроль — от совпадения двух записей
+        # индекса внутри одной.
         key = (row.get("parent_uuid"), row.get("file_path"))
         if key in seen_paths:
             result["defects"][DEFECT_DUPLICATE_PATH] += 1
+            tally_groups()
             return _failure(
                 result, DEFECT_DUPLICATE_PATH,
                 f"Две записи индекса вывелись в один модуль: {name} → "
                 f"{row.get('file_path')}. Ключ цепочки состояния "
-                "(parent_uuid, file_path, revision_no) принял бы это за одну строку. "
-                f"Группа {group or '—'} не загружена.",
+                "(configuration_uuid, parent_uuid, file_path, revision_no) принял бы "
+                f"это за одну строку. Группа {group or '—'} не загружена.",
                 group=group, name=name)
         seen_paths.add(key)
 
@@ -394,7 +415,7 @@ def write_object_modules(cur, configuration_uuid: str, dump_root=None,
 
     flush()
     result["written"] = inserted
-    result["groups"] = {"seen": len(seen_groups), "with_rows": len(groups_with_rows)}
+    tally_groups()
     result["seconds"] = round((datetime.now() - started).total_seconds(), 3)
     return result
 

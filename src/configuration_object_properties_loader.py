@@ -50,8 +50,9 @@ V38 (узел V18 открыт); содержимое слотов `Help`/`Comma
 (`parent_uuid`, `parent_type = 'common_modules'`), а НЕ строка конфигурации с
 `parent_uuid IS NULL` (уточнение оператора
 28.10.2026): состояния текста живут по тому же ключу, что у модулей внешнего объекта, —
-`(parent_uuid, file_path, revision_no)` (M1, M3), и частичный индекс
-`uq_bsl_modules_config_module_revision` к таким строкам не применяется.
+`(configuration_uuid, parent_uuid, file_path, revision_no)` (M1, M3; размерность
+конфигурации добавляет узел V47 П1.1), и частичный индекс
+`uq_bsl_modules_config_module_revision` к таким строкам не применяется (он снят шагом П1).
 """
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -264,7 +265,8 @@ def common_module_text_row(configuration_uuid: str, descriptor: Dict[str, Any],
     Родитель — uuid самого общего модуля (`parent_type = 'common_modules'`; уточнение оператора
     28.10.2026), а не строка
     конфигурации с `parent_uuid IS NULL`: состояния текста живут по ключу
-    `(parent_uuid, file_path, revision_no)` (M1, M3), то есть так же, как модули внешнего
+    `(configuration_uuid, parent_uuid, file_path, revision_no)` (M1, M3; размерность
+    конфигурации — узел V47 П1.1), то есть так же, как модули внешнего
     объекта. Пустой модуль остаётся строкой с `code IS NULL` и `code_size = 0`: «текста нет»
     и «файла нет» — разные состояния, и первая из них подтверждена файлом выгрузки.
     """

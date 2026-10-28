@@ -10,7 +10,11 @@ Q6 (граница второй транзакции: писатель рабо�
 
 В базе проба не оставляет ничего: все записи — внутри одной транзакции, которая в конце
 откатывается, а после отката на новом соединении проверяется то же состояние, что и до
-прогона (круг узла пуст, строки внешнего контура на месте).
+прогона (круг узла по каждой строке заголовка не изменился, строки внешнего контура на
+месте). До узла П4 (28.10.2026) круг узла в живой базе был пуст и проверялся нулём; с тех
+пор конвейер загрузки сам пишет строки узла (стадия S4b), и ноль в этой таблице — уже не
+«состояние до пробы», а «конфигурация без модулей». Гарантия пробы другая: она ничего не
+меняет, поэтому базовое состояние называется по каждой конфигурации и с ним же сравнивается.
 
 Контуры:
 
@@ -442,18 +446,26 @@ def check_blank(cur, header: dict, expect: dict, dump_copy: Path, cache: dict) -
     check("строки испорченной записи в таблице нет", by_path == 0, f"строк: {by_path}")
 
 
-def check_refusals(cur, header: dict, other: dict, dump_copy: Path) -> None:
+def check_refusals(cur, header: dict, other: dict, dump_copy: Path,
+                   baseline: dict) -> None:
     """G: чужой каталог выгрузки, несуществующий каталог, чужой заголовок."""
     print("\n=== G. отказ принять не свой источник ===")
     if other:
-        result = writer.write_object_modules(cur, str(other["uuid"]),
+        other_uuid = str(other["uuid"])
+        other_before = int(baseline.get(other_uuid) or 0)
+        result = writer.write_object_modules(cur, other_uuid,
                                              dump_dir=str(dump_copy))
         check("каталог другой конфигурации отклонён (причина dump_dir_mismatch)",
               result.get("status") == "error"
               and result.get("refusal") == writer.REFUSAL_DUMP_DIR_MISMATCH,
               f"{result.get('refusal')}: {str(result.get('error'))[:120]}")
-        check("ни одной строки другой конфигурации не записано",
-              writer.count_scope_rows(cur, str(other["uuid"])) == 0)
+        # Отказ произошёл ДО снятия прежних строк (`remove_previous_rows` идёт после
+        # сверки источника), поэтому круг чужой конфигурации остаётся базовым — и это
+        # проверяется сравнением с базовым числом, а не с нулём: у загруженной
+        # конфигурации строк узла ровно столько, сколько записал конвейер.
+        left_other = writer.count_scope_rows(cur, other_uuid)
+        check("ни одной строки другой конфигурации не записано и прежние не сняты",
+              left_other == other_before, f"строк: {left_other}, базовое: {other_before}")
     result = writer.write_object_modules(cur, str(header["uuid"]),
                                          dump_dir=str(WORK_DIR / "нет_такого"))
     check("несуществующий каталог выгрузки назван отказом",
@@ -476,6 +488,20 @@ def other_contour_rows(cur):
     return [dict(zip(columns, values)) for values in cur.fetchall()]
 
 
+def circle_rows_by_header(cur) -> dict:
+    """Сколько строк круга узла лежит у каждой строки заголовка ДО пробы.
+
+    Писатель снимает прежние строки своей конфигурации сам (`remove_previous_rows`),
+    поэтому «пустой круг» внутри транзакции пробы создаётся им же, а не состоянием базы.
+    Значит проверять надо не ноль, а неизменность: базовое число каждой конфигурации
+    называется и сравнивается с ним же после отката.
+    """
+    cur.execute("SELECT c.uuid::text, count(b.id) FROM configurations c LEFT JOIN "
+                "bsl_modules b ON b.configuration_uuid = c.uuid AND b.parent_type = %s "
+                "GROUP BY c.uuid", (slots.PARENT_TYPE,))
+    return {str(uuid): int(count or 0) for uuid, count in cur.fetchall()}
+
+
 def main() -> int:
     print("ПРОГОН V47 (П3): писатель модулей объектов конфигурации в bsl_modules")
     if not DUMP_ROOT.is_dir():
@@ -492,6 +518,9 @@ def main() -> int:
         heads = headers(cur)
         contour_before = other_contour_rows(cur)
         total_before = int(one(cur, "SELECT count(*) FROM bsl_modules") or 0)
+        circle_before = circle_rows_by_header(cur)
+        note(f"базовое состояние круга узла по строкам заголовков: {circle_before}; "
+             "строк таблицы всего: " + str(total_before))
         mincfg = heads.get("MinCfg")
         kommag = heads.get("XXI_Коммерческий_магазин_8_редакция_1_0_3")
         bgu = heads.get("БухгалтерияГосударственногоУчреждения")
@@ -516,8 +545,10 @@ def main() -> int:
             if not dump_dir:
                 continue
             empty_now = writer.count_scope_rows(cur, uuid)
-            if not check(f"круг узла пуст до записи {header['name']} (проба на пустом круге)",
-                         empty_now == 0, f"строк: {empty_now}"):
+            if not check(f"круг узла {header['name']} до записи назван и равен базовому "
+                         f"(пуст он или заполнен конвейером — не меняет дела)",
+                         empty_now == circle_before.get(uuid, 0),
+                         f"строк: {empty_now}, базовое: {circle_before.get(uuid, 0)}"):
                 continue
             run_dump(cur, header, dump_dir, expect, cache)
             check_second_call(cur, header, expect, dump_dir, cache)
@@ -529,10 +560,12 @@ def main() -> int:
                         copy_dump(mincfg_dir, WORK_DIR / "MinCfg_blank"), cache)
             check_c5(cur, mincfg, copy_dump(mincfg_dir, WORK_DIR / "MinCfg_corrupt"), cache)
             check_refusals(cur, mincfg, bgu,
-                           copy_dump(mincfg_dir, WORK_DIR / "MinCfg_refusal"))
+                           copy_dump(mincfg_dir, WORK_DIR / "MinCfg_refusal"),
+                           circle_before)
 
         conn.rollback()
-        note("транзакция пробы откатана — в базе не остаётся ни одной строки узла")
+        note("транзакция пробы откатана — в базе не изменилось ни одной строки узла "
+             "(ни записанного, ни снятого)")
 
     with connect() as conn:
         cur = conn.cursor()
@@ -543,10 +576,12 @@ def main() -> int:
         check("строки чужих контуров таблицы (внешний контур, V46) не тронуты",
               contour_after == contour_before,
               f"до {len(contour_before)}, после {len(contour_after)}")
-        left = sum(writer.count_scope_rows(cur, str(header["uuid"]))
-                   for header in heads.values())
-        check("после отката круг узла пуст по всем строкам заголовков", left == 0,
-              f"строк: {left}")
+        left = {str(header["uuid"]): writer.count_scope_rows(cur, str(header["uuid"]))
+                for header in heads.values()}
+        check("после отката круг узла по всем строкам заголовков равен базовому",
+              {uuid: count for uuid, count in left.items() if count}
+              == {uuid: count for uuid, count in circle_before.items() if count},
+              f"базовое: {circle_before}, после: {left}")
 
     shutil.rmtree(WORK_DIR, ignore_errors=True)
     print(f"\nИТОГ: пройдено {PASSED}, провалено {len(FAILURES)} "

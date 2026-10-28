@@ -36,8 +36,10 @@ from configuration_loader import OBJECTS_TABLE, register_configuration
 # инструмента: карточка и инструмент обязаны рассказывать об одном слое одинаково.
 from configuration_load_contract import (
     CHILD_SECTION_HEADER,
+    OBJECT_MODULES_SECTION_HEADER,
     ROOT_MODULES_SECTION_HEADER,
     format_child_object_lines,
+    format_object_module_lines,
     format_root_modules_lines,
 )
 # Узел V31: формулировки провенанса принадлежат модулю провенанса, а не карточке. Карточка
@@ -391,6 +393,22 @@ def format_load_result(result):
         lines.append(f"ID: {result.get('id')}")
         lines.append(f"UUID: {result.get('uuid', '')}")
         lines.append(f"Название: {result.get('name', '')}")
+        if result.get("load_incomplete"):
+            # Узел V47 (решение Q4, критерий 8 плана): незакрытая группа объектов делает
+            # конфигурацию неполной, и сказано это обязано быть вверху ответа, а не только
+            # в разделе стадии: «✅ Загружено» без этой строки утверждало бы состав, которого
+            # в базе нет. Причину называет раздел стадии ниже, здесь — что не закрыто и что
+            # с этим делать (повторить стадию отдельно нельзя, Q4.1).
+            groups = ", ".join(
+                str(item) for item in (result.get("incomplete_groups") or []))
+            lines.append(
+                "⚠️ Конфигурация неполная: "
+                + (f"группа объектов не загружена ({groups})" if groups
+                   else "стадия модулей объектов конфигурации не выполнена")
+                + ". Заголовок и уже записанные части состава сохранены (граница D7); "
+                  "требуется полная перезагрузка load_1c_catalog_tool(source_path=…, "
+                  "force=True) — отдельного входа для дозагрузки модулей нет (Q4.1)"
+            )
         replaced = result.get("replaced")
         if replaced:
             if result.get("variant") == VARIANT_CONFIGURATION:
@@ -587,6 +605,16 @@ def format_load_result(result):
             if child_part:
                 lines.append(f"{CHILD_SECTION_HEADER}:")
                 lines.extend(format_child_object_lines(child_part, indent="   "))
+            # Узел V47 (стадия S4b): модули объектов конфигурации — вторая транзакция
+            # загрузки (Q6, граница D7). Раздел печатается и при отказе стадии, и при
+            # `not_run` (индекс состава не разобран — круг не определён): «конфигурация
+            # загружена» без него утверждало бы, что кода модулей в базе нет, тогда как
+            # причина отказа или причина пропуска называются только здесь. Отдельного
+            # инструмента с этим текстом нет (Q4.1) — форматёр один, карточный.
+            object_module_part = result.get("object_modules") or {}
+            if object_module_part:
+                lines.append(f"{OBJECT_MODULES_SECTION_HEADER}:")
+                lines.extend(format_object_module_lines(object_module_part, indent="   "))
 
         if counts.get("properties_total"):
             # Что из Properties не имеет колонки в схеме, называется числом, а не молчанием:

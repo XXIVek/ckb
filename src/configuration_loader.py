@@ -64,12 +64,38 @@
     отказ стадии не отменяет уже записанный заголовок, но карточка и ответ называют
     остановившую стадию прямо (аналог R13: отказ секции — не отказ загрузки).
 
+Узел V47 (28.10.2026, слой 2 — модули объектов конфигурации): после стадии S4 конвейер
+вызывает `configuration_object_modules_loader.load_object_modules` — тексты шести слотов
+`Ext/` пишутся в `bsl_modules` (`parent_type = 'configuration_objects'`) ВТОРОЙ
+транзакцией после фиксации содержимого конфигурации (решение Q6, граница D7 узла V46).
+Правила узла (`docs/CONFIGURATION_OBJECT_MODULES_PLAN.md`):
+
+  * флага просьбы нет (решение Q4): стадия выполняется в том же вызове всегда —
+    конфигурация без модулей такая же битая, как без свойств, а разделение загрузки
+    свойств и загрузки модулей означает риск ошибок и повторное чтение всей конфигурации;
+  * атомом полноты является группа объектов. В отличие от S3/S4 отказ такой стадии
+    загрузку останавливает: ответ помечается `load_incomplete`, незакрытая группа
+    называется прямо (`incomplete_groups`), а уже зафиксированные S1–S4 остаются
+    зафиксированными — смысл границы D7 этим не отменяется (критерий 8 плана);
+  * отдельного инструмента и дозагрузки нет (решение Q4.1): правило оператора — «ошибка
+    загрузки влечёт перезагрузку всей конфигурации», предупреждение требует
+    `load_1c_catalog_tool(source_path=…, force=True)`;
+  * индекс состава не разобран → стадия снимается в `not_run` (правило C2): круг модулей
+    задают записи `configuration_objects`, а их нет — нули читались бы как «модулей нет»;
+  * строки круга узла снимаются вместе с заголовком тем же `DELETE` по
+    `configuration_uuid` с явной границей по `parent_type` (раздел 10 плана), отдельной
+    ветки в `_remove_rows` для них нет;
+  * обогащение (S5) загрузчик не вызывает — отдельный вызов (позиция оператора
+    28.10.2026), в `STAGES` этой стадии нет.
+
+
 
 Чтения идут через psycopg2 (`src/external_db.py`), а не psql-подпроцессом: `_run_psql` /
 `_psql_fields` унаследованы от прежнего загрузчика, многоколоночные выборки разбирают
 текст по '|', а URL и комментарий конфигурации — как раз значения с '|'.
 """
 import re
+from datetime import datetime
 from pathlib import Path
 
 import psycopg2.extras
@@ -96,9 +122,21 @@ from configuration_object_properties_loader import (
     load_object_properties,
     remove_object_properties,
 )
+# Узел V47 (стадия S4b): модули объектов конфигурации — вторая транзакция после фиксации
+# содержимого (Q6, граница D7). Точка входа стадии одна и отдельного инструмента у неё нет
+# (Q4.1), поэтому здесь импортируется и ответ «стадия не выполнялась» (`mark_index_unavailable`):
+# право снять стадию в `not_run` имеет только загрузчик — он знает, разбирался ли в этом
+# вызове `ConfigDumpInfo.xml`.
+from configuration_object_modules_loader import (
+    load_object_modules,
+    mark_index_unavailable,
+    object_modules_defaults,
+)
 from configuration_load_contract import (
     CHILD_SECTION_HEADER,
+    OBJECT_MODULES_SECTION_HEADER,
     ROOT_MODULES_SECTION_HEADER,
+    STATUS_ERROR,
     child_objects_defaults,
     root_modules_defaults,
 )
@@ -762,6 +800,57 @@ def register_configuration(source_path, force=False, xml_path=None):
             f"configuration_uuid={row['uuid']})."
         )
 
+    # ── узел V47 (стадия S4b): модули объектов конфигурации ────────────────────────────
+    # Вторая транзакция ПОСЛЕ фиксации содержимого конфигурации (решение Q6, граница D7
+    # узла V46): отказ стадии не откатывает заголовок, индекс состава, модули корня и
+    # свойства дочерних объектов. Порядок вызова повторяет S3/S4 — после коммита
+    # транзакции заголовка (стадия своим соединением не увидела бы незакоммиченного
+    # заголовка и строк индекса), ключ — uuid, каталог тот же `root_source`. Флагов нет
+    # (решение Q4): стадия выполняется всегда, права «не читать код» у неё нет.
+    #
+    # Один штамп времени на событие загрузки (M2): строки модулей несут то же время, что
+    # и остальные строки этой загрузки, а не время своей транзакции.
+    load_moment = datetime.now()
+    load_incomplete = False
+    incomplete_groups = []
+    if index_info is None:
+        # Круг не определён: его задают записи `configuration_objects`, а их этой
+        # загрузкой не создавалось (V33). Стадия НЕ выполнялась (C2) — её нули
+        # читались бы как ответ о конфигурации: «модулей нет» вместо «круг не читался».
+        object_modules = mark_index_unavailable(
+            "ConfigDumpInfo.xml не найден или индекс состава не разобран (узел V33)")
+    else:
+        try:
+            object_modules = load_object_modules(
+                root_source, configuration_uuid=row["uuid"], changed_at=load_moment)
+        except Exception as exc:  # noqa: BLE001 — отказ стадии называется, а не бросается
+            object_modules = object_modules_defaults()
+            object_modules["status"] = STATUS_ERROR
+            object_modules["error"] = (
+                f"исключение слоя модулей объектов конфигурации: {exc}")
+            object_modules["reason"] = object_modules["error"]
+    for module_warning in object_modules.get("warnings") or []:
+        warnings.append(f"модули объектов конфигурации: {module_warning}")
+    if not object_modules.get("success"):
+        # В отличие от S3/S4 такая загрузка не называется полной: атомом полноты
+        # является группа объектов (Q4), и «✅ загружено» без этой строки утверждало бы
+        # состав, которого в базе нет (критерий 8 плана). Отдельного входа для повтора
+        # стадии нет (Q4.1) — требуется полная перезагрузка.
+        load_incomplete = True
+        failed_group = object_modules.get("failed_group")
+        if failed_group and failed_group not in incomplete_groups:
+            incomplete_groups.append(failed_group)
+        warnings.append(
+            "Модули объектов конфигурации не загружены — причина названа строкой "
+            "«Стадия не удалась» в разделе «" + OBJECT_MODULES_SECTION_HEADER
+            + "» карточки"
+            + (f", незакрытая группа объектов: {failed_group}" if failed_group else "")
+            + ". Заголовок, индекс состава, модули предопределённых программ и "
+              "свойства дочерних объектов записаны; повторить стадию отдельно нельзя "
+              "(решение Q4.1) — требуется полная перезагрузка: "
+              "load_1c_catalog_tool(source_path=..., force=True)."
+        )
+
     result = {
         "success": True,
         "id": new_id,
@@ -795,6 +884,14 @@ def register_configuration(source_path, force=False, xml_path=None):
         # узел V46: машинная часть стадии S4 — полная (тот же закрытый контракт, что отдаёт
         # отдельный инструмент); текст раздела даёт общий форматёр контракта.
         "child_objects": child_objects,
+        # узел V47: машинная часть стадии S4b — полная (тот же закрытый контракт, который
+        # читают проба П4 и проверка П5); текст раздела даёт общий форматёр контракта.
+        # `load_incomplete`/`incomplete_groups` — признак того, что состав в БД неполный
+        # (решение Q4): карточка обязана назвать это сразу после строки исхода, а не только
+        # внутри раздела стадии, иначе «✅ загружено» читалось бы как полная конфигурация.
+        "object_modules": object_modules,
+        "load_incomplete": load_incomplete,
+        "incomplete_groups": incomplete_groups,
     }
     if index_info is not None:
         index_counts = index_info.get("counts") or {}
