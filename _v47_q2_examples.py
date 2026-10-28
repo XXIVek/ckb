@@ -91,7 +91,7 @@ def main():
                             password="Sta090860", dbname="ckb_1c_configurations")
     cur = conn.cursor(cursor_factory=RealDictCursor)
     cur.execute(
-        "SELECT c.uuid::text AS cfg, o.name, o.object_id "
+        "SELECT c.uuid::text AS cfg, c.name AS cfg_name, o.name, o.object_id "
         "FROM configuration_objects o JOIN configurations c ON c.id = o.configuration_id "
         "WHERE (o.child_type = ANY(%s)) "
         "   OR (o.child_type = 'Module' AND split_part(o.name, '.', 1) = ANY(%s)) "
@@ -104,6 +104,10 @@ def main():
     state = Counter()
     by_slot = defaultdict(Counter)
     samples = defaultdict(list)
+    total_bytes = 0
+    total_chars = 0
+    per_cfg = defaultdict(lambda: [0, 0])
+    bin_side = Counter()          # .bin рядом там, где .bsl нет (машинный код V46: bin_only)
     for row in rows:
         dump = by_uuid.get(row["cfg"], "")
         if not dump:
@@ -117,18 +121,40 @@ def main():
             continue
         if os.path.isfile(path):
             size = os.path.getsize(path)
+            with open(path, "rb") as fh:
+                raw = fh.read()
+            try:  # та же строга раскодирования, что у read_root_module_file (V44)
+                text = raw.decode("utf-8-sig")
+            except UnicodeDecodeError as exc:
+                state["undecodable"] += 1
+                if len(samples["undecodable"]) < 2:
+                    samples["undecodable"].append((row["name"], path, size))
+                    print(f"  не раскодирован: {row['name']} — {exc}")
+                continue
             tag = "file" if size > 0 else "empty_file"
+            total_bytes += size
+            total_chars += len(text)
+            per_cfg[row["cfg_name"]][0] += 1
+            per_cfg[row["cfg_name"]][1] += size
         else:
             tag = "indexed_no_file"
+            size = -1
+            # тот же каталог Ext/, то же имя модуля, расширение .bin — машинный код вместо
+            # исходника (защита паролем / обфускация); прецедент — `bin_only` у V46
+            if os.path.isfile(path[:-4] + ".bin"):
+                bin_side[(row["cfg_name"], slot)] += 1
+                if sum(bin_side.values()) <= 3:
+                    print(f"  рядом .bin вместо .bsl: {row['cfg_name']} — {row['name']}")
         state[tag] += 1
         by_slot[slot][tag] += 1
         if len(samples[tag]) < 2:
-            samples[tag].append((row["name"], path, size if tag != "indexed_no_file" else -1))
+            samples[tag].append((row["name"], path, size))
 
     total = sum(state.values())
     print(f"=== A. круг узла V47: {total} записей индекса ===")
-    for tag in ("file", "empty_file", "indexed_no_file", "no_dump_for_config",
-                "kind_unresolved", "container_unmapped", "name_shape_unexpected"):
+    for tag in ("file", "empty_file", "indexed_no_file", "undecodable",
+                "no_dump_for_config", "kind_unresolved", "container_unmapped",
+                "name_shape_unexpected"):
         if state[tag]:
             print(f"  {tag:24} {state[tag]}")
     print("\n  по слотам:")
@@ -141,6 +167,30 @@ def main():
             print(f"  {tag:16} {name}")
             print(f"  {'':16} путь: {path or '(путь не выведен — см. причину в разделе A)'}")
             print(f"  {'':16} размер: {'нет файла' if size < 0 else str(size) + ' байт'}")
+
+    print("\n=== C. раскодирование файлов круга (utf-8-sig строго — правило V44) ===")
+    decoded = state["file"] + state["empty_file"]
+    print(f"  файлов, открытых как файл модуля: {decoded}")
+    print(f"  не раскодированных (undecoded): {state['undecodable']}")
+    print(f"  суммарный размер файлов круга: {total_bytes} байт "
+          f"({total_bytes / (1024 * 1024):.1f} МиБ)")
+    print(f"  суммарный объём кода после раскодирования: {total_chars} символов")
+
+    print("\n=== D. .bin вместо .bsl в круге узла (машинный код: пароль, обфускация) ===")
+    if not bin_side:
+        print("  записей, где вместо .bsl рядом лежит .bin, нет")
+    else:
+        by_cfg = defaultdict(Counter)
+        for (cfg, slot), cnt in bin_side.items():
+            by_cfg[cfg][slot] += cnt
+        for cfg in sorted(by_cfg, key=lambda k: -sum(by_cfg[k].values())):
+            print(f"  {cfg:46} всего {sum(by_cfg[cfg].values()):3}  "
+                  + "  ".join(f"{k}={v}" for k, v in sorted(by_cfg[cfg].items())))
+
+    print("\n=== E. объём кода по строкам заголовков (число для Q5) ===")
+    for name in sorted(per_cfg, key=lambda k: -per_cfg[k][1]):
+        files, size = per_cfg[name]
+        print(f"  {name:46} файлов {files:6}  объём {size / (1024 * 1024):8.1f} МиБ")
     return 0
 
 
