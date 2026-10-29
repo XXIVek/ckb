@@ -85,11 +85,19 @@ DEFAULT_TARGETS = [
 # меняются — пересоздавать конфигурацию force=True ради них значило бы снять историю
 # состояний (M7). Стадия S4 конвейера вызывает тот же слой, поэтому отдельного контракта у
 # инструмента нет: закрытый словарь и текст даёт configuration_load_contract.
+# Узел V48 (П5, 29.10.2026) добавил load_session_parameters_tool: core 5 → 6. Причина та же
+# (решение оператора Q5.2 — свой вход на каждую позицию нормативного списка): файлы
+# регистрации параметров сеанса меняются, а заголовок и индекс состава — нет. Стадия S4c
+# конвейера и инструмент вызывают одну и ту же функцию слоя
+# (src/configuration_session_parameters_loader.load_session_parameters); отдельного
+# контракта у инструмента нет — закрытый словарь session_parameters_defaults() и текст
+# раздела даёт configuration_load_contract.
 EXPECTED_TOOLS = {
     "server_configurations_core.py": [
         "delete_external_report_tool", "load_1c_catalog_tool",
         "load_configuration_object_properties_tool",
         "load_configuration_root_modules_tool", "load_external_object_file_tool",
+        "load_session_parameters_tool",
     ],
     "server_configurations_enrichment.py": [
         "add_config_aliases_tool", "add_config_cross_reference_tool", "add_config_snippet_tool",

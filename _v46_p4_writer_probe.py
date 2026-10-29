@@ -9,7 +9,10 @@
 
 Транзакция в конце ОТКАТЫВАЕТСЯ намеренно: прогон проверяет запись, а не оставляет в базе
 строки, которых оператор не просил. Поэтому числа читаются внутри той же транзакции, а
-после отката проверяется, что таблицы снова пусты — следов прогон не оставляет.
+после отката проверяется, что таблицы вернулись к базовому состоянию — числу строк, прочитанному
+до записи. Формулировка «таблицы снова пусты» с 28.10.2026 этого свойства не выражала: конвейер
+(узлы V45/V46 П5, V47, V48 П4) пишет в таблицы стадий реальный состав загруженных конфигураций,
+и эти строки остаются в базе намеренно.
 
 `configuration_uuid` берётся из `Configuration.xml` выгрузки (`configuration_uuid_from_layout`
 узла V44), а не выдумывается: uuid заголовка знает источник, а не прогон. Внешнего ключа у
@@ -30,7 +33,8 @@
     [Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $env:PYTHONIOENCODING='utf-8'
     cd C:\\1C_LLM\\ckb
     python _v46_p4_writer_probe.py [MinCfg|BGU2|BP3]
-Код возврата 0 — расхождений нет, после отката таблицы пусты.
+Код возврата 0 — расхождений нет; после отката таблицы возвращены к базовому состоянию
+(число строк каждой таблицы равно прочитанному до записи).
 """
 import sys
 import uuid as uuid_module
@@ -47,6 +51,12 @@ except Exception:
 import psycopg2  # noqa: E402
 
 import configuration_object_properties as props  # noqa: E402
+# Узел V48 (шаг П4, проба `_v48_p4_loader_probe.py`, 29.10.2026): круг этой пробы — таблицы
+# стадии V46, а не весь круг версионности. С регистрации таблицы `session_parameters` (узел П1)
+# эти два круга разошлись: чужую таблицу проба ни снимает, ни считает — иначе она проверяла бы
+# запись чужой стадии и мешала ей. Реестр писателей ниже по-прежнему сверяется с полным кругом
+# `CONFIGURATION_VERSIONED_TABLES`: он обязан покрывать все версионируемые таблицы.
+from configuration_load_contract import CHILD_TABLES  # noqa: E402
 from configuration_root_module_loader import configuration_uuid_from_layout  # noqa: E402
 from current_revision import (  # noqa: E402
     CHANGED_BY_EDIT, CHANGED_BY_LOAD, COMMIT_FLAG_COLUMN, CONFIGURATION_VERSIONED_TABLES,
@@ -162,7 +172,7 @@ def write_all(cur, cfg_uuid, collected):
 
 def check_written(cur, cfg_uuid, collected, written):
     print("\n--- записанные строки ---")
-    for table in CONFIGURATION_VERSIONED_TABLES:
+    for table in CHILD_TABLES:
         expected = len(collected[table])
         view = current_view(table)
         total = one(cur, "SELECT count(*) FROM " + table + " WHERE configuration_uuid = %s",
@@ -323,7 +333,7 @@ def check_paths_resolve(cur, cfg_uuid, dump_dir, limit=5):
 def check_duplicate_rejected(cur, cfg_uuid, collected):
     """Ключ цепочки существует фактом: повтор той же строки отклонён."""
     print("\n--- ключ цепочки состояния ---")
-    for table in CONFIGURATION_VERSIONED_TABLES:
+    for table in CHILD_TABLES:
         if not collected[table]:
             continue
         writer = CONFIGURATION_OBJECT_WRITERS[table]
@@ -486,6 +496,33 @@ def run_dump(name):
     note("контракт разбора: " + ", ".join(f"{table} {len(rows)}"
                                           for table, rows in collected.items()))
 
+    # Инвариант «таблицы пусты» перестал выражать то же самое с 28.10.2026: конвейер
+    # (узлы V45/V46 П5, V47, V48 П4) пишет в таблицы стадий реальный состав загруженных
+    # конфигураций, и строки эти остаются в базе намеренно — снять их после загрузки значит
+    # оставить конфигурацию без её содержимого. Проверяемое свойство пробы не менялось: прогон
+    # ничего не меняет в базе. Значит базовое состояние читается ДО записи (сколько строк
+    # всего и сколько строк этой конфигурации), запись идёт в снятом внутри транзакции круге
+    # этой конфигурации, а откат обязан вернуть ровно это состояние. Без этой правки проба
+    # падала на duplicate key по `uq_subsystems_configuration_full_name_revision` на
+    # конфигурациях, загруженных раньше (замер 29.10.2026: строки подсистем BP3/BGU2/KomMag
+    # от 28.10.2026), — то есть проверяла совпадение со своим предположением о пустоте.
+    baseline = {}
+    baseline_cfg = {}
+    conn_base = connect()
+    try:
+        cur_base = conn_base.cursor()
+        for table in CHILD_TABLES:
+            baseline[table] = int(one(cur_base, "SELECT count(*) FROM " + table) or 0)
+            baseline_cfg[table] = int(one(cur_base, "SELECT count(*) FROM " + table
+                                              + " WHERE configuration_uuid = %s",
+                                         (cfg_uuid,)) or 0)
+    finally:
+        conn_base.close()
+    if any(baseline_cfg.values()):
+        note("%s: в таблицах уже есть строки этой конфигурации (%s) — они снимаются внутри "
+             "транзакции пробы и возвращаются откатом: проба не пишет поверх реального состава "
+             "и не считает чужие строки своими" % (name, baseline_cfg))
+
     conn = connect()
     try:
         cur = conn.cursor()
@@ -496,6 +533,14 @@ def run_dump(name):
         # считают строки, а не план, поэтому план задаёт сама проба: `SET LOCAL` живёт ровно
         # в её транзакции и в код загрузчика не попадает.
         cur.execute("SET LOCAL enable_nestloop = off")
+        removed_pre = {}
+        for table in CHILD_TABLES:
+            cur.execute("DELETE FROM " + table + " WHERE configuration_uuid = %s", (cfg_uuid,))
+            removed_pre[table] = cur.rowcount
+        check("прежние строки этой конфигурации сняты внутри транзакции (запись начинается "
+              "с чистого круга)",
+              all(removed_pre[table] == baseline_cfg[table] for table in CHILD_TABLES),
+              str(removed_pre))
         written, moment = write_all(cur, cfg_uuid, collected)
         check("метка события одна и та же для всех четырёх групп (M2)", bool(moment), str(moment))
         check_written(cur, cfg_uuid, collected, written)
@@ -515,13 +560,14 @@ def run_dump(name):
     conn_after = connect()
     try:
         cur_after = conn_after.cursor()
-        leftovers = {}
-        for table in CONFIGURATION_VERSIONED_TABLES:
+        drift = {}
+        for table in CHILD_TABLES:
             count = int(one(cur_after, "SELECT count(*) FROM " + table) or 0)
-            if count:
-                leftovers[table] = count
-        check("после отката таблицы новых строк не содержат", not leftovers,
-              str(leftovers) if leftovers else "0 строк во всех четырёх таблицах")
+            if count != baseline[table]:
+                drift[table] = f"{baseline[table]} → {count}"
+        check("после отката таблицы вернулись к базовому состоянию", not drift,
+              "; ".join(f"{table}: {where}" for table, where in drift.items())
+              or "состояние всех четырёх таблиц не изменилось: " + str(baseline))
     finally:
         conn_after.close()
 

@@ -1256,6 +1256,75 @@ class CommonModuleSourcesRowWriter(TableRowWriter):
     })
 
 
+class SessionParametersRowWriter(TableRowWriter):
+    """Строка свойств параметра сеанса (таблица `session_parameters`, узел V48).
+
+    Имена колонок совпадают с полями контракта разбора
+    (`src/configuration_session_parameters.py::parse_session_parameter_file`) намеренно —
+    чтобы маппинг был виден по тексту, а не по памяти (приём узла V33).
+
+    Колонки, смысл которых не выводится из имени:
+
+      * ключом цепочки состояния является НЕ `object_uuid`, а
+        (`configuration_uuid`, `object_name`, `revision_no`) (Q2): 82 из 125 uuid вида
+        встречаются в двух и более конфигурациях, а строка заголовка перечисляет детей
+        массивами имён и uuid в них не хранится вовсе
+        (`_v48_q2_key_probe.py`). `object_uuid` — отдельная колонка и поисковый индекс,
+        но не ключ (тот же порядок, что у `subsystems` узла V46);
+      * `full_name` совпадает с `object_name`: иерархии раскладки у вида нет — 207/207
+        записей индекса состава имеют `name = 'SessionParameter.' || object_name` и
+        `depth = 0` (замер 2.2). Колонка заведена для единой формы чтения детей
+        конфигурации (у V46 именем служит `full_name`), а не для дублирования; равенство
+        колонок в CHECK не кладётся сознательно — появление вложенных параметров сеанса
+        отклонялось бы схемой, которой никто не обещал такое ограничение;
+      * `type_raw` — блок `<Type>` из файла как есть. Классификация типа является
+        ОТВЕТОМ разбора, а не фактом выгрузки; без исходного текста этот ответ нельзя
+        перепроверить ни постоянному проверке узла (П6), ни читающему;
+      * `types` — по одной записи на каждое значение `<v8:Type>` в порядке файла (Q4):
+        213 значений на 207 файлов, 6 файлов дают по два значения (замер 2.4.3). Закрытый
+        словарь записи задаёт РАЗБОР константой `TYPE_ENTRY_KEYS`, а не «что удалось
+        прочитать»; CHECK схемы выражает только форму верхнего уровня и согласованность
+        кратности — по отдельной записи массива он не работает (замер 2.5). Вид колонки —
+        `jsonb_array`, а не `jsonb_nullable`: пустой массив является СОСТОЯНИЕМ
+        (`absent`), а не отсутствующим значением, и NULL-вариант рассогласовал бы строку
+        с ограничением `session_parameters_types_absent_matches_no_block`;
+      * `type_multiplicity` и `type_parse_state` — два разных состояния об одном блоке:
+        «типа не было» (`absent`) и «блок был, но мы его не разобрали»
+        (`unknown_form`/`partial`) (Q3). Пустой массив связан с `absent` в обе стороны
+        ограничением схемы, поэтому перепутать их вставкой нельзя;
+      * `type_qualifiers` — квалификаторы блока «как есть»: размещение квалификаторов по
+        отдельным значениям составного типа не замерялось (2.4.5), поэтому выдуманной
+        модели здесь нет, а есть сохранённое содержимое;
+      * `source_path` — путь относительно КОРНЯ выгрузки (`SessionParameters/<Имя>.xml`),
+        а не относительно каталога вида (поправка V46: путь от каталога не совпадал ни с
+        записями индекса состава, ни с колонками других слоёв).
+
+    `synonym` — `jsonb_nullable`, а не `jsonb_object`: «свойства в выгрузке нет» и
+    «свойство есть, но пустое» — разные состояния (тот же контракт, что `origin_manifest`
+    узла V31 и `picture` узла V46).
+
+    Строки без `object_uuid` или без `object_name` разбор не отдаёт: без имени строку
+    нечем ключить, а без uuid она не является ссылкой на объект метаданных. Такой файл
+    называется отказом разбора в отчёте стадии, а не превращается в NULL-колонку.
+    """
+
+    TABLE = "session_parameters"
+    COLUMNS = versioned_columns({
+        "configuration_uuid": "uuid",
+        "object_uuid": "uuid",
+        "object_name": "text",
+        "full_name": "text",
+        "comment": "text",
+        "synonym": "jsonb_nullable",
+        "type_raw": "text",
+        "type_multiplicity": "text",
+        "type_parse_state": "text",
+        "types": "jsonb_array",
+        "type_qualifiers": "jsonb_nullable",
+        "source_path": "text",
+    })
+
+
 # Контракт разбора → писатель: выбор по словарю, а не по имени таблицы (приём
 # ROOT_MODULE_WRITERS: ошибка выбора превращается в запись не в ту таблицу).
 CONFIGURATION_OBJECT_WRITERS = {
@@ -1263,6 +1332,9 @@ CONFIGURATION_OBJECT_WRITERS = {
     "subsystem_content": SubsystemContentRowWriter,
     "common_modules": CommonModulesRowWriter,
     "common_module_sources": CommonModuleSourcesRowWriter,
+    # Узел V48 (параметры сеанса): писатель группы свой, реестр — общий механизм
+    # (правило rules:core-rules:functional:add-object-block, п. 6).
+    "session_parameters": SessionParametersRowWriter,
 }
 
 

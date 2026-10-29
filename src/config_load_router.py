@@ -38,9 +38,15 @@ from configuration_load_contract import (
     CHILD_SECTION_HEADER,
     OBJECT_MODULES_SECTION_HEADER,
     ROOT_MODULES_SECTION_HEADER,
+    SESSION_PARAMETERS_SECTION_HEADER,
+    SESSION_PARAMETER_META_TAG,
+    SESSION_PARAMETER_TABLE,
+    STOP_STAGE_SECTION_HEADER,
     format_child_object_lines,
     format_object_module_lines,
     format_root_modules_lines,
+    format_session_parameters_lines,
+    format_stopped_stage_lines,
 )
 # Узел V31: формулировки провенанса принадлежат модулю провенанса, а не карточке. Карточка
 # объекта, карточка дубликата и сводка печатают один и тот же текст по одному описанию —
@@ -217,6 +223,12 @@ def _normalize(result, detection):
         result["status"] = "kind_conflict"
     elif result.get("already_exists"):
         result["status"] = "duplicate"
+    elif (result.get("stopped_stage") or {}).get("stage"):
+        # Узел V48 (шаг П8, решение Q8 вариант A): отказ стадии детей останавливает
+        # конвейер. Это отдельный исход карточки, а не общий `error`: заголовок, индекс
+        # состава и перечни вида зафиксированы, и «Не могу загрузить» без разделов стадий
+        # прочитался бы как «в базе ничего нет» — а это была бы неправда.
+        result["status"] = "stopped_stage"
     elif not result.get("status"):
         result["status"] = "error"
     return result
@@ -377,6 +389,85 @@ def _existing_card(existing, table):
     return lines
 
 
+def _stage_section_lines(result):
+    """Разделы четырёх стадий детей — один код для успеха и для остановки.
+
+    Узел V48 (шаг П8, решение Q8 вариант A): разделы печатались только в карточке успеха,
+    но состояние стадии нужно читать и когда конвейер остановлен: `not_run` последующих
+    стадий и причина отказа живут именно здесь. Держать два набора вызовов форматёров
+    значило бы иметь два описания одного состава (тот же приём, по которому форматёр стадии
+    один на карточку и на отдельный инструмент).
+    """
+    lines = []
+    # Узел V45 (стадия S3): код предопределённых программ корня. Текст даёт общий
+    # форматёр контракта — тот же, что в ответе отдельного инструмента: карточка и
+    # инструмент описывают один слой одинаково, два форматёра разъехались бы при
+    # первой же правке. Раздел печатается и при отказе стадии: строка «Стадия не
+    # выполнена» называет причину один раз, а предупреждение карточки говорит, где
+    # её искать и как повторить стадию.
+    root_part = result.get("root_modules") or {}
+    if root_part:
+        lines.append(f"{ROOT_MODULES_SECTION_HEADER}:")
+        lines.extend(format_root_modules_lines(root_part, indent="   "))
+    # Узел V46 (стадия S4): свойства подсистем и общих модулей. Раздел печатается и
+    # при отказе стадии — по той же причине, что у S3: «загружено» без него читалось бы
+    # как «состав конфигурации в БД есть весь», хотя содержимое объектов не записано.
+    # Граница «что из содержимого дочерних объектов не загружено» печатается и при успехе:
+    # подсистемы и общие модули — только часть этого содержимого (по модели A–H узла V38 —
+    # группы B и E, а не всё, что перечисляет индекс состава).
+    child_part = result.get("child_objects") or {}
+    if child_part:
+        lines.append(f"{CHILD_SECTION_HEADER}:")
+        lines.extend(format_child_object_lines(child_part, indent="   "))
+    # Узел V48 (стадия S4c, позиция 2.3 списка): свойства параметров сеанса.
+    # Раздел печатается и при отказе стадии — по той же причине, что у S3/S4: «загружено»
+    # без него читалось бы как «состав конфигурации в БД есть весь». Ответ стадии лежит в
+    # собственном ключе, а не внутри `child_objects` (правило C3, решение Q5); текст даёт
+    # общий форматёр контракта — тот же, что отдаёт отдельный инструмент
+    # `load_session_parameters_tool` (шаг П5).
+    session_part = result.get("session_parameters") or {}
+    if session_part:
+        lines.append(f"{SESSION_PARAMETERS_SECTION_HEADER}:")
+        lines.extend(format_session_parameters_lines(session_part, indent="   "))
+    # Узел V47 (стадия S4b): модули объектов конфигурации — вторая транзакция загрузки
+    # (Q6, граница D7). Раздел печатается и при отказе стадии, и при `not_run` (индекс
+    # состава не разобран — круг не определён): «конфигурация загружена» без него
+    # утверждало бы, что кода модулей в базе нет, тогда как причина отказа или причина
+    # пропуска называются только здесь. Отдельного инструмента с этим текстом нет (Q4.1) —
+    # форматёр один, карточный.
+    object_module_part = result.get("object_modules") or {}
+    if object_module_part:
+        lines.append(f"{OBJECT_MODULES_SECTION_HEADER}:")
+        lines.extend(format_object_module_lines(object_module_part, indent="   "))
+    return lines
+
+
+def _incomplete_note(result):
+    """Строка о неполном составе — одна для успеха с отказом и для остановки.
+
+    Узел V47 (решение Q4, критерий 8 плана): незакрытая группа делает конфигурацию
+    неполной, и сказано это обязано быть вверху ответа, а не только в разделе стадии.
+    """
+    groups = ", ".join(str(item) for item in (result.get("incomplete_groups") or []))
+    return (
+        "⚠️ Конфигурация неполная: "
+        + (f"не закрыто: {groups}" if groups
+           else "стадия состава конфигурации не выполнена")
+        + ". Заголовок и уже записанные части состава сохранены (граница D7); "
+          "чем продолжить — называет раздел остановленной стадии ниже"
+    )
+
+
+def _stopped_stage_section(result):
+    """Раздел об остановке конвейера (узел V48, шаг П8, решение Q8 вариант A)."""
+    stopped = result.get("stopped_stage") or {}
+    if not stopped.get("stage"):
+        return []
+    lines = [STOP_STAGE_SECTION_HEADER + ":"]
+    lines.extend(format_stopped_stage_lines(stopped, indent="   "))
+    return lines
+
+
 def format_load_result(result):
     """Единый формат ответа точки входа: ровно четыре исхода (R8, раздел 1 норматива)."""
     if not isinstance(result, dict):
@@ -394,21 +485,12 @@ def format_load_result(result):
         lines.append(f"UUID: {result.get('uuid', '')}")
         lines.append(f"Название: {result.get('name', '')}")
         if result.get("load_incomplete"):
-            # Узел V47 (решение Q4, критерий 8 плана): незакрытая группа объектов делает
-            # конфигурацию неполной, и сказано это обязано быть вверху ответа, а не только
-            # в разделе стадии: «✅ Загружено» без этой строки утверждало бы состав, которого
-            # в базе нет. Причину называет раздел стадии ниже, здесь — что не закрыто и что
-            # с этим делать (повторить стадию отдельно нельзя, Q4.1).
-            groups = ", ".join(
-                str(item) for item in (result.get("incomplete_groups") or []))
-            lines.append(
-                "⚠️ Конфигурация неполная: "
-                + (f"группа объектов не загружена ({groups})" if groups
-                   else "стадия модулей объектов конфигурации не выполнена")
-                + ". Заголовок и уже записанные части состава сохранены (граница D7); "
-                  "требуется полная перезагрузка load_1c_catalog_tool(source_path=…, "
-                  "force=True) — отдельного входа для дозагрузки модулей нет (Q4.1)"
-            )
+            # Узел V47 (решение Q4, критерий 8 плана): незакрытая группа делает конфигурацию
+            # неполной, и сказано это обязано быть вверху ответа, а не только в разделе стадии.
+            # Узел V48 (шаг П8, решение Q8 вариант A): строка одна для двух исходов — и для
+            # отказа последней стадии, и для остановки на любой другой; даёт её
+            # `_incomplete_note`, потому что двух формулировок об одном факте быть не должно.
+            lines.append(_incomplete_note(result))
         replaced = result.get("replaced")
         if replaced:
             if result.get("variant") == VARIANT_CONFIGURATION:
@@ -523,10 +605,17 @@ def format_load_result(result):
                 # остальными значило бы сказать, что подсистем и общих модулей в БД нет, —
                 # карточка противоречила бы собственному разделу СОДЕРЖИМОЕ ДОЧЕРНИХ ОБЪЕКТОВ.
                 from configuration_object_properties_loader import LOADED_META_TABLES
+                # Узел V48 (стадия S4c, позиция 2.3 списка): SessionParameters тоже относится
+                # к видам, содержимое которых сохраняется, — но своей стадией и в свою таблицу.
+                # Словарь «тег <ChildObjects> → таблицы вида» держит тот слой, который эти
+                # таблицы пишет (прецедент LOADED_META_TABLES узла V46), поэтому он дополняется
+                # здесь, а не правкой словаря V46 (круг CHILD_* этим узлом не расширяется).
+                loaded_tags = dict(LOADED_META_TABLES)
+                loaded_tags[SESSION_PARAMETER_META_TAG] = (SESSION_PARAMETER_TABLE,)
                 loaded = {tag: count for tag, count in child_counts.items()
-                          if tag in LOADED_META_TABLES}
+                          if tag in loaded_tags}
                 rest = {tag: count for tag, count in child_counts.items()
-                        if tag not in LOADED_META_TABLES}
+                        if tag not in loaded_tags}
                 by_type = ", ".join(
                     f"{tag} {count}" for tag, count in sorted(rest.items())
                 )
@@ -536,9 +625,10 @@ def format_load_result(result):
                 lines.append(
                     f"Состав из <ChildObjects> Configuration.xml: объектов "
                     f"{sum(child_counts.values())}"
-                    + (f"; видов с загруженным содержимым (узел V46): {loaded_detail} — их "
-                       "свойства и ссылки лежат в таблицах стадии S4, раздел «"
-                       + CHILD_SECTION_HEADER + "» ниже" if loaded_detail else "")
+                    + (f"; видов с загруженным содержимым (узлы V46 и V48): {loaded_detail} — "
+                       "их свойства и ссылки лежат в таблицах стадий S4 и S4c, разделы «"
+                       + CHILD_SECTION_HEADER + "» и «" + SESSION_PARAMETERS_SECTION_HEADER
+                       + "» ниже" if loaded_detail else "")
                     + (f"; остальных объектов {sum(rest.values())} — по типам: {by_type}; "
                        "эти записи в БД не раскладываются (таблиц объектов метаданных по ним "
                        "в схеме нет, узел V18)" if by_type else "")
@@ -584,37 +674,11 @@ def format_load_result(result):
                     f"{anomalies.get('empty_object_name', 0)}. Пустые колонки остались NULL "
                     "(«таких объектов в конфигурации нет»), а не пустым перечнем"
                 )
-            # Узел V45 (стадия S3): код предопределённых программ корня. Текст даёт общий
-            # форматёр контракта — тот же, что в ответе отдельного инструмента: карточка и
-            # инструмент описывают один слой одинаково, два форматёра разъехались бы при
-            # первой же правке. Раздел печатается и при отказе стадии: строка «Стадия не
-            # выполнена» называет причину один раз, а предупреждение карточки говорит, где
-            # её искать и как повторить стадию (конвейер отказом стадии не прерывается —
-            # заголовок и индекс уже записаны).
-            root_part = result.get("root_modules") or {}
-            if root_part:
-                lines.append(f"{ROOT_MODULES_SECTION_HEADER}:")
-                lines.extend(format_root_modules_lines(root_part, indent="   "))
-            # Узел V46 (стадия S4): свойства подсистем и общих модулей. Раздел печатается и
-            # при отказе стадии — по той же причине, что у S3: «✅ загружено» без него
-            # читалось бы как «состав конфигурации в БД есть весь», хотя содержимое
-            # объектов не записано. Граница «что из содержимого дочерних объектов не загружено»
-            # печатается и при успехе: подсистемы и общие модули — только часть этого содержимого
-            # (по модели A–H узла V38 — группы B и E, а не всё, что перечисляет индекс состава).
-            child_part = result.get("child_objects") or {}
-            if child_part:
-                lines.append(f"{CHILD_SECTION_HEADER}:")
-                lines.extend(format_child_object_lines(child_part, indent="   "))
-            # Узел V47 (стадия S4b): модули объектов конфигурации — вторая транзакция
-            # загрузки (Q6, граница D7). Раздел печатается и при отказе стадии, и при
-            # `not_run` (индекс состава не разобран — круг не определён): «конфигурация
-            # загружена» без него утверждало бы, что кода модулей в базе нет, тогда как
-            # причина отказа или причина пропуска называются только здесь. Отдельного
-            # инструмента с этим текстом нет (Q4.1) — форматёр один, карточный.
-            object_module_part = result.get("object_modules") or {}
-            if object_module_part:
-                lines.append(f"{OBJECT_MODULES_SECTION_HEADER}:")
-                lines.extend(format_object_module_lines(object_module_part, indent="   "))
+            # Разделы четырёх стадий детей (S3, S4, S4c, S4b) печатает общий помощник —
+            # тот же, что читает карточка остановленной загрузки (узел V48, шаг П8). Тексты
+            # дают форматёры контракта: карточка и отдельный инструмент описывают слой
+            # одинаково, а два набора вызовов разъехались бы при первой же правке.
+            lines.extend(_stage_section_lines(result))
 
         if counts.get("properties_total"):
             # Что из Properties не имеет колонки в схеме, называется числом, а не молчанием:
@@ -653,6 +717,34 @@ def format_load_result(result):
         origin_columns = result.get("origin_columns") or {}
         if provenance_state_of(origin_columns) == STATE_RECORDED:
             lines.extend(provenance_describe_lines(origin_columns, indent="  "))
+        for warning in result.get("warnings") or []:
+            lines.append(f"⚠️ {warning}")
+        return "\n".join(lines)
+
+    if status == "stopped_stage":
+        # Узел V48 (шаг П8, решение Q8 вариант A): конвейер остановлен отказом стадии.
+        # Карточка обязана назвать три факта и не смешивать их: на какой стадии
+        # остановились и почему (раздел остановки), что при этом осталось в базе
+        # (заголовок, индекс состава, записи выполненных стадий — строка ID/UUID и
+        # разделы стадий) и какие стадии не выполнялись вовсе (`not_run` в разделе
+        # остановки и в разделах стадий). «❌ Не могу загрузить» здесь был бы ложью:
+        # загрузка выполнялась и остановилась на середине.
+        stopped = result.get("stopped_stage") or {}
+        lines = [
+            "⚠️ Загрузка остановлена: "
+            + str(result.get("error")
+                  or f"стадия {stopped.get('stage', '?')} не выполнена")
+        ]
+        lines.append(f"Тип: {title}" + (f" (таблица {table})" if table else ""))
+        lines.append(f"ID: {result.get('id')}")
+        lines.append(f"UUID: {result.get('uuid', '')}")
+        lines.append(f"Название: {result.get('name', '')}")
+        if result.get("load_incomplete"):
+            lines.append(_incomplete_note(result))
+        lines.extend(_stopped_stage_section(result))
+        lines.extend(_stage_section_lines(result))
+        if result.get("hint"):
+            lines.append(f"ℹ️ {result['hint']}")
         for warning in result.get("warnings") or []:
             lines.append(f"⚠️ {warning}")
         return "\n".join(lines)

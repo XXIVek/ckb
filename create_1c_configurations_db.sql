@@ -679,6 +679,100 @@ CREATE TABLE IF NOT EXISTS common_module_sources (
         UNIQUE (configuration_uuid, object_uuid, module_type, revision_no)
 );
 
+-- Узел V48 (29.10.2026, позиция 2.3 нормативного списка «Структура конфигурации.txt»):
+-- свойства параметров сеанса. Модель узла — docs/CONFIGURATION_SESSION_PARAMETERS_PLAN.md
+-- (раздел 4): Q1 — своя таблица, Q2 — ключ по имени, Q3 — состояния разбора,
+-- Q4 — запись на каждое значение <v8:Type> и кратность по определению оператора.
+--
+-- Граница, которую обязан видеть читающий: таблица `session_parameters` — это СОДЕРЖИМОЕ
+-- вида, а колонка `configurations.session_parameters` (TEXT[], узел V43) — ПЕРЕЧЕНЬ ИМЁН
+-- вида в строке заголовка. Совпадение имён читается как риск, а не как связь: внешнего
+-- ключа здесь нет осознанно (прецедент V20.1 — FK блокировал бы пересоздание заголовка),
+-- отношение читается именем по перечню заголовка, и равенство множеств сторожит
+-- постоянная проверка узла, а не схема.
+--
+-- Ключ цепочки состояния — (configuration_uuid, object_name, revision_no), а не uuid
+-- метаданных: строка заголовка перечисляет детей массивами имён, uuid в ней не хранится
+-- вовсе, а 82 из 125 uuid вида встречаются в двух и более конфигурациях (замер
+-- _v48_q2_key_probe.py, 29.10.2026). Граница configuration_uuid обязательна при любой
+-- форме ключа. `object_uuid` заводится отдельной колонкой и поисковым индексом, но ключом
+-- не становится (тот же порядок, что у `subsystems` узла V46).
+--
+-- `full_name` совпадает с `object_name`: иерархии раскладки у вида нет — 207/207 записей
+-- индекса состава имеют name = 'SessionParameter.' || object_name и depth = 0 (замер 2.2).
+-- Колонка заведена не для дублирования, а для единой формы чтения детей конфигурации (у
+-- V46 именем служит full_name). Равенство колонок — факт замера и предмет проверки узла,
+-- в CHECK оно не кладётся: появление вложенных параметров сеанса отклонялось бы схемой,
+-- которой никто не обещал такое ограничение.
+--
+-- Словарь `type_multiplicity` (absent | single | composite) — определение оператора от
+-- 29.10.2026: одна запись `types` — одиночный тип, несколько записей — составной.
+-- Согласованность колонок выражается CHECK: строка «две записи, но single» отклоняется
+-- (замер _v48_q4_jsonb_probe.py). Словарь `type_parse_state` называет, что понял разбор
+-- (Q3): «тип не разобран» и «типа не было» — разные состояния.
+-- Закрытый словарь самой записи `types` (index, value, ns_uri, class, state, resolved,
+-- target_object_type, target_object_uuid, target_full_name) задаёт РАЗБОР одной константой
+-- (`TYPE_ENTRY_KEYS` в src/configuration_session_parameters.py), а не «что удалось
+-- прочитать». CHECK его не выражает: БД отклоняет любой CHECK по отдельной записи массива
+-- текстом «cannot use subquery in check constraint», пропускает лишние ключи и дубликат
+-- второй записи (уникальный индекс возможен только по первой) — замер 2.5. Поэтому словарь
+-- и кратность по числу <v8:Type> в файле сторожит tools/check_v48_session_parameters.py.
+--
+-- Текста модуля и содержимого квалификаторов по отдельным значениям составного типа здесь
+-- нет: размещение квалификаторов по значениям не замерялось (2.4.5), поэтому
+-- `type_qualifiers` остаётся колонкой строки «как есть», а не выдуманной моделью.
+CREATE TABLE IF NOT EXISTS session_parameters (
+    id BIGSERIAL PRIMARY KEY,
+    configuration_uuid UUID NOT NULL,
+    object_uuid UUID NOT NULL,
+    object_name TEXT NOT NULL,
+    full_name TEXT NOT NULL,
+    comment TEXT,
+    synonym JSONB,
+    type_raw TEXT,
+    type_multiplicity TEXT NOT NULL,
+    type_parse_state TEXT NOT NULL,
+    types JSONB NOT NULL DEFAULT '[]',
+    type_qualifiers JSONB,
+    source_path TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW(),
+    revision_no INTEGER NOT NULL DEFAULT 1,
+    changed_at TIMESTAMP,
+    changed_by TEXT,
+    is_committed BOOLEAN NOT NULL DEFAULT FALSE,
+    CONSTRAINT session_parameters_type_multiplicity_known
+        CHECK (type_multiplicity IN ('absent', 'single', 'composite')),
+    CONSTRAINT session_parameters_type_parse_state_known
+        CHECK (type_parse_state IN ('parsed', 'partial', 'unknown_form', 'absent')),
+    CONSTRAINT session_parameters_types_is_array
+        CHECK (jsonb_typeof(types) = 'array'),
+    -- «не разобрали» не равно «типа не было»: пустой массив и состояние absent связаны с
+    -- отсутствием блока <Type> в обе стороны (Q3, вариант A)
+    CONSTRAINT session_parameters_types_absent_matches_no_block
+        CHECK ((types = '[]'::jsonb) = (type_multiplicity = 'absent')
+               AND (type_parse_state = 'absent') = (type_multiplicity = 'absent')),
+    -- CASE, а не плоский OR: порядок веток CASE гарантирован, поэтому
+    -- jsonb_array_length не вызывается для не-массива, и такая строка отклоняется
+    -- ограничением session_parameters_types_is_array с именем, а не внутренней
+    -- ошибкой «cannot get array length of a non-array» (замер 29.10.2026,
+    -- _v48_p1_ddl_probe.sql, случай 6)
+    CONSTRAINT session_parameters_type_multiplicity_matches_types
+        CHECK (CASE WHEN jsonb_typeof(types) <> 'array' THEN TRUE
+                    ELSE type_multiplicity = CASE
+                             WHEN jsonb_array_length(types) = 1 THEN 'single'
+                             WHEN jsonb_array_length(types) > 1 THEN 'composite'
+                             ELSE 'absent'
+                         END
+               END),
+    CONSTRAINT session_parameters_revision_no_positive CHECK (revision_no >= 1),
+    CONSTRAINT session_parameters_changed_by_known
+        CHECK (changed_by IS NULL OR changed_by IN ('load', 'edit', 'restore')),
+    CONSTRAINT session_parameters_changed_pair_check
+        CHECK ((changed_at IS NULL) = (changed_by IS NULL)),
+    CONSTRAINT session_parameters_configuration_object_revision_key
+        UNIQUE (configuration_uuid, object_name, revision_no)
+);
+
 
 -- --------------------------------------------
 -- ИНДЕКСЫ (только для таблиц этого файла; индексы внешнего отчёта — в src/ddl_external_report.sql)
@@ -806,6 +900,27 @@ WHERE NOT EXISTS (SELECT 1 FROM common_module_sources h
                     AND h.module_type = cs.module_type
                     AND h.revision_no > cs.revision_no);
 
+-- Витрина текущего состояния свойств параметров сеанса (узел V48). Предикат — тот же, что у
+-- витрин V46: строка относится к максимальной ревизии в пределах ключа цепочки
+-- (configuration_uuid, object_name); признак коммита на круг не влияет (решение A1).
+-- `types` и `type_multiplicity` перечислены своими колонками: содержательный запрос «какие
+-- параметры сеанса указывают на объект» идёт по витрине, а не по базовой таблице, и
+-- containment @> по jsonb работает на витрине так же, как на таблице (замер 2.5).
+-- Имя витрины задаёт не этот файл: его отдаёт current_view() по реестру
+-- CONFIGURATION_VERSIONED_TABLES (src/current_revision.py), а расхождение имени ловит
+-- tools/check_v19_revisions.py.
+CREATE OR REPLACE VIEW v_current_session_parameters AS
+SELECT sp.id,
+       sp.configuration_uuid, sp.object_uuid, sp.object_name, sp.full_name,
+       sp.comment, sp.synonym, sp.type_raw, sp.type_multiplicity, sp.type_parse_state,
+       sp.types, sp.type_qualifiers, sp.source_path, sp.created_at,
+       sp.revision_no, sp.changed_at, sp.changed_by, sp.is_committed
+FROM session_parameters sp
+WHERE NOT EXISTS (SELECT 1 FROM session_parameters h
+                  WHERE h.configuration_uuid = sp.configuration_uuid
+                    AND h.object_name = sp.object_name
+                    AND h.revision_no > sp.revision_no);
+
 -- Индексы configuration_objects (узел V33). Перечень объекта читают по конфигурации и по
 -- виду, дочерние элементы — по parent_name, поиск по идентификатору — по object_id/uuid.
 CREATE INDEX IF NOT EXISTS idx_config_objects_config
@@ -870,6 +985,24 @@ CREATE INDEX IF NOT EXISTS idx_common_module_sources_configuration_uuid
     ON common_module_sources(configuration_uuid);
 CREATE INDEX IF NOT EXISTS idx_common_module_sources_object_uuid
     ON common_module_sources(object_uuid);
+
+-- Индексы узла V48 (параметры сеанса). Отдельного индекса по configuration_uuid нет: его
+-- обслуживает уникальный индекс цепочки состояния session_parameters_configuration_object_revision_key
+-- с той же ведущей колонкой — им же пользуются предикат витрины и чистка узла по
+-- configuration_uuid (тот же порядок, что у subsystems/common_modules узла V46 и у
+-- bsl_modules_* узла V44). Индекс по full_name не заводится: у вида full_name совпадает с
+-- object_name (замер 2.2), второй индекс над теми же значениями — только расход места.
+-- Частичный индекс WHERE type_multiplicity = 'composite' создать можно (замер 2.5), но
+-- составных типов 6 файлов из 207 (замер 2.4.3): это фильтр вывода, а не путь поиска.
+CREATE INDEX IF NOT EXISTS idx_session_parameters_object_uuid_revision
+    ON session_parameters(object_uuid, revision_no);
+-- GIN по содержимому types отвечает на вопрос «какие параметры сеанса указывают на
+-- справочник Организации» оператором containment: types @> '[{"target_full_name":
+-- "Catalog.Организации"}]' (замер 2.5: план с Bitmap Index Scan по этому индексу при
+-- выключенном последовательном скане; на 22 строках планировщик сам выбирает Seq Scan, и
+-- по этому выбору о применимости индекса не судят).
+CREATE INDEX IF NOT EXISTS idx_session_parameters_types_gin
+    ON session_parameters USING gin (types jsonb_path_ops);
 
 
 -- --------------------------------------------

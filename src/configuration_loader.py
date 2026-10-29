@@ -88,6 +88,26 @@
   * обогащение (S5) загрузчик не вызывает — отдельный вызов (позиция оператора
     28.10.2026), в `STAGES` этой стадии нет.
 
+Узел V48 (29.10.2026, позиция 2.3 нормативного списка — свойства параметров сеанса): между
+стадиями S4 и S4b конвейер вызывает
+`configuration_session_parameters_loader.load_session_parameters` — свойства вида
+`SessionParameters` пишутся в таблицу `session_parameters` своей транзакцией. Правила узла
+(`docs/CONFIGURATION_SESSION_PARAMETERS_PLAN.md`):
+
+  * стадия отдельная, а не третий вид S4 (решение Q5): ответ лежит в собственном ключе
+    `session_parameters`, а не внутри `child_objects` (правило C3), порядок `STAGES`
+    повторяет порядок нормативного списка (2.3 идёт сразу за 2.1–2.2);
+  * отказ стадии, как у S3/S4, записанный заголовок и индекс состава не отменяет (C5) и
+    называется предупреждением: остановка конвейера по первой ошибке (решение Q8, вариант A)
+    является шагом П8 того же узла;
+  * круг пишется одной транзакцией и только целиком: неразобранный файл круга останавливает
+    стадию ДО записи, чтобы половина круга не читалась как полный состав вида (приём V12/V46);
+  * строки вида снимаются вместе с заголовком явным `DELETE` по `configuration_uuid`
+    (`remove_session_parameters` в `_remove_rows`): внешнего ключа и каскада в схеме нет
+    осознанно (прецедент V20.1);
+  * отдельная точка входа группы есть — `load_session_parameters_tool` того же слоя (шаг П5
+    того же узла): повтор стадии не требует пересоздания конфигурации `force=True`.
+
 
 
 Чтения идут через psycopg2 (`src/external_db.py`), а не psql-подпроцессом: `_run_psql` /
@@ -122,6 +142,16 @@ from configuration_object_properties_loader import (
     load_object_properties,
     remove_object_properties,
 )
+# Узел V48 (стадия S4c, позиция 2.3 списка): свойства параметров сеанса. Точка входа одна —
+# тот же слой, что и отдельный инструмент `load_session_parameters_tool` (шаг П5); контракт
+# стадии и форматёр текста общие
+# (прецедент V45/V46). Снятие строк по uuid заголовка держит этот же слой: внешнего ключа и
+# каскада в схеме нет осознанно (прецедент V20.1), поэтому `_remove_rows` обязан вызвать его
+# явно — иначе force=True оставил бы в базе прежний состав вида.
+from configuration_session_parameters_loader import (
+    load_session_parameters,
+    remove_session_parameters,
+)
 # Узел V47 (стадия S4b): модули объектов конфигурации — вторая транзакция после фиксации
 # содержимого (Q6, граница D7). Точка входа стадии одна и отдельного инструмента у неё нет
 # (Q4.1), поэтому здесь импортируется и ответ «стадия не выполнялась» (`mark_index_unavailable`):
@@ -133,12 +163,28 @@ from configuration_object_modules_loader import (
     object_modules_defaults,
 )
 from configuration_load_contract import (
+    CHILD_OBJECTS_REPEAT_HINT,
     CHILD_SECTION_HEADER,
+    NOT_RUN_STOPPED_REASON,
     OBJECT_MODULES_SECTION_HEADER,
+    ROOT_MODULES_REPEAT_HINT,
     ROOT_MODULES_SECTION_HEADER,
+    SESSION_PARAMETERS_REPEAT_HINT,
+    SESSION_PARAMETERS_SECTION_HEADER,
+    SESSION_PARAMETER_TABLE,
+    STAGE_CHILD_OBJECTS,
+    STAGE_INCOMPLETE_GROUPS,
+    STAGE_OBJECT_MODULES,
+    STAGE_ROOT_MODULES,
+    STAGE_SESSION_PARAMETERS,
     STATUS_ERROR,
+    STATUS_NOT_RUN,
+    build_stopped_stage,
     child_objects_defaults,
     root_modules_defaults,
+    session_parameters_defaults,
+    stage_title,
+    stopped_stage_defaults,
 )
 from external_db import connect, transaction
 # Узел V19, закрытие S2 (18.10.2026): счётчики и перечень внешних объектов читаются из
@@ -403,6 +449,13 @@ def _remove_rows(cur, cfg_id, configuration_uuid=None):
     # в этом пути нет — снимается сама конфигурация целиком (круг задаёт CONTRACT-слой).
     if configuration_uuid:
         children.update(remove_object_properties(cur, configuration_uuid))
+    # Узел V48 (стадия S4c): строки свойств параметров сеанса тоже адресуются uuid заголовка,
+    # а внешнего ключа и каскада в схеме нет осознанно (прецедент V20.1). Значит снятие обязан
+    # выполнить этот же явный DELETE: без него force=True оставил бы в базе строки, которые ни
+    # к какой конфигурации не относятся и не читаются ни одной карточкой (тот же дефект, что у
+    # модулей корня и свойств V46 до соответствующих шагов).
+    if configuration_uuid:
+        children[SESSION_PARAMETER_TABLE] = remove_session_parameters(cur, configuration_uuid)
     cur.execute("DELETE FROM configurations WHERE id = %s", [cfg_id])
     children["configurations"] = cur.rowcount
     return children
@@ -497,6 +550,58 @@ def _objects_table_available():
     if isinstance(rows, dict):
         return False
     return bool(rows and rows[0]["present"])
+
+
+def _written_before_stop_note(new_id, objects_written, header_arrays_filled,
+                              root_modules, child_objects, session_parameters):
+    """Что реально лежит в базе на момент остановки конвейера (узел V48, шаг П8).
+
+    Строка обязана быть: остановка стадии откатом не является (стадии S3+ идут после коммита
+    транзакции заголовка), и `success: false` без неё прочитался бы как «в базе ничего нет».
+    Перечисляется только то, что записано этим вызовом и подтверждено ответом стадии, — не
+    «обычно бывает так», а факт текущего прогона.
+    """
+    parts = [f"заголовок конфигурации id={new_id}"]
+    if objects_written:
+        parts.append(f"индекс состава: {objects_written} записей в {OBJECTS_TABLE}")
+    if header_arrays_filled:
+        parts.append(f"перечни имён объектов состава: {header_arrays_filled} колонок")
+    if root_modules.get("success"):
+        parts.append("модули предопределённых программ корня: "
+                     f"{int(root_modules.get('written') or 0)} строк")
+    if child_objects.get("success"):
+        parts.append("свойства подсистем и общих модулей: "
+                     f"{int(child_objects.get('objects_written') or 0)} объектов")
+    if session_parameters.get("success"):
+        parts.append(f"свойства параметров сеанса: "
+                     f"{int(session_parameters.get('rows_written') or 0)} строк")
+    return "; ".join(parts)
+
+
+def _stage_stop(stage_id, stage_result, written_note, warnings, incomplete_groups):
+    """Остановить конвейер на отказавшей стадии (узел V48, решение Q8 вариант A).
+
+    Делает три вещи и только они отделены от текста самой стадии:
+      1. собирает закрытый ответ `stopped_stage` (адрес стадии, причина, чем продолжить,
+         перечень оставшихся `not_run` стадий) — контракт держит `configuration_load_contract`;
+      2. называет незакрытую группу состава в `incomplete_groups` (машиночитаемый признак
+         неполного состава, прецедент S4b узла V47);
+      3. кладёт строку об остановке: без неё предупреждение стадии читается как частная
+         жалоба, а не как причина, по которой последующие группы не выполнялись.
+
+    Текст причины отказа и подсказку повтора стадия назвала сама — здесь они только
+    пересылаются, второй формулировки об одном отказе в модуле нет.
+    """
+    stopped = build_stopped_stage(stage_id, stage_result, written_note)
+    group = stopped.get("incomplete_group")
+    if group and group not in incomplete_groups:
+        incomplete_groups.append(group)
+    warnings.append(
+        f"Загрузка остановлена на стадии {stage_id} «{stage_title(stage_id)}» "
+        f"(решение Q8, вариант A): {stopped.get('reason')}. "
+        f"{stopped.get('written_before_stop')}"
+    )
+    return stopped
 
 
 def register_configuration(source_path, force=False, xml_path=None):
@@ -746,29 +851,77 @@ def register_configuration(source_path, force=False, xml_path=None):
     # строку (`_require_header` → `find_configuration`). Ключ — uuid, а не id: `force=True`
     # меняет id, uuid остаётся прежним (V44). Если XML передан явно (тестовые фикстуры),
     # слой обязан искать `Ext/` рядом с этим XML, а не рядом с аргументом каталога.
+    #
+    # Узел V48 (шаг П8, решение Q8 вариант A) меняет поведение конвейера при отказе:
+    #   * ответ каждой стадии создаётся ДО вызова — стадия, которую не позвали, обязана
+    #     читаться `not_run` (правило C2), а не отсутствовать в ответе и не нести нули
+    #     выполненной стадии;
+    #   * первая ошибка стадии останавливает конвейер: последующие стадии не вызываются
+    #     вовсе, их ответы остаются на `*_defaults()` со статусом `not_run`;
+    #   * остановка откатом не является — заголовок, индекс состава и перечни вида, а также
+    #     записи выполненных до отказа стадий остаются в базе (граница D7), поэтому ответ
+    #     обязан назвать и остановленную стадию, и то, что сохранилось;
+    #   * `load_incomplete`/`incomplete_groups` — машиночитаемый признак неполного состава
+    #     (прецедент S4b узла V47), `success: false` — признак остановки. Два разных факта,
+    #     два разных ключа ответа: смешивать их нельзя, но при остановке проставляются оба.
     root_source = Path(xml_path).parent if xml_path else source_path
-    try:
-        root_modules = load_root_modules(root_source, configuration_uuid=row["uuid"])
-    except Exception as exc:  # noqa: BLE001 — отказ стадии называется, а не бросается
-        root_modules = root_modules_defaults()
-        root_modules["configuration_id"] = new_id
-        root_modules["configuration_uuid"] = row["uuid"]
-        root_modules["configuration_name"] = row["name"]
-        root_modules["error"] = (
-            f"исключение слоя модулей предопределённых программ: {exc}"
-        )
-    if not root_modules.get("success"):
-        # Заголовок и индекс уже записаны, и отказ стадии их не отменяет — но молчать о
-        # пропавшем после force=True состоянии нельзя (дефект, описанный в docstring V44):
-        # стадия называется прямо, вместе со способом повторить её отдельно.
-        warnings.append(
-            "Модули предопределённых программ корня не загружены — причина названа "
-            "строкой «Стадия не выполнена» в разделе «"
-            + ROOT_MODULES_SECTION_HEADER
-            + "» карточки. Заголовок и индекс состава записаны; повторить стадию "
-            f"отдельно: load_configuration_root_modules_tool(source_path=..., "
-            f"configuration_uuid={row['uuid']})."
-        )
+    root_modules = root_modules_defaults()
+    child_objects = child_objects_defaults()
+    session_parameters = session_parameters_defaults()
+    object_modules = object_modules_defaults()
+    # Узел V48 (шаг П8, правило C2): пропущенная стадия называет причину пропуска. Без неё
+    # форматёр стадии печатает «загрузчик не назвал причину», и читатель карточки видит
+    # «Стадия не выполнена» без объяснения. Статус нулевого ответа S4b приходит из контракта
+    # писателя (`ok`, описывающего результат записи, а не состояние стадии), поэтому статус
+    # пропущенной стадии ставит загрузчик — право назвать состояние стадии принадлежит ему
+    # (тот же приём, что `mark_index_unavailable` узла V47). Причина — в `reason`, а не в
+    # `error`: «не выполнялась» и «отказала после начала работы» различаются именно так.
+    for _empty_stage in (child_objects, session_parameters, object_modules):
+        _empty_stage["reason"] = NOT_RUN_STOPPED_REASON
+    object_modules["status"] = STATUS_NOT_RUN
+    stopped_stage = stopped_stage_defaults()
+    stopped = False
+    load_incomplete = False
+    incomplete_groups = []
+    # Один штамп времени на событие загрузки (M2): строки детей несут то же время, что и
+    # заголовок и строки выполненных стадий, а не время своей транзакции. Штамп ставится до
+    # первой стадии детей, потому что с шагом П8 стадия может и не вызываться — у пропущенной
+    # стадии своего времени загрузки нет.
+    load_moment = datetime.now()
+
+    def _stop_here(stage_id, stage_result):
+        """Остановка на отказавшей стадии с перечнем того, что уже записано."""
+        return _stage_stop(
+            stage_id, stage_result,
+            _written_before_stop_note(new_id, objects_written, header_arrays_filled,
+                                      root_modules, child_objects, session_parameters),
+            warnings, incomplete_groups)
+
+    if not stopped:
+        try:
+            root_modules = load_root_modules(root_source, configuration_uuid=row["uuid"])
+        except Exception as exc:  # noqa: BLE001 — отказ стадии называется, а не бросается
+            root_modules = root_modules_defaults()
+            root_modules["configuration_id"] = new_id
+            root_modules["configuration_uuid"] = row["uuid"]
+            root_modules["configuration_name"] = row["name"]
+            root_modules["error"] = (
+                f"исключение слоя модулей предопределённых программ: {exc}"
+            )
+        if not root_modules.get("success"):
+            # Заголовок и индекс уже записаны, и отказ стадии их не отменяет — но молчать о
+            # пропавшем после force=True состоянии нельзя (дефект, описанный в docstring V44):
+            # стадия называется прямо, вместе со способом повторить её отдельно.
+            warnings.append(
+                "Модули предопределённых программ корня не загружены — причина названа "
+                "строкой «Стадия не выполнена» в разделе «"
+                + ROOT_MODULES_SECTION_HEADER
+                + "» карточки. Чем продолжить: "
+                + f"{ROOT_MODULES_REPEAT_HINT} (configuration_uuid={row['uuid']})."
+            )
+            stopped_stage = _stop_here(STAGE_ROOT_MODULES, root_modules)
+            stopped = True
+            load_incomplete = True
 
     # Узел V46 (стадия S4): свойства дочерних объектов — подсистемы и общие модули.
     # Порядок вызова повторяет стадию V44: ПОСЛЕ коммита транзакции заголовка (соединение
@@ -779,26 +932,71 @@ def register_configuration(source_path, force=False, xml_path=None):
     # 188 МБ на BGU2 и 294 МБ на BP3): S4 отвечает свойства и дескрипторы, содержимое модулей
     # запрашивается явно — `with_module_content=True` у отдельного инструмента. Разница названа
     # и в ответе стадии (строка форматёра про тексты), а не молчанием.
-    try:
-        child_objects = load_object_properties(root_source, configuration_uuid=row["uuid"])
-    except Exception as exc:  # noqa: BLE001 — отказ стадии называется, а не бросается
-        child_objects = child_objects_defaults()
-        child_objects["configuration_id"] = new_id
-        child_objects["configuration_uuid"] = row["uuid"]
-        child_objects["configuration_name"] = row["name"]
-        child_objects["error"] = f"исключение слоя свойств дочерних объектов: {exc}"
-    if not child_objects.get("success"):
-        # Заголовок, индекс и модули корня уже записаны, и отказ этой стадии их не отменяет
-        # (C5). Молчать нельзя по той же причине, что у V44: после force=True прежние строки
-        # сняты, и «загружено» без этой строки читалось бы как полный состав.
-        warnings.append(
-            "Свойства подсистем и общих модулей не загружены — причина названа строкой "
-            "«Стадия не выполнена» в разделе «" + CHILD_SECTION_HEADER
-            + "» карточки. Заголовок, индекс состава и модули предопределённых программ "
-            "записаны; повторить стадию отдельно: "
-            f"load_configuration_object_properties_tool(source_path=..., "
-            f"configuration_uuid={row['uuid']})."
-        )
+    if not stopped:
+        try:
+            child_objects = load_object_properties(
+                root_source, configuration_uuid=row["uuid"])
+        except Exception as exc:  # noqa: BLE001 — отказ стадии называется, а не бросается
+            child_objects = child_objects_defaults()
+            child_objects["configuration_id"] = new_id
+            child_objects["configuration_uuid"] = row["uuid"]
+            child_objects["configuration_name"] = row["name"]
+            child_objects["error"] = f"исключение слоя свойств дочерних объектов: {exc}"
+        if not child_objects.get("success"):
+            # Заголовок, индекс и модули корня уже записаны, и отказ этой стадии их не отменяет
+            # (C5). Молчать нельзя по той же причине, что у V44: после force=True прежние строки
+            # сняты, и «загружено» без этой строки читалось бы как полный состав.
+            warnings.append(
+                "Свойства подсистем и общих модулей не загружены — причина названа строкой "
+                "«Стадия не выполнена» в разделе «" + CHILD_SECTION_HEADER
+                + "» карточки. Чем продолжить: "
+                + f"{CHILD_OBJECTS_REPEAT_HINT} (configuration_uuid={row['uuid']})."
+            )
+            stopped_stage = _stop_here(STAGE_CHILD_OBJECTS, child_objects)
+            stopped = True
+            load_incomplete = True
+
+    # ── узел V48 (стадия S4c, позиция 2.3 списка): свойства параметров сеанса ─────────
+    # Порядок вызова повторяет S3/S4: ПОСЛЕ коммита транзакции заголовка (своим соединением
+    # стадия не увидела бы незакоммиченного заголовка и строк индекса состава), ключ — uuid,
+    # каталог тот же `root_source`. Стадия отдельная, а не третий вид S4 (решение Q5), и
+    # ответ её лежит в собственном ключе `session_parameters` (правило C3); порядок стадий
+    # повторяет порядок нормативного списка (2.3 идёт сразу за 2.1–2.2). Отказ стадии, как у
+    # S3/S4, записанный заголовок не отменяет (C5) — но с шагом П8 того же узла (решение Q8,
+    # вариант A) он останавливает конвейер: S4b после отказа S4c не выполняется и читается
+    # `not_run`, а не нулями.
+    #
+    # Один штамп времени на событие загрузки (M2): строки свойств несут то же время, что и
+    # остальные строки этой загрузки, а не время своей транзакции.
+    if not stopped:
+        try:
+            session_parameters = load_session_parameters(
+                root_source, configuration_uuid=row["uuid"], changed_at=load_moment)
+        except Exception as exc:  # noqa: BLE001 — отказ стадии называется, а не бросается
+            session_parameters = session_parameters_defaults()
+            session_parameters["configuration_id"] = new_id
+            session_parameters["configuration_uuid"] = row["uuid"]
+            session_parameters["configuration_name"] = row["name"]
+            session_parameters["status"] = STATUS_ERROR
+            session_parameters["error"] = (
+                f"исключение слоя свойств параметров сеанса: {exc}")
+            session_parameters["reason"] = session_parameters["error"]
+        for parameter_warning in session_parameters.get("warnings") or []:
+            warnings.append(f"параметры сеанса: {parameter_warning}")
+        if not session_parameters.get("success"):
+            # Заголовок, индекс состава, модули корня и свойства подсистем с общими модулями
+            # уже записаны, и отказ этой стадии их не отменяет (C5). Молчать нельзя по той же
+            # причине, что у V44/V46: после force=True прежние строки сняты, и «загружено» без
+            # этой строки читалось бы как полный состав конфигурации.
+            warnings.append(
+                "Свойства параметров сеанса не загружены — причина названа строкой "
+                "«Стадия не выполнена» в разделе «" + SESSION_PARAMETERS_SECTION_HEADER
+                + "» карточки. Чем продолжить: "
+                + f"{SESSION_PARAMETERS_REPEAT_HINT} (configuration_uuid={row['uuid']})."
+            )
+            stopped_stage = _stop_here(STAGE_SESSION_PARAMETERS, session_parameters)
+            stopped = True
+            load_incomplete = True
 
     # ── узел V47 (стадия S4b): модули объектов конфигурации ────────────────────────────
     # Вторая транзакция ПОСЛЕ фиксации содержимого конфигурации (решение Q6, граница D7
@@ -808,51 +1006,66 @@ def register_configuration(source_path, force=False, xml_path=None):
     # заголовка и строк индекса), ключ — uuid, каталог тот же `root_source`. Флагов нет
     # (решение Q4): стадия выполняется всегда, права «не читать код» у неё нет.
     #
-    # Один штамп времени на событие загрузки (M2): строки модулей несут то же время, что
-    # и остальные строки этой загрузки, а не время своей транзакции.
-    load_moment = datetime.now()
-    load_incomplete = False
-    incomplete_groups = []
-    if index_info is None:
-        # Круг не определён: его задают записи `configuration_objects`, а их этой
-        # загрузкой не создавалось (V33). Стадия НЕ выполнялась (C2) — её нули
-        # читались бы как ответ о конфигурации: «модулей нет» вместо «круг не читался».
-        object_modules = mark_index_unavailable(
-            "ConfigDumpInfo.xml не найден или индекс состава не разобран (узел V33)")
-    else:
-        try:
-            object_modules = load_object_modules(
-                root_source, configuration_uuid=row["uuid"], changed_at=load_moment)
-        except Exception as exc:  # noqa: BLE001 — отказ стадии называется, а не бросается
-            object_modules = object_modules_defaults()
-            object_modules["status"] = STATUS_ERROR
-            object_modules["error"] = (
-                f"исключение слоя модулей объектов конфигурации: {exc}")
-            object_modules["reason"] = object_modules["error"]
-    for module_warning in object_modules.get("warnings") or []:
-        warnings.append(f"модули объектов конфигурации: {module_warning}")
-    if not object_modules.get("success"):
-        # В отличие от S3/S4 такая загрузка не называется полной: атомом полноты
-        # является группа объектов (Q4), и «✅ загружено» без этой строки утверждало бы
-        # состав, которого в базе нет (критерий 8 плана). Отдельного входа для повтора
-        # стадии нет (Q4.1) — требуется полная перезагрузка.
-        load_incomplete = True
-        failed_group = object_modules.get("failed_group")
-        if failed_group and failed_group not in incomplete_groups:
-            incomplete_groups.append(failed_group)
-        warnings.append(
-            "Модули объектов конфигурации не загружены — причина названа строкой "
-            "«Стадия не удалась» в разделе «" + OBJECT_MODULES_SECTION_HEADER
-            + "» карточки"
-            + (f", незакрытая группа объектов: {failed_group}" if failed_group else "")
-            + ". Заголовок, индекс состава, модули предопределённых программ и "
-              "свойства дочерних объектов записаны; повторить стадию отдельно нельзя "
-              "(решение Q4.1) — требуется полная перезагрузка: "
-              "load_1c_catalog_tool(source_path=..., force=True)."
-        )
+    # Штамп времени общий с остальными стадиями этой загрузки (M2) — `load_moment` задан
+    # выше, где начинается событие детей заголовка.
+    #
+    # Узел V48 (шаг П8, решение Q8 вариант A): отказ этой стадии, как и отказ любой другой,
+    # делает итог `success: false`; различие двух состояний сохраняет статус стадии (C2):
+    #   * `error` — круг читался и отказал: это остановка, и она называется ключом
+    #     `stopped_stage` (для S4b продолжения нет, кроме полной перезагрузки, Q4.1);
+    #   * `not_run` — круг не определён (индекс состава не разобран, узел V33): стадии не
+    #     было, останавливать нечего, итог остаётся прежним, но состав помечается неполным.
+    if not stopped:
+        if index_info is None:
+            # Круг не определён: его задают записи `configuration_objects`, а их этой
+            # загрузкой не создавалось (V33). Стадия НЕ выполнялась (C2) — её нули
+            # читались бы как ответ о конфигурации: «модулей нет» вместо «круг не читался».
+            object_modules = mark_index_unavailable(
+                "ConfigDumpInfo.xml не найден или индекс состава не разобран (узел V33)")
+        else:
+            try:
+                object_modules = load_object_modules(
+                    root_source, configuration_uuid=row["uuid"], changed_at=load_moment)
+            except Exception as exc:  # noqa: BLE001 — отказ стадии не бросается, а называется
+                object_modules = object_modules_defaults()
+                object_modules["status"] = STATUS_ERROR
+                object_modules["error"] = (
+                    f"исключение слоя модулей объектов конфигурации: {exc}")
+                object_modules["reason"] = object_modules["error"]
+        for module_warning in object_modules.get("warnings") or []:
+            warnings.append(f"модули объектов конфигурации: {module_warning}")
+        if not object_modules.get("success"):
+            # Атомом полноты является группа объектов (Q4), и «✅ загружено» без этой строки
+            # утверждало бы состав, которого в базе нет (критерий 8 плана) — независимо от
+            # того, отказала стадия или не выполнялась вовсе. Отдельного входа для повтора
+            # стадии нет (Q4.1) — требуется полная перезагрузка.
+            load_incomplete = True
+            failed_group = object_modules.get("failed_group")
+            if failed_group and failed_group not in incomplete_groups:
+                incomplete_groups.append(failed_group)
+            warnings.append(
+                "Модули объектов конфигурации не загружены — причина названа строкой "
+                "«Стадия не удалась» в разделе «" + OBJECT_MODULES_SECTION_HEADER
+                + "» карточки"
+                + (f", незакрытая группа объектов: {failed_group}" if failed_group else "")
+                + ". Заголовок, индекс состава, модули предопределённых программ и "
+                  "свойства дочерних объектов записаны; повторить стадию отдельно нельзя "
+                  "(решение Q4.1) — требуется полная перезагрузка: "
+                  "load_1c_catalog_tool(source_path=..., force=True)."
+            )
+            if object_modules.get("status") == STATUS_ERROR:
+                # Отказ круга — остановка конвейера (Q8). `not_run` остановкой не является:
+                # стадии не было, и её состояние описывает только раздел стадии (C2).
+                stopped_stage = _stop_here(STAGE_OBJECT_MODULES, object_modules)
+                stopped = True
 
     result = {
-        "success": True,
+        # узел V48 (шаг П8, решение Q8 вариант A): итог зависит от отказа стадии. Раньше
+        # `success: True` ставился безусловно после записи заголовка, и отказ любой стадии
+        # детей оставался предупреждением. Теперь первая ошибка стадии даёт `false`; при этом
+        # `load_incomplete`/`incomplete_groups` — отдельный признак неполного состава, а не
+        # копия признака остановки (два разных факта, два разных ключа).
+        "success": not stopped,
         "id": new_id,
         "uuid": row["uuid"],
         "name": row["name"],
@@ -884,6 +1097,11 @@ def register_configuration(source_path, force=False, xml_path=None):
         # узел V46: машинная часть стадии S4 — полная (тот же закрытый контракт, что отдаёт
         # отдельный инструмент); текст раздела даёт общий форматёр контракта.
         "child_objects": child_objects,
+        # узел V48: машинная часть стадии S4c (позиция 2.3 списка) — полная; ответ лежит в
+        # собственном ключе, а не внутри `child_objects` (правило C3, решение Q5). Текст
+        # раздела даёт общий форматёр контракта — тот же, что отдаёт отдельный инструмент
+        # `load_session_parameters_tool` (шаг П5).
+        "session_parameters": session_parameters,
         # узел V47: машинная часть стадии S4b — полная (тот же закрытый контракт, который
         # читают проба П4 и проверка П5); текст раздела даёт общий форматёр контракта.
         # `load_incomplete`/`incomplete_groups` — признак того, что состав в БД неполный
@@ -892,7 +1110,23 @@ def register_configuration(source_path, force=False, xml_path=None):
         "object_modules": object_modules,
         "load_incomplete": load_incomplete,
         "incomplete_groups": incomplete_groups,
+        # узел V48 (шаг П8, решение Q8 вариант A): чем остановлен конвейер. Нулевой словарь
+        # означает «конвейер не останавливался»; ненулевой называет остановленную стадию, её
+        # причину, чем продолжить и что осталось в базе. Последующие стадии при этом не
+        # вызывались вовсе и читаются `not_run` своими ответами (правило C2).
+        "stopped_stage": stopped_stage,
     }
+    if stopped:
+        # Обязательная строка: остановка откатом не является, и `false` без неё читался бы
+        # как «в базе ничего нет» — неправда, заголовок и индекс состава зафиксированы.
+        result["error"] = (
+            f"Загрузка остановлена на стадии {stopped_stage['stage']} "
+            f"«{stopped_stage['title']}»: {stopped_stage['reason']}"
+        )
+        result["hint"] = (
+            f"{stopped_stage['written_before_stop']}. "
+            f"Чем продолжить: {stopped_stage['resume_with']}"
+        )
     if index_info is not None:
         index_counts = index_info.get("counts") or {}
         result["index_counts"] = {

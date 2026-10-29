@@ -41,6 +41,7 @@ from configuration_load_contract import (  # noqa: E402
     OBJECT_MODULES_BOUNDARY,
     OBJECT_MODULES_RELOAD_HINT,
     OBJECT_MODULES_SECTION_HEADER,
+    STAGE_OBJECT_MODULES,
     STATUS_ERROR,
     STATUS_NOT_RUN,
     STATUS_OK,
@@ -483,7 +484,13 @@ def contour_forced_failure(cur, dump_dir: Path, cfg_uuid: str, expected_rows: in
     part = result.get("object_modules") or {}
 
     check("заголовок и прежние стадии зафиксированы (смысл границы D7 не отменён)",
-          result.get("success") is True
+          # Узел V48 (шаг П8, решение Q8 вариант A): отказ стадии больше не оставляет итог
+          # `success: true` — первая ошибка останавливает конвейер и называется ключом
+          # `stopped_stage`. Зафиксированность заголовка, индекса состава и стадий,
+          # выполненных до отказа, от этого не меняется: её называют ответы этих стадий здесь
+          # и счётчики `scope_counts` ниже (строки заголовка и индекса остаются в базе).
+          result.get("success") is False
+          and (result.get("stopped_stage") or {}).get("stage") == STAGE_OBJECT_MODULES
           and (result.get("root_modules") or {}).get("success") is True
           and (result.get("child_objects") or {}).get("success") is True,
           result.get("error"))

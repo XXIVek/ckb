@@ -22,6 +22,16 @@
 Номер S4b, а не S5: S5 остаётся за планируемой стадией анализа (см. ниже), и занятый номер
 заставил бы карточку стадий и план обогащения называть S5 реализованной.
 
+Узел V48 (29.10.2026, решение Q5): между S4 и S4b стоит стадия S4c — свойства параметров
+сеанса (`session_parameters`, позиция 2.3 нормативного списка плана
+`docs/CONFIGURATION_SESSION_PARAMETERS_PLAN.md`). Стадия отдельная, а не третий вид S4,
+потому что правило C3 требует своего ключа ответа (`session_parameters`), а не разбивки чужого
+ключа по видам; порядок `STAGES` при этом повторяет порядок нормативного списка. Отказ стадии
+S4c повторяет поведение S3/S4: он не отменяет записанный заголовок и называется
+предупреждением; остановка конвейера по первой ошибке (решение Q8, вариант A) — шаг П8 того
+же узла. Отдельная точка входа группы есть — `load_session_parameters_tool` (шаг П5 того же
+узла, реестр сервера — шесть инструментов): повтор стадии не требует перезагрузки конфигурации.
+
 Запланированная S5 (дополнение оператора 23.10.2026 — НЕ реализована, в `STAGES` её нет): анализ
 загруженной конфигурации по уже сохранённым строкам БД, построение необходимых сниппетов по
 объектам и при необходимости перекрёстных ссылок на документацию (`config_*`, контракт V17).
@@ -77,6 +87,19 @@ from configuration_root_modules import (
     TABLES,
     TITLE_BY_KIND,
 )
+# Узел V48 (стадия S4c, позиция 2.3 списка): словарь состояний и имя таблицы задаёт разбор
+# вида (src/configuration_session_parameters.py), а не этот модуль — нулевой контракт стадии,
+# сводка разбора и проверка узла (П6) обязаны называть один и тот же круг. Разбор ничего из
+# этого контракта не импортирует, поэтому цикл здесь односторонний (тот же порядок, что у
+# импорта CONTENT_STATES у V46 выше).
+from configuration_session_parameters import (
+    DIR_NAME as SESSION_PARAMETER_DIR,
+    MULTIPLICITY_VALUES,
+    OBJECT_KIND_TAG as SESSION_PARAMETER_META_TAG,
+    RECORD_STATES,
+    TABLE_NAME as SESSION_PARAMETER_TABLE,
+    TYPE_CLASS_VALUES,
+)
 from current_revision import CONFIGURATION_VERSIONED_TABLES
 
 # ── стадии конвейера: один перечень на контракт, карточку и проверку ───────────────
@@ -84,6 +107,13 @@ STAGE_LAYOUT = "s1_layout"
 STAGE_HEADER = "s2_header"
 STAGE_ROOT_MODULES = "s3_root_modules"
 STAGE_CHILD_OBJECTS = "s4_child_objects"
+# Узел V48 (29.10.2026, решение Q5): свойства параметров сеанса — отдельная стадия, а не
+# третий вид стадии S4. Порядок `STAGES` повторяет порядок нормативного списка
+# (docs/CONFIGURATION_SESSION_PARAMETERS_PLAN.md, раздел 2.9): позиция 2.3 идёт сразу за
+# 2.1–2.2, то есть между S4 и S4b; существующие стадии не перенумеровываются. Отдельная
+# стадия нужна потому, что правило C3 требует своего ключа ответа: разбивать содержимое
+# чужого ключа `child_objects` по видам значило бы переименовывать контракт V46.
+STAGE_SESSION_PARAMETERS = "s4c_session_parameters"
 # Узел V47 (28.10.2026): тексты модулей объектов конфигурации. Номер S4b, а не S5:
 # S5 остаётся за планируемой стадией анализа (дополнение оператора 23.10.2026), которой
 # в `STAGES` нет. Стадия идёт сразу за S4 и является второй транзакцией загрузки (Q6,
@@ -96,6 +126,7 @@ STAGES: Tuple[Tuple[str, str], ...] = (
     (STAGE_HEADER, "Запись заголовка: свойства, перечни состава, индекс состава"),
     (STAGE_ROOT_MODULES, "Модули предопределённых программ корня"),
     (STAGE_CHILD_OBJECTS, "Содержимое дочерних объектов конфигурации"),
+    (STAGE_SESSION_PARAMETERS, "Свойства параметров сеанса (SessionParameters, позиция 2.3)"),
     (STAGE_OBJECT_MODULES, "Модули объектов конфигурации (тексты Ext/, вторая транзакция)"),
 )
 
@@ -103,6 +134,242 @@ STATUS_NOT_RUN = "not_run"
 STATUS_OK = "ok"
 STATUS_SKIPPED = "skipped"
 STATUS_ERROR = "error"
+
+# ── узел V48 (стадия S4c, позиция 2.3 нормативного списка) ─────────────────────────
+# Заголовок раздела, подсказка о повторе и граница круга объявлены ДО `CHILD_NOT_IMPLEMENTED`:
+# текст незакрытой части ссылается на раздел, где читается отказ стадии, и повторять этот
+# заголовок текстом значило бы держать два написания одного заголовка — по той же причине,
+# по которой у V45 и V46 форматёр раздела один на карточку и на отдельный инструмент.
+# Имя таблицы и словари состояний приходят импортом из разбора вида (см. начало модуля) —
+# второго перечня таблицы или состояний в проекте нет.
+SESSION_PARAMETERS_SECTION_HEADER = "СВОЙСТВА ПАРАМЕТРОВ СЕАНСА (узел V48, позиция 2.3)"
+
+# Что обязан сказать ответ о повторе стадии. Отдельная точка входа группы —
+# `load_session_parameters_tool` (шаг П5 узла, тот же слой, что стадия — прецедент V44/V46);
+# ответ обязан называть, чем именно повтор делать можно, а не обещать инструмент, которого в
+# реестре нет: строка меняется одним местом, когда состав реестра меняется (проверка
+# `tools/check_mcp_tool_wiring.py`).
+SESSION_PARAMETERS_REPEAT_HINT = (
+    "Повторить стадию можно отдельным входом группы "
+    "load_session_parameters_tool(source_path=…) без перезагрузки конфигурации "
+    "(узел V48, шаг П5) либо полной перезагрузкой "
+    "load_1c_catalog_tool(source_path=…, force=True)"
+)
+
+# Граница круга называется и при успехе: «строки свойств записаны» не равно «о виде больше
+# ничего нет». Формулировка держится замеров раздела 2 плана — без неё пустой тип читался бы
+# как «типа нет в выгрузке», а не как «разбор его не распознал».
+SESSION_PARAMETERS_BOUNDARY = (
+    f"круг узла — файлы регистрации вида {SESSION_PARAMETER_META_TAG} из каталога "
+    f"{SESSION_PARAMETER_DIR}/ (позиция 2.3 списка): сохраняются имя, синоним, комментарий "
+    "и блок Type в закрытом словаре записей (`types`, `type_qualifiers`); подкаталогов, "
+    "форм, макетов и модулей у вида нет (замер 2.2), поэтому строка одна на файл. "
+    "DefinedTypes в выгрузке нет (замер 2.4.4): значение `cfg:DefinedType.*` остаётся "
+    "записью класса `defined_type_ref` без ключей цели — узла загрузки определённых типов "
+    "нет. Строка в таблице есть только там, где файл разобран: `absent`, `partial` и "
+    "`unknown_form` называются ответом стадии, а не строкой с пустым типом — ограничение "
+    "`type_parse_state = 'parsed' ⇒ types <> '[]'` (узел П1) не даёт пустому типу "
+    "притвориться разобранным"
+)
+
+
+# ── остановка конвейера по отказу стадии (узел V48, шаг П8, решение Q8 вариант A) ────
+#
+# Норматив: первая ошибка стадии останавливает конвейер, ответ получает `success: false` с
+# названием остановленной стадии, последующие стадии не выполняются и читаются `not_run`
+# (правило C2). Механизм остановки в загрузчике существовал и раньше — только для слоя
+# заголовка (отказ разбора индекса состава даёт `return`); решение Q8 распространило его на
+# стадии детей. Перечень стадий, их подсказки продолжения и незакрытые группы лежат здесь,
+# одним местом: загрузчик, карточка `load_1c_catalog_tool` и проверка узла читают один и тот
+# же словарь (прецедент V45/V46/V47 — два текста об одном отказе разъезжаются).
+#
+# Отдельного входа для дозагрузки нет только у S4b (решение Q4.1 узла V47) — об этом говорит
+# `full_reload_required`, а не догадка читающего. Строка «что осталось в базе» обязательна:
+# стадии S3+ идут ПОСЛЕ коммита транзакции заголовка, поэтому остановка не является откатом,
+# и `success: false` без неё прочитался бы как «в базе ничего нет».
+
+ROOT_MODULES_REPEAT_HINT = (
+    "повторить стадию можно отдельным входом группы "
+    "load_configuration_root_modules_tool(source_path=…, configuration_uuid=…) без "
+    "перезагрузки конфигурации (узел V45) либо полной перезагрузкой "
+    "load_1c_catalog_tool(source_path=…, force=True)"
+)
+
+CHILD_OBJECTS_REPEAT_HINT = (
+    "повторить стадию можно отдельным входом группы "
+    "load_configuration_object_properties_tool(source_path=…, configuration_uuid=…) без "
+    "перезагрузки конфигурации (узел V46) либо полной перезагрузкой "
+    "load_1c_catalog_tool(source_path=…, force=True)"
+)
+
+# Чем продолжить загрузку после остановки на каждой стадии — функция `stage_resume_hint`
+# ниже. Словарем на уровне модуля этот перечень не объявить: подсказка S4b живёт в тексте
+# стадии V47 (её читает форматёр `format_object_module_lines`), а обращение к ней происходит
+# уже во время работы загрузки — так держится один текст об одном действии, а не два.
+
+# Отдельного входа дозагрузки нет у одной стадии — S4b (решение Q4.1). `True` означает
+# «продолжить можно только полной перезагрузкой конфигурации».
+STAGE_FULL_RELOAD_ONLY: Dict[str, bool] = {
+    STAGE_ROOT_MODULES: False,
+    STAGE_CHILD_OBJECTS: False,
+    STAGE_SESSION_PARAMETERS: False,
+    STAGE_OBJECT_MODULES: True,
+}
+
+# Незакрытая группа состава, которую называет `incomplete_groups` при остановке на стадии.
+# Для S4b группу называет ответ стадии (`failed_group` — конкретный вид объектов), поэтому
+# словарь даёт только общее имя на случай, когда вид не назван.
+STAGE_INCOMPLETE_GROUPS: Dict[str, str] = {
+    STAGE_ROOT_MODULES: "модули предопределённых программ корня (группа C модели V38)",
+    STAGE_CHILD_OBJECTS: "свойства подсистем и общих модулей (часть групп B и E модели V38)",
+    STAGE_SESSION_PARAMETERS: "свойства параметров сеанса (позиция 2.3 нормативного списка)",
+    STAGE_OBJECT_MODULES: "модули объектов конфигурации (группа C модели V38, Ext/)",
+}
+
+# Обязательная строка ответа: остановка откатом не является. Заполняется загрузчиком по
+# факту выполненного — здесь каркас фразы, чтобы формулировка была одна.
+STOPPED_STAGE_WRITTEN_TEMPLATE = (
+    "в базе остались: {written}; состав детей неполон — остановка не является откатом "
+    "(стадии S3+ выполняются после фиксации заголовка и индекса состава, граница D7)"
+)
+
+STOPPED_STAGE_KEYS: Tuple[str, ...] = (
+    "stage", "title", "status", "reason", "failed_group", "failed_record",
+    "resume_with", "full_reload_required", "not_run_stages", "written_before_stop",
+    "incomplete_group",
+)
+
+STOP_STAGE_SECTION_HEADER = ("ЗАГРУЗКА ОСТАНОВЛЕНА ПО ОТКАЗУ СТАДИИ "
+                            "(узел V48, решение Q8 вариант A)")
+
+# Причина, которую получает стадия, не вызванная конвейером (правило C2). Смысл отдельной
+# строки: нулевой ответ стадии S4b несёт статус писателя (`ok`, потому что писатель описывает
+# результат записи, а не состояние стадии), и без этой причины пропущенная стадия
+# читалась бы как «модулей объектов в конфигурации нет», а не как «стадия не выполнялась».
+NOT_RUN_STOPPED_REASON = ("стадия не вызывалась: конвейер остановлен на более ранней стадии "
+                          "(решение Q8, вариант A) — «не выполнялась» читается статусом, "
+                          "а не нулями выполненной стадии (правило C2)")
+
+
+def stage_title(stage_id: str) -> str:
+    """Название стадии по её адресу из `STAGES` (один перечень на весь слой)."""
+    for stage, title in STAGES:
+        if stage == stage_id:
+            return title
+    return stage_id
+
+
+def stages_after(stage_id: str) -> List[str]:
+    """Адресы стадий, идущих после указанной, в порядке `STAGES`.
+
+    Порядок перечня стадий = порядок нормативного списка (раздел 2.9 плана V48): остановка
+    имеет смысл только при совпадении порядка, иначе она пропускает группы, стоящие раньше
+    ошибки. Поэтому «что не выполнялось» считается из `STAGES`, а не дописывается вручную там,
+    где добавили новую стадию.
+    """
+    ids = [stage for stage, _ in STAGES]
+    if stage_id not in ids:
+        return []
+    return ids[ids.index(stage_id) + 1:]
+
+
+def stage_resume_hint(stage_id: str) -> str:
+    """Чем продолжить загрузку, остановленную на стадии `stage_id`.
+
+    Подсказки берутся из текстов стадий, а не переписываются: S3 и S4 имеют отдельные входы
+    групп (узлы V45, V46), S4c — свой вход (шаг П5 того же узла), S4b — не имеет (решение
+    Q4.1). Стадия без подсказки была бы ошибкой контракта, поэтому ответ по умолчанию —
+    полная перезагрузка, а не пустая строка.
+    """
+    if stage_id == STAGE_ROOT_MODULES:
+        return ROOT_MODULES_REPEAT_HINT
+    if stage_id == STAGE_CHILD_OBJECTS:
+        return CHILD_OBJECTS_REPEAT_HINT
+    if stage_id == STAGE_SESSION_PARAMETERS:
+        return SESSION_PARAMETERS_REPEAT_HINT
+    if stage_id == STAGE_OBJECT_MODULES:
+        return OBJECT_MODULES_RELOAD_HINT
+    return "полная перезагрузка load_1c_catalog_tool(source_path=…, force=True)"
+
+
+def stopped_stage_defaults() -> Dict[str, Any]:
+    """Закрытый словарь остановки с нулями (C1).
+
+    Пустой (нулевой по всем ключам) словарь означает «конвейер не останавливался». Ненулевой
+    `stage` — признак остановки, и он обязан называть остановленную стадию, причину, чем
+    продолжить и что осталось в базе (решение Q8).
+    """
+    return {key: ([] if key == "not_run_stages" else
+                  (False if key == "full_reload_required" else None))
+            for key in STOPPED_STAGE_KEYS}
+
+
+def build_stopped_stage(stage_id: str, stage_result: Dict[str, Any],
+                       written_before_stop: str) -> Dict[str, Any]:
+    """Собрать ответ об остановке по закрытому контракту (C1, C3).
+
+    `stage_result` — ответ отказавшей стадии: из него берутся причина и, если стадия их
+    назвала, незакрытая группа и запись (`failed_group`/`failed_record` у S4b). Ничего не
+    выдумывается: не названо — остаётся `None`, и форматёр скажет об этом прямо.
+    """
+    stage_result = stage_result or {}
+    stopped = stopped_stage_defaults()
+    stopped["stage"] = stage_id
+    stopped["title"] = stage_title(stage_id)
+    stopped["status"] = STATUS_ERROR
+    stopped["reason"] = (stage_result.get("error") or stage_result.get("reason")
+                        or "загрузчик не назвал причину")
+    stopped["failed_group"] = stage_result.get("failed_group")
+    stopped["failed_record"] = stage_result.get("failed_record")
+    stopped["incomplete_group"] = (stage_result.get("failed_group")
+                                  or STAGE_INCOMPLETE_GROUPS.get(stage_id))
+    stopped["resume_with"] = stage_resume_hint(stage_id)
+    stopped["full_reload_required"] = bool(STAGE_FULL_RELOAD_ONLY.get(stage_id, False))
+    stopped["not_run_stages"] = [{"stage": stage, "title": stage_title(stage),
+                                  "status": STATUS_NOT_RUN}
+                                 for stage in stages_after(stage_id)]
+    stopped["written_before_stop"] = STOPPED_STAGE_WRITTEN_TEMPLATE.format(
+        written=written_before_stop or "заголовок конфигурации")
+    return stopped
+
+
+def format_stopped_stage_lines(result: Dict[str, Any],
+                               indent: str = "") -> List[str]:
+    """Текст раздела об остановке конвейера (решение Q8, вариант A).
+
+    Форматёр один — карточный: отдельного инструмента с этим текстом нет, остановку описывает
+    ответ конвейера. Раздел обязан назвать и то, чего в базе НЕ стало (`not_run` последующих
+    стадий, правило C2), и то, что в базе ОСТАЛОСЬ (заголовок, индекс состава, перечни вида,
+    записи выполненных до отказа стадий) — иначе `false` прочитался бы как пустая база.
+    """
+    lines: List[str] = []
+    if not result or not result.get("stage"):
+        return lines
+    lines.append(
+        f"{indent}Остановлено на стадии: {result.get('stage')} — {result.get('title')}"
+    )
+    lines.append(f"{indent}Причина отказа: {result.get('reason')}")
+    group = result.get("failed_group")
+    if group:
+        record = result.get("failed_record")
+        lines.append(
+            f"{indent}Незакрытая группа состава: {group}"
+            + (f" (запись: {record})" if record else "")
+        )
+    lines.append(f"{indent}Что осталось в базе: {result.get('written_before_stop')}")
+    lines.append(f"{indent}Чем продолжить: {result.get('resume_with')}")
+    if result.get("full_reload_required"):
+        lines.append(
+            f"{indent}Отдельного входа дозагрузки этой стадии нет (решение Q4.1) — "
+            "продолжить можно только полной перезагрузкой конфигурации"
+        )
+    for item in result.get("not_run_stages") or []:
+        lines.append(
+            f"{indent}Стадия не выполнялась: {item.get('stage')} — {item.get('title')} "
+            f"(статус {STATUS_NOT_RUN}: «не выполнялась» читается статусом, а не нулями — C2)"
+        )
+    return lines
+
 
 # Что из содержимого дочерних объектов стадия S4 НЕ загружает (узлы V38 и V46). С узла V46
 # стадия реализована частично: свойства подсистем, их ссылки `Content`, свойства
@@ -114,9 +381,19 @@ STATUS_ERROR = "error"
 # назвать: сказать «конфигурация загружена целиком», когда реквизитов и форм объектов нет,
 # значило бы соврать (решение оператора 22.10.2026 о том, что заглушка не является ни
 # ошибкой, ни успехом, сохраняется для неотзакрытой части).
+#
+# Узел V48 (шаг П4, решение Q5): свойства параметров сеанса закрывает отдельная стадия S4c,
+# а не третий вид S4, поэтому в этом тексте параметры сеанса из незакрытой части убраны.
+# Круг `CHILD_KINDS` при этом не расширяется (план
+# docs/CONFIGURATION_SESSION_PARAMETERS_PLAN.md, раздел 5): карточка слоя не вправе обещать
+# то, чего у вида `load_configuration_object_properties_tool` нет. Круг `CHILD_TABLES`
+# сужен до таблиц самой стадии V46 — см. комментарий у его определения: таблица V48
+# относится стадии S4c и в ответе S4 перечисляться не должна.
 CHILD_NOT_IMPLEMENTED = (
     "содержимое дочерних объектов загружено частично: закрыты свойства подсистем и общих "
-    "модулей (узел V46, по модели V38 — часть групп B и E) и тексты модулей объектов "
+    "модулей (узел V46, по модели V38 — часть групп B и E), свойства параметров сеанса — "
+    "позиция 2.3 нормативного списка (узел V48, стадия S4c, раздел «"
+    + SESSION_PARAMETERS_SECTION_HEADER + "» ниже) и тексты модулей объектов "
     "конфигурации — шесть слотов Ext/ (узел V47, стадия S4b, раздел «"
     "МОДУЛИ ОБЪЕКТОВ КОНФИГУРАЦИИ» ниже); не реализованы реквизиты и "
     "табличные части объектов "
@@ -178,8 +455,16 @@ def root_modules_defaults() -> Dict[str, Any]:
     }
 
 
-def child_objects_defaults() -> Dict[str, Any]:
-    return {"status": STATUS_NOT_RUN, "reason": None, "objects_written": 0, "tables": []}
+# Мёртвое определение `child_objects_defaults()` (прежний облик V45: четыре ключа `status`,
+# `reason`, `objects_written`, `tables`) удалено узлом V48, шаг П8 (позиция O9 плана,
+# раздел 5). Живым было единственное определение ниже — закрытый контракт стадии S4 узла V46,
+# и именно оно перекрывало это: Python оставляет последнее объявление. Безвредный для
+# работающего кода дубль неприемлем здесь: функция задаёт состояние «стадия не выполнялась»
+# (`not_run`), а на нём стоит остановка конвейера по решению Q8 — два облика одного
+# состояния в модуле контракта значили бы два разных ответа на один вопрос. Проверяется
+# отсутствием второго `FunctionDef` с этим именем — `_v48_q8_contract_probe.py`, критерий 6б
+# плана `docs/CONFIGURATION_SESSION_PARAMETERS_PLAN.md`.
+
 
 
 # ── текст стадии S3: один форматёр на карточку и на отдельный инструмент ────────────
@@ -253,7 +538,25 @@ def format_root_modules_lines(result: Dict[str, Any],
 # Круг таблиц стадии задаёт тот же перечень, что и круг версионных таблиц конфигурации
 # (`src/current_revision.py`): отдельного списка здесь заводить нельзя — круг разъехался бы
 # с кругом версионности, и ровно так появился D11 (круг задаёт признак версии, а не список).
-CHILD_TABLES: Tuple[str, ...] = CONFIGURATION_VERSIONED_TABLES
+#
+# Узел V48 (шаг П4, проба `_v48_p4_loader_probe.py`, замер 29.10.2026): круг был буквально
+# равен `CONFIGURATION_VERSIONED_TABLES`, и это совпадало только пока версионируемых таблиц
+# конфигурации было ровно четыре и все они принадлежали стадии S4. Регистрация таблицы
+# `session_parameters` (узел П1) молча добавила к кругу пятую таблицу: стадия S4 начала
+# снимать и анализировать чужую таблицу (`remove_object_properties` и
+# `refresh_table_statistics` вызываются кругом по умолчанию), а её ответ перечислял бы
+# `session_parameters` в ключе `tables` — то есть обещать содержимое, которого у видов V46
+# нет, прямо противореча решению Q5.
+#
+# Источник круга остаётся один — `CONFIGURATION_VERSIONED_TABLES`; каждая стадия называет
+# СВОИ таблицы своей константой, а чужой круг = источник минус чужие стадии. Стадия, которая
+# не объявит свои таблицы, попадёт в круг S4 — и проверка П4 это ловит строкой «круг стадии
+# S4 не тронут».
+SESSION_PARAMETER_TABLES: Tuple[str, ...] = (SESSION_PARAMETER_TABLE,)
+CHILD_TABLES: Tuple[str, ...] = tuple(
+    table for table in CONFIGURATION_VERSIONED_TABLES
+    if table not in SESSION_PARAMETER_TABLES
+)
 CHILD_KINDS: Tuple[str, ...] = (KIND_SUBSYSTEMS, KIND_COMMON_MODULES)
 CHILD_KIND_TITLES: Dict[str, str] = {
     KIND_SUBSYSTEMS: "Подсистемы",
@@ -615,6 +918,194 @@ def format_object_module_lines(result: Dict[str, Any],
     for warning in result.get("warnings") or []:
         lines.append(f"{indent}⚠️ {warning}")
     lines.append(f"{indent}Граница: {OBJECT_MODULES_BOUNDARY}")
+    return lines
+
+
+# ── контракт стадии S4c (узел V48, шаг П4, позиция 2.3 списка) ───────────────────
+
+def session_parameters_defaults() -> Dict[str, Any]:
+    """Закрытый контракт стадии S4c с нулями (C1, C2, C3).
+
+    Словарь плоский — тот же, что возвращает слой `load_session_parameters`; конвейер
+    вкладывает его в свой ключ `session_parameters` без переименования (C3). `status`
+    различает «стадия не выполнялась» (`not_run`, C2) и «выполнилась с отказом» (`error`):
+    нули без статуса слили бы эти два факта в одно — иерархии состояний у вида нет, но
+    классы расхождений те же, что у V46 и V47.
+
+    Что обязан назвать ответ отдельно (план, раздел 5):
+
+    * `counts_by_state` по типам — «тип не разобран» читается фактом, а не нулём строки;
+    * `types_multiplicity` — распределение `single`/`composite`/`absent`: кратность есть
+      свойство модели 1С (определение оператора Q4), а не исключение данных;
+    * `types_unresolved_total` и примеры — число записей с `resolved = false`: ненулевое
+      значение это данные или новое правило перехода, а не молчаливый NULL;
+    * `index_only` / `file_only` — записей индекса без файла и файлов без индекса:
+      замер 2.2 даёт нули, и нули обязаны быть названы, а не подразумеваны;
+    * `unknown_properties` — предупреждение о свойстве вне словаря (приём V43 про «виды
+      без колонки» и V46 про имена вне словаря): молча пропущенное свойство отличалось бы
+      от «такого свойства в выгрузке нет».
+    """
+    return {
+        "status": STATUS_NOT_RUN,
+        "success": False,
+        "error": None,
+        "reason": None,
+        "stage": STAGE_SESSION_PARAMETERS,
+        "configuration_id": None,
+        "configuration_uuid": None,
+        "configuration_name": None,
+        "tables": [SESSION_PARAMETER_TABLE],
+        "directory": SESSION_PARAMETER_DIR,
+        "files_found": 0,
+        "files_read": 0,
+        "files_failed": [],
+        "rows_written": 0,
+        "removed_previous": 0,
+        "index_available": False,
+        "index_records": 0,
+        "index_only": [],
+        "file_only": [],
+        "uuid_mismatch": [],
+        "counts_by_state": {state: 0 for state in RECORD_STATES},
+        "types_total": 0,
+        "types_resolved": 0,
+        "types_unresolved_total": 0,
+        "types_unresolved": [],
+        "types_multiplicity": {mult: 0 for mult in MULTIPLICITY_VALUES},
+        "types_by_class": {kind: 0 for kind in TYPE_CLASS_VALUES},
+        "unknown_properties": {},
+        "unexpected_tags": {},
+        "value_tag_mismatch": [],
+        "namespace_prefixes": [],
+        "observations": [],
+        "statistics_refreshed": 0,
+        "warnings": [],
+    }
+
+
+def format_session_parameters_lines(result: Dict[str, Any],
+                                    indent: str = "") -> List[str]:
+    """Текст стадии S4c по закрытому контракту `session_parameters_defaults()` (C1, C3).
+
+    Формат один для двух контуров: раздела карточки `load_1c_catalog_tool` и ответа
+    отдельного инструмента, который заводит шаг П5 (прецедент V45/V46). Отказ форматёр
+    называет сам («Стадия не выполнена» / «Стадия не удалась»), вызывающий причину не
+    повторяет. Граница круга печатается и при успехе: «строки свойств записаны» не равно
+    «о виде всё сохранено», а пустой тип без этой строки читался бы как «типа нет».
+    Неперечисленные ключи читаются нулями (C1).
+    """
+    lines: List[str] = []
+    if not result:
+        return lines
+
+    if not result.get("success"):
+        reason = result.get("error") or result.get("reason") or "загрузчик не назвал причину"
+        prefix = ("Стадия не выполнена" if result.get("status") in (None, STATUS_NOT_RUN)
+                  else "Стадия не удалась")
+        lines.append(f"{indent}{prefix}: {reason}")
+        lines.append(f"{indent}{SESSION_PARAMETERS_REPEAT_HINT}")
+        for warning in result.get("warnings") or []:
+            lines.append(f"{indent}⚠️ {warning}")
+        return lines
+
+    removed = int(result.get("removed_previous") or 0)
+    lines.append(
+        f"{indent}Записано строк свойств ({SESSION_PARAMETER_TABLE}): "
+        f"{int(result.get('rows_written') or 0)}; файлов разобрано "
+        f"{int(result.get('files_read') or 0)} из {int(result.get('files_found') or 0)} "
+        f"(каталог {result.get('directory') or SESSION_PARAMETER_DIR}/)"
+        + (f"; снято прежних строк: {removed}" if removed else "; прежних строк не снималось")
+    )
+
+    counts_by_state = result.get("counts_by_state") or {}
+    lines.append(
+        f"{indent}Состояния разбора типа: "
+        + ", ".join(f"{state}={int(counts_by_state.get(state) or 0)}"
+                    for state in RECORD_STATES)
+        + " — «блока Type нет» (absent), «блок есть, но форма не распознана» (unknown_form) "
+          "и «разобран частично» (partial) различаются ответом стадии, а не пустой строкой"
+    )
+    multiplicity = result.get("types_multiplicity") or {}
+    lines.append(
+        f"{indent}Кратность значений типа: "
+        + ", ".join(f"{mult}={int(multiplicity.get(mult) or 0)}"
+                    for mult in MULTIPLICITY_VALUES)
+        + " — кратность называется числом, потому что это свойство модели 1С (определение "
+          "оператора Q4), а не исключение данных"
+    )
+
+    classes = result.get("types_by_class") or {}
+    lines.append(
+        f"{indent}Записей значений типа: {int(result.get('types_total') or 0)}; классы: "
+        + ", ".join(f"{kind}={int(classes.get(kind) or 0)}" for kind in TYPE_CLASS_VALUES)
+        + f"; ссылок разрешено {int(result.get('types_resolved') or 0)}, неразрешено "
+          f"{int(result.get('types_unresolved_total') or 0)} (остаются записями без ключей "
+          "цели, а не молчанием — приём D3)"
+    )
+    for sample in (result.get("types_unresolved") or [])[:10]:
+        lines.append(
+            f"{indent}  ⚠️ неразрешённая ссылка: {sample.get('value')} — "
+            f"{sample.get('reason')}"
+            + (f" (индексное имя {sample.get('index_name')})"
+               if sample.get("index_name") else "")
+        )
+
+    if not result.get("index_available"):
+        lines.append(
+            f"{indent}  Индекс состава не читается — сверка файла регистрации с перечнем "
+            "невозможна, и «объекта нет в перечне» от «перечень этой конфигурации не "
+            "загружен» этим не отличить"
+        )
+    else:
+        index_only = result.get("index_only") or []
+        file_only = result.get("file_only") or []
+        uuid_mismatch = result.get("uuid_mismatch") or []
+        lines.append(
+            f"{indent}Сверка с индексом состава: записей вида "
+            f"{int(result.get('index_records') or 0)}; записей перечня без файла "
+            f"{len(index_only)}, файлов без записи перечня {len(file_only)}, несовпадений "
+            "uuid "
+            f"{len(uuid_mismatch)} — нули названы числом, потому что замер 2.2 даёт именно "
+            "нули, а подразумевать их нельзя"
+        )
+        for name in index_only[:10]:
+            lines.append(f"{indent}  ⚠️ запись индекса без файла регистрации: {name}")
+        for name in file_only[:10]:
+            lines.append(f"{indent}  ⚠️ файл регистрации без записи индекса: {name}")
+        for item in uuid_mismatch[:10]:
+            lines.append(
+                f"{indent}  ⚠️ uuid файла {item.get('file_uuid')} не совпадает с uuid "
+                f"индекса {item.get('index_uuid')} ({item.get('source_path')})"
+            )
+
+    for name, count in sorted((result.get("unknown_properties") or {}).items()):
+        lines.append(
+            f"{indent}  ⚠️ свойство вне словаря разбора: {name} ({count}) — сохранение "
+            "такого свойства требует колонки и решения, молча оно не отбрасывается"
+        )
+    for tag, count in sorted((result.get("unexpected_tags") or {}).items()):
+        lines.append(f"{indent}  ⚠️ незнакомый тег блока Type: {tag} ({count})")
+    for item in (result.get("value_tag_mismatch") or [])[:10]:
+        lines.append(
+            f"{indent}  ⚠️ число тегов значения ({item.get('tags')}) не совпало с числом "
+            f"записей ({item.get('entries')}): {item.get('source_path')}"
+        )
+    for observation in (result.get("observations") or [])[:10]:
+        lines.append(f"{indent}  ⚠️ круг каталога: {observation[0]} — {observation[1]}")
+    for failure in (result.get("files_failed") or [])[:10]:
+        lines.append(f"{indent}  ⚠️ файл не разобран: {failure.get('source_path')} — "
+                     f"{failure.get('reason')}")
+
+    refreshed = int(result.get("statistics_refreshed") or 0)
+    if refreshed:
+        lines.append(
+            f"{indent}Статистика таблицы {SESSION_PARAMETER_TABLE} пересобрана (ANALYZE): "
+            f"{refreshed} — без неё читатели витрин текущего состояния платят минутами "
+            "(мера V46)"
+        )
+    for warning in result.get("warnings") or []:
+        lines.append(f"{indent}⚠️ {warning}")
+    lines.append(f"{indent}Граница: {SESSION_PARAMETERS_BOUNDARY}")
     return lines
 
 
