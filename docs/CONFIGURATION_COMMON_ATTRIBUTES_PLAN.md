@@ -266,6 +266,31 @@
 из замера. Рекомендуемый вариант помечен «⟶ рекомендуется» и не считается принятым, пока не назван
 оператором.
 
+**Принято 30.10.2026.** Оператор подтвердил Q0 (номер узла и все имена: стадия
+`s4e_common_attributes`, таблицы `common_attributes` + `common_attribute_targets`, модуль
+`src/configuration_common_attributes.py`, инструмент `load_common_attributes_tool`, проверка
+`tools/check_v50_common_attributes.py`) и указал приступить к реализации, то есть принять
+рекомендованные варианты Q1…Q10 (вариант A везде). Два отступления от эскиза раздела 4, которые
+обязаны быть названы здесь, а не в комментариях постфактум:
+
+- **Q2, форма ключа применения.** Эскиз предлагал `UNIQUE (configuration_uuid,
+  attribute_object_uuid, revision_no, ordinal)` (форма `subsystem_content` V46). Принята форма
+  `UNIQUE (common_attribute_id, ordinal)` (форма `role_rights` V49): uuid общих реквизитов общие
+  для конфигураций (2.8), поэтому uuid в ключ не кладётся вовсе, а граница конфигурации и
+  конкретной ревизии держится ссылкой на строку родителя. Замер 2.4 (повторов цели внутри
+  реквизита — 0) делает `ordinal` достаточным различающим столбцом и одновременно хранит порядок
+  перечня.
+- **Раздел 4, CHECK по значениям словарей платформы.** Эскиз обещал «колоночные ограничения на
+  каждый замкнутый словарь». Принято решение НЕ класть CHECK по значениям свойств: словарь замкнут
+  замером по четырём выгрузкам, XSD вида в слое схемы нет, и CHECK означал бы отказ записать
+  конфигурацию из-за значения платформы, которого мы не ждали (прецедент Q4 узла V49). Вместо
+  этого — состояние строки `properties_state` ('all_known' / 'unknown_value' / 'unknown_tag') с
+  перечнем виновников `unknown_property_names`; норматив словарей держат константа разбора и
+  постоянная проверка узла (П6). CHECK остаются только на состояниях, выведенных самим слоем
+  (`type_multiplicity`, `type_parse_state`, `use_state`, `*_resolve_state`, `content_state`,
+  `properties_state`, пары «изменение/признак»).
+
+
 **Q0. Номер узла и имена.** V50 — следующий после V49 (закрыт 30.10.2026). План, стадия
 `s4e_common_attributes` (в `STAGES` — после `s4d_roles`, перед `s4b_object_modules`, потому что
 `STAGES` повторяет порядок нормативного списка), модуль разбора
@@ -409,21 +434,30 @@
 (`indexing`, `full_text_search`, `data_history`); блок `<Type>` по Q6
 (`type_raw`, `type_multiplicity`, `type_parse_state`, `types jsonb`, `type_qualifiers jsonb`);
 счётчики `targets_count`, `targets_used_count`, `targets_not_used_count`; состояния
-`content_state` (`with_content`, `empty_content`, `indexed_no_file`, `file_not_in_index`,
-`directory_missing`) и `properties_state`; колоночные ограничения на каждый замкнутый словарь
-(2.7) и на согласованность счётчиков с состоянием; ключ
+`content_state` (`with_content`, `empty_content`) и `properties_state` (`all_known`,
+`unknown_value`, `unknown_tag`) с перечнем `unknown_property_names`; ограничения — на состояния,
+выведенные самим слоем, и на согласованность счётчиков с состоянием (CHECK по значениям словарей
+платформы не кладётся, см. «Принято 30.10.2026» в разделе 3); ключ
 `UNIQUE (configuration_uuid, object_name, revision_no)`; колонки ревизий.
 
 **`common_attribute_targets`** — строка применения: `common_attribute_id` (FK `ON DELETE CASCADE`),
 `configuration_uuid`, `attribute_object_uuid`, `attribute_full_name`, `ordinal`, `target_kind`,
 `target_full_name`, `target_object_id`, `target_object_uuid`, `target_resolve_state`,
 `target_unresolved_path`, `use_state`, `conditional_separation_state` (всегда `empty_value` на
-корпусе — граница, а не молчание), `target_ordinal`; ключ по Q2; индекс по `target_full_name` и
-по `target_object_uuid` — это и есть запрос «какие общие реквизиты у этого объекта».
+корпусе — граница, а не молчание); ключ `UNIQUE (common_attribute_id, ordinal)` — принятая форма
+Q2 (см. раздел 3), отдельной колонки `target_ordinal` нет, порядок держит `ordinal`; индекс по
+`target_full_name` и частичный по `target_object_uuid` — это и есть запрос «какие общие реквизиты
+у этого объекта».
 
-Витрина `v_current_common_attributes` и регистрация двух таблиц в словаре версионных
+Витрина `v_current_common_attributes` и регистрация её в словаре версионных
 (`CONFIGURATION_VERSIONED_TABLES`); `common_attribute_targets` — безцепочечная таблица, попадает в
-`CONFIGURATION_UNVERSIONED_TABLES` по прецеденту `role_rights`.
+`CONFIGURATION_UNVERSIONED_TABLES` по прецеденту `role_rights`, а её витрина
+`v_current_common_attribute_targets` строится связкой.
+
+Состояний файлового круга (`index_only`, `file_only`, `uuid_mismatch`, `directory_missing`) в
+таблице нет осознанно — по прецеденту V48 их называет ответ стадии и постоянная проверка узла
+(Q8, Q9), а не строка: строка вида пишется по файлу, подтверждённому индексом состава, и
+отсутствие каталога — свойство выгрузки, а не реквизита.
 
 Признака предопределённости в эскизе нет (Q7): ни колонки, ни производного флага. Единственное
 выраженное в схеме наблюдение о совпадении uuid между конфигурациями — сам ключ с
@@ -460,7 +494,7 @@
 | Шаг | Что делает | Чем проверяется | Статус |
 |---|---|---|---|
 | **П0** | Замеры круга, словаря свойств, формы `<Type>`, перечня применения, разрешимости целей, блоков разделения, обратных отсылок, повторности целей, состояния живой схемы | `_v50_p0_layout_probe.py`, `_v50_p0_probe.py`, `_v50_p0_index_probe.py`, `_v50_p0_reverse_probe.py`, `_scratch/_v50_sep_blocks.py` | ✅ 30.10.2026 (раздел 2) |
-| **П1** | Схема: `migrate_v50_common_attributes.sql` + зеркало в `create_1c_configurations_db.sql`, регистрация таблиц, витрина | `python _cmp_ddl.py` (rc=0), `python validate_project.py` (rc=0), `python tools/check_v19_revisions.py` | ⏳ после ответов Q1–Q7 |
+| **П1** | Схема: `migrate_v50_common_attributes.sql` + зеркало в `create_1c_configurations_db.sql` (внесён идемпотентным скриптом `_v50_p1_mirror.py`, чтобы текст пары не разъезжался), регистрация `common_attributes` в круге версионности | `python _cmp_ddl.py` (rc=0: колонки 1099/1099, индексы 125/125, ограничения 180/180, витрины 23/23), `python validate_project.py` (rc=0), `python tools/check_v19_revisions.py` (95 проверок, 0 падений) | ✅ 30.10.2026 (69 колонок строки реквизита, 15 — строки применения, 2 витрины, 5 индексов) |
 | **П2** | Разбор `src/configuration_common_attributes.py`: свойства, `<Type>`, `<Content>` с разрешением целей, блоки разделения; состояния `empty_value`, `unknown_value`, `unknown_form`, `prefix_only`, `unresolved` | `python _v50_p2_offline_probe.py` (ожидания — числа раздела 2) | ⏳ |
 | **П3** | Писатели в `CONFIGURATION_OBJECT_WRITERS`, круг таблиц стадии в контракте (`COMMON_ATTRIBUTES_TABLES`) | `python _v50_p3_writer_probe.py` (запись равна разбору; круг не пишется частями) | ⏳ |
 | **П4** | Загрузчик `src/configuration_common_attributes_loader.py`, стадия `s4e_common_attributes` в `STAGES`, `_remove_rows`, `ANALYZE` | `python _v50_p4_loader_probe.py MinCfg KomMag`, затем отдельно BGU2 и BP3 (прогоны, меняющие состояние БД, не параллелят) | ⏳ |
