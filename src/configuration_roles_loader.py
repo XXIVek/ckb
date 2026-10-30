@@ -68,13 +68,18 @@ Q8, Q9, правила C1–C3); разбор файлов вида — отде
 from typing import Any, Dict, List, Optional, Tuple
 
 from configuration_load_contract import (
-    ROLES_REPEAT_HINT,
     ROLE_DIR,
+    ROLE_KIND_RIGHTS,
+    ROLE_KIND_ROLES,
+    ROLE_KIND_WRITE_ORDER,
+    ROLE_KINDS,
     ROLE_RIGHTS_TABLE,
     ROLE_SOURCES_TABLE,
     ROLE_TABLE,
     ROLE_TABLES,
+    ROLE_TABLES_BY_KIND,
     ROLE_TEMPLATES_TABLE,
+    ROLES_REPEAT_HINT,
     STATUS_ERROR,
     STATUS_OK,
     roles_defaults,
@@ -86,7 +91,12 @@ from configuration_roles import (
     rights_index_rows,
 )
 from configuration_root_module_loader import configuration_uuid_from_layout
-from current_revision import CHANGED_BY_LOAD, FIRST_REVISION, stamp_revision_rows
+from current_revision import (
+    CHANGED_BY_LOAD,
+    FIRST_REVISION,
+    current_view,
+    stamp_revision_rows,
+)
 from external_db import transaction
 from external_table_writer import CONFIGURATION_OBJECT_WRITERS
 
@@ -210,6 +220,71 @@ def remove_roles(cur, configuration_uuid: str,
     return removed
 
 
+def normalize_kinds(kinds) -> Tuple[Tuple[str, ...], Optional[str]]:
+    """Разобрать запрос групп круга S4d в замкнутом словаре `ROLE_KINDS`.
+
+    `None` — весь круг, то есть ровно то, что делает стадия конвейера: два входа
+    (конвейер и отдельный инструмент) не должны расходиться значением по умолчанию
+    (прецедент `normalize_kinds` узла V46).
+
+    Каждая граница запроса называется текстом отказа, а не молчаливой деградацией:
+
+    * неизвестная группа — с перечнем допустимых: «такой группы нет» и «группу не просили»
+      — разные ответы, и второй нельзя получать из первого;
+    * пустой список — отказ: вызов, который ничего не пишет, неотличим от вызова, который
+      ничего не нашёл (C2);
+    * `roles` без `role_rights` — отказ: снятие ролей каскадом `role_rights_role_id_fkey`
+      сняло бы права, и в базе остались бы роли с состоянием `with_rights` без единой
+      строки прав — состав, которого в выгрузке нет (запрет «половины круга», V12/V46);
+    * `role_rights` без `roles` — разрешено: строки прав дописываются к уже лежащим в базе
+      CURRENT-ревизиям ролей (сценарий позиции O8 — «права отдельным входом»); если строк
+      ролей в базе нет, отказ называет это состоянием базы, а не ошибкой запроса.
+    """
+    if kinds is None:
+        return ROLE_KINDS, None
+    items = [kinds] if isinstance(kinds, str) else list(kinds)
+    wanted = set()
+    unknown: List[str] = []
+    for item in items:
+        name = str(item or "").strip()
+        if not name:
+            continue
+        if name in ROLE_KINDS:
+            wanted.add(name)
+        else:
+            unknown.append(name)
+    if unknown:
+        return (), ("Запрошены группы круга ролей, которых нет: "
+                    + ", ".join(sorted(unknown)) + ". Реализованы: "
+                    + ", ".join(ROLE_KINDS)
+                    + " (и весь круг без параметра kinds).")
+    if not wanted:
+        return (), ("Пустой kinds: не запрошена ни одна группа круга. Укажите хотя бы одну "
+                    "из " + ", ".join(ROLE_KINDS) + " или уберите kinds, чтобы записать "
+                    "весь круг.")
+    if ROLE_KIND_ROLES in wanted and ROLE_KIND_RIGHTS not in wanted:
+        return (), ("Группа `roles` не записывается без `role_rights`: строки прав ссылаются "
+                    "на id строк ролей и снимаются каскадом `role_rights_role_id_fkey`, "
+                    "поэтому в базе остались бы роли с состоянием `with_rights` без единой "
+                    "строки прав — состав, которого в выгрузке нет. Запросите "
+                    "`roles,role_rights` или весь круг.")
+    return tuple(kind for kind in ROLE_KIND_WRITE_ORDER if kind in wanted), None
+
+
+def existing_role_ids(cur, configuration_uuid: str) -> Dict[str, int]:
+    """Числовые id CURRENT-ревизий ролей этой конфигурации (для группы `role_rights`).
+
+    Строка права ссылается на id конкретной ревизии роли (Q2, вариант A). Когда сами роли
+    в этом вызове не перезаписываются, ролью остаётся та строка, что уже лежит в базе, —
+    её id читается витриной текущего состояния, а не поиском максимума по цепочке
+    (прецедент `v_current_roles` из замера P1).
+    """
+    cur.execute(
+        f"SELECT object_name, id FROM {current_view(ROLE_TABLE)} "
+        "WHERE configuration_uuid = %s::uuid", (str(configuration_uuid),))
+    return {str(row[0]): int(row[1]) for row in cur.fetchall()}
+
+
 def _require_header(configuration_uuid: str) -> Tuple[Optional[Dict], Optional[str]]:
     """Найти строку заголовка по uuid; вернуть карточку или причину отказа.
 
@@ -292,14 +367,24 @@ def _prepared_rights(collected: Dict, role_rows: List[Dict],
 
 def load_roles(source_path: str,
                configuration_uuid: Optional[str] = None,
+               kinds=None,
                changed_at=None) -> Dict[str, Any]:
     """Загрузить свойства ролей конфигурации (узел V49, стадия S4d).
 
     Порядок: каталог → uuid из `Configuration.xml` (или сверка переданного) → проверка, что
-    заголовок загружен → индекс состава из `configuration_objects` (сверка файлов с
-    перечнем и разрешение целей, Н6) → разбор каталога вида → **одна транзакция**:
-    `DELETE` по uuid + вставки четырёх таблиц → отдельной транзакцией `ANALYZE`
-    (мера V46).
+    заголовок загружен → круг запрошенных групп → индекс состава из `configuration_objects`
+    (сверка файлов с перечнем и разрешение целей, Н6) → разбор каталога вида →
+    **одна транзакция**: `DELETE` по uuid + вставки запрошенных таблиц → отдельной
+    транзакцией `ANALYZE` (мера V46).
+
+    `kinds` — группы круга (`roles`, `role_rights`, `role_restrictions`), нужные отдельному
+    входу `load_roles_tool` (шаг П5); пусто — весь круг, то есть ровно то, что делает
+    стадия конвейера. Группы управляют записью, а не разбором: разбор всегда полный, потому
+    что опознание вызова шаблона требует деклараций всех ролей конфигурации (Q5), а разрешение
+    целей — индекса состава (Q3); половина круга при частичном разборе дала бы состояния,
+    которых в выгрузке нет. Экономии времени `kinds` поэтому не даёт (замер П4: 210 МБ
+    читаются и при одном шаблоне), она даёт точечную запись без снятия соседних таблиц.
+    Границы запроса — в `normalize_kinds`.
 
     Отказ разбора любого файла круга останавливает стадию ДО записи: половина круга в базе
     читалась бы как полный состав вида (приём V12/V46). Отсутствие каталога `Roles/` — не
@@ -309,14 +394,16 @@ def load_roles(source_path: str,
 
     `changed_at` передаёт конвейер: строки одной загрузки обязаны нести одну метку (M2), а
     не время своей транзакции. Пустое значение — своя метка вызова (одиночный прогон
-    слоя); для четырёх таблиц момент берётся один — его возвращает первая
+    слоя); для всех записываемых таблиц момент берётся один — его возвращает первая
     `stamp_revision_rows`.
 
     Порядок записи держится иерархией данных, а не удобством: сначала роли (`insert_ids`,
     `RETURNING id`), затем права, ссылающиеся на id этих строк (Q2, вариант A), затем
     тексты шаблонов и дескрипторы файлов — они на строки прав не ссылаются. Всё это одной
     транзакцией: отказ на середине оставил бы в базе роли без прав, то есть состав,
-    которого в выгрузке нет.
+    которого в выгрузке нет. Когда группы `roles` в запросе нет, права пишутся на
+    CURRENT-ревизии ролей, уже лежащие в базе (`existing_role_ids`), — ролей без них база
+    не оставляет.
     """
     uuid_info = configuration_uuid_from_layout(source_path)
     if "uuid" not in uuid_info:
@@ -336,6 +423,14 @@ def load_roles(source_path: str,
     header, reason = _require_header(configuration_uuid)
     if header is None:
         return _stage_failure(reason)
+
+    wanted_kinds, kinds_error = normalize_kinds(kinds)
+    if kinds_error:
+        return _stage_failure(kinds_error)
+    # Таблицы запроса — объединение таблиц запрошенных групп: ответ по ним и обязан
+    # назвать, что снялось и записалось, а что осталось прежним.
+    touched_tables = tuple(table for kind in wanted_kinds
+                           for table in ROLE_TABLES_BY_KIND[kind])
 
     warnings: List[str] = []
     index_info: Dict[str, Any] = {"available": False, "row_count": 0, "kind_count": 0,
@@ -362,54 +457,105 @@ def load_roles(source_path: str,
     role_rows = list(collected.get("role_rows") or [])
     template_rows = list(collected.get("template_rows") or [])
     source_rows = list(collected.get("source_rows") or [])
-    rights, orphans = _prepared_rights(collected, role_rows, configuration_uuid)
+    write_roles = ROLE_TABLE in touched_tables
+    write_rights = ROLE_RIGHTS_TABLE in touched_tables
+    write_templates = ROLE_TEMPLATES_TABLE in touched_tables
+    write_sources = ROLE_SOURCES_TABLE in touched_tables
+
+    rights: List[Dict] = []
+    orphans: List[str] = []
+    existing_ids: Dict[str, int] = {}
+    if write_rights:
+        # Ключом проверки остаётся имя строки роли: числовой id даёт только транзакция
+        # вставки (Q2, вариант A). Когда группа `roles` в запросе не участвовала, ролью
+        # остаётся строка, уже лежащая в базе, — её CURRENT-ревизию читает
+        # `existing_role_ids`, и проверять полноту связывания приходится по ней.
+        key_rows = role_rows
+        if not write_roles:
+            try:
+                with transaction() as cur:
+                    existing_ids = existing_role_ids(cur, configuration_uuid)
+            except Exception as exc:  # noqa: BLE001 — состояние базы называется отказом
+                return _stage_failure(
+                    f"Группа `role_rights` не записана: чтение текущего состава ролей этой "
+                    f"конфигурации не удалось: {exc}. Строки прав ссылаются на id ревизий "
+                    "ролей — запросите `roles,role_rights` либо весь круг без kinds.",
+                    header=header,
+                )
+            key_rows = [{"object_name": name} for name in sorted(existing_ids)]
+        rights, orphans = _prepared_rights(collected, key_rows, configuration_uuid)
     if orphans:
         # Право без строки роли в том же круге — противоречие самого разбора: строка права
         # обязана ссылаться на ревизию роли (Q2), и молча её отбросить значит назвать
         # неполный круг полным. Отказ до транзакции: в базе остаётся прежний состав.
+        detail = (
+            "Разбор дал право имени, которого нет среди построенных строк ролей — это "
+            "внутреннее противоречие разбора, а не состояние выгрузки"
+            if write_roles else
+            "В базе нет CURRENT-строк ролей этих имён, а группа `roles` в этом вызове не "
+            "участвовала: права не на что записать — запросите `roles,role_rights` либо "
+            "весь круг без kinds"
+        )
         return _stage_failure(
             f"Круг не записан: {len(orphans)} строка(ов) прав остались без строки роли "
-            f"({', '.join(orphans[:5])}). Разбор дал право имени, которого нет среди "
-            "построенных строк ролей — это внутреннее противоречие разбора, а не состояние "
-            "выгрузки; ни одна строка круга не записана",
+            f"({', '.join(orphans[:5])}). {detail}; ни одна строка круга не записана",
             header=header,
         )
 
     # Ключ конфигурации знает вызывающий, а не XML объекта — тот же порядок, что у писателей
-    # свойств V46, модулей корня V44 и параметров сеанса V48.
-    for rows in (role_rows, template_rows, source_rows):
+    # свойств V46, модулей корня V44 и параметров сеанса V48. Строки незапрошенных групп
+    # ни ключом не помечаются, ни ревизией не штампуются: этот вызов их не касается.
+    for rows, writing in ((role_rows, write_roles), (template_rows, write_templates),
+                          (source_rows, write_sources)):
+        if not writing:
+            continue
         for row in rows:
             row["configuration_uuid"] = configuration_uuid
-    # Один штамп времени на всё событие загрузки (M2): четыре таблицы одной загрузки не
-    # должны нести разные метки, иначе их нельзя прочитать как один состав.
-    moment = stamp_revision_rows(role_rows, revision_no=FIRST_REVISION,
-                                 changed_by=CHANGED_BY_LOAD, changed_at=changed_at)
-    stamp_revision_rows(template_rows, revision_no=FIRST_REVISION,
-                        changed_by=CHANGED_BY_LOAD, changed_at=moment)
-    stamp_revision_rows(source_rows, revision_no=FIRST_REVISION,
-                        changed_by=CHANGED_BY_LOAD, changed_at=moment)
+    # Один штамп времени на всё событие загрузки (M2): записываемые таблицы одной загрузки
+    # не должны нести разные метки, иначе их нельзя прочитать как один состав. Метку
+    # определяет первая штампуемая таблица и передаётся остальным; если версионируемых
+    # таблиц в запросе нет (одна группа `role_rights`), штамп не нужен вовсе — у прав
+    # колонок ревизии нет (исключение `CONFIGURATION_UNVERSIONED_TABLES`).
+    moment = changed_at
+    if write_roles:
+        moment = stamp_revision_rows(role_rows, revision_no=FIRST_REVISION,
+                                     changed_by=CHANGED_BY_LOAD, changed_at=moment)
+    if write_templates:
+        moment = stamp_revision_rows(template_rows, revision_no=FIRST_REVISION,
+                                     changed_by=CHANGED_BY_LOAD, changed_at=moment)
+    if write_sources:
+        moment = stamp_revision_rows(source_rows, revision_no=FIRST_REVISION,
+                                     changed_by=CHANGED_BY_LOAD, changed_at=moment)
 
     removed: Dict[str, int] = {}
     written: Dict[str, int] = {table: 0 for table in ROLE_TABLES}
+    # Снимаются только таблицы запроса, и порядок остаётся `REMOVE_ORDER` (права раньше
+    # ролей), а не порядком групп запроса: каскад не должен снять строку молча (M7).
+    remove_targets = tuple(table for table in REMOVE_ORDER if table in touched_tables)
     try:
         with transaction() as cur:
-            removed = remove_roles(cur, configuration_uuid)
-            # Роли — по одной строке с RETURNING id: строка права ссылается на ЧИСЛОВОЙ id
-            # этой ревизии (Q2, вариант A), а `insert_many` id не возвращает. Порядок
-            # `insert_ids` совпадает с порядком `role_rows` — связь держится им, а не
-            # угадыванием (их всего 682 на BP3, цена поштучной вставки невелика).
-            role_ids = ROLE_WRITERS[ROLE_TABLE].insert_ids(cur, role_rows)
-            written[ROLE_TABLE] = len(role_ids)
-            ids_by_name = {str(row.get("object_name")): record_id
-                           for row, record_id in zip(role_rows, role_ids)}
-            for row in rights:
-                row["role_id"] = ids_by_name[str(row["role_name"])]
-            written[ROLE_RIGHTS_TABLE] = ROLE_WRITERS[ROLE_RIGHTS_TABLE].insert_many(
-                cur, rights)
-            written[ROLE_TEMPLATES_TABLE] = ROLE_WRITERS[ROLE_TEMPLATES_TABLE].insert_many(
-                cur, template_rows)
-            written[ROLE_SOURCES_TABLE] = ROLE_WRITERS[ROLE_SOURCES_TABLE].insert_many(
-                cur, source_rows)
+            removed = remove_roles(cur, configuration_uuid, remove_targets)
+            ids_by_name: Dict[str, int] = dict(existing_ids)
+            if write_roles:
+                # Роли — по одной строке с RETURNING id: строка права ссылается на ЧИСЛОВОЙ
+                # id этой ревизии (Q2, вариант A), а `insert_many` id не возвращает. Порядок
+                # `insert_ids` совпадает с порядком `role_rows` — связь держится им, а не
+                # угадыванием (их всего 682 на BP3, цена поштучной вставки невелика).
+                role_ids = ROLE_WRITERS[ROLE_TABLE].insert_ids(cur, role_rows)
+                written[ROLE_TABLE] = len(role_ids)
+                ids_by_name.update({str(row.get("object_name")): record_id
+                                    for row, record_id in zip(role_rows, role_ids)})
+            if write_rights:
+                for row in rights:
+                    row["role_id"] = ids_by_name[str(row["role_name"])]
+                written[ROLE_RIGHTS_TABLE] = ROLE_WRITERS[ROLE_RIGHTS_TABLE].insert_many(
+                    cur, rights)
+            if write_templates:
+                written[ROLE_TEMPLATES_TABLE] = ROLE_WRITERS[
+                    ROLE_TEMPLATES_TABLE].insert_many(cur, template_rows)
+            if write_sources:
+                written[ROLE_SOURCES_TABLE] = ROLE_WRITERS[
+                    ROLE_SOURCES_TABLE].insert_many(cur, source_rows)
     except Exception as exc:  # noqa: BLE001 — заголовок уже разрешён, отказ называется им
         return _stage_failure(
             f"Ошибка записи: {exc}. Транзакция отменена целиком: в базе остались прежние "
@@ -421,20 +567,32 @@ def load_roles(source_path: str,
     # Отдельная транзакция ПОСЛЕ фиксации записи: планировщик обязан увидеть строки, иначе
     # первый же читатель витрин текущего состояния платит минутами за счётчик (замер V46 на
     # BGU2: 8 мин 25 с против 7 мс после ANALYZE). Отказ статистики отказом загрузки не
-    # является: строки зафиксированы, и состояние ответа от него не меняется.
+    # является: строки зафиксированы, и состояние ответа от него не меняется. Незатронутые
+    # таблицы не анализируются: их статистика уже соответствует их строкам, а `ANALYZE`
+    # большой таблицы ради вызова, который её не касался, платил бы минутами.
     statistics_refreshed = 0
     try:
         with transaction() as cur:
-            refresh_table_statistics(cur, ROLE_TABLES)
-            statistics_refreshed = len(ROLE_TABLES)
+            refresh_table_statistics(cur, touched_tables)
+            statistics_refreshed = len(touched_tables)
     except Exception as exc:  # noqa: BLE001 — ответ описывает запись, а не статистику
         warnings.append(
-            f"статистика таблиц {', '.join(ROLE_TABLES)} не обновлена: {exc}. Строки "
+            f"статистика таблиц {', '.join(touched_tables)} не обновлена: {exc}. Строки "
             "записаны, но читатель витрин текущего состояния получит план по пустой "
             "статистике: счётчики на большой выгрузке выполняются минутами вместо "
             "миллисекунд"
         )
 
+    kinds_state = {
+        kind: {
+            "requested": True,
+            "written": int(sum(written[table]
+                               for table in ROLE_TABLES_BY_KIND[kind])),
+            "removed_previous": int(sum(removed.get(table) or 0
+                                       for table in ROLE_TABLES_BY_KIND[kind])),
+        }
+        for kind in wanted_kinds
+    }
     result = roles_defaults()
     result.update({
         "status": STATUS_OK,
@@ -442,6 +600,8 @@ def load_roles(source_path: str,
         "configuration_id": header["id"],
         "configuration_uuid": configuration_uuid,
         "configuration_name": header.get("name"),
+        "kinds_requested": list(wanted_kinds),
+        "kinds": kinds_state,
         "rows_written": int(sum(written.values())),
         "written_by_table": written,
         "roles_written": int(written[ROLE_TABLE]),
@@ -467,8 +627,8 @@ def load_roles(source_path: str,
             "«объекта нет в перечне» от «перечень этой конфигурации не загружен» не "
             "отличить"
         )
-    for kind, detail in (collected.get("observations") or []):
-        if kind == "directory_missing":
+    for observation, detail in (collected.get("observations") or []):
+        if observation == "directory_missing":
             warnings.append(
                 f"Каталог {ROLE_DIR}/ в выгрузке отсутствует — ролей у этой конфигурации "
                 "нет, и нули таблиц являются ответом о выгрузке, а не отказом стадии"
@@ -480,6 +640,15 @@ def load_roles(source_path: str,
             "(роль без содержимого существует; четыре замеренные выгрузки дают 1 202/1 202, "
             "поэтому расхождение требует объяснения этим прогоном)"
         )
+    if len(wanted_kinds) < len(ROLE_KINDS):
+        untouched = [table for table in ROLE_TABLES if table not in touched_tables]
+        warnings.append(
+            "Запрошены не все группы круга (kinds=" + ",".join(wanted_kinds) + "): таблицы "
+            + ", ".join(untouched) + " этим вызовом не снимались и не записывались — их "
+            "строки остались прежними, и нули `written_by_table` для этих таблиц означают "
+            "именно это, а не отсутствие ролей или прав в конфигурации. Разбор при этом "
+            "был полным: сводка описывает круг выгрузки, а не содержимое базы, и экономии "
+            "времени `kinds` не даёт (позиция O8 плана)")
     if removed:
         warnings.append(
             "Прежние строки свойств ролей этой конфигурации сняты перед записью: "

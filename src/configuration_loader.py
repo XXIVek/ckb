@@ -112,7 +112,7 @@
 списка (`docs/CONFIGURATION_ROLES_PLAN.md`):
 
     src/configuration_roles_loader.py :: load_roles(source_path, configuration_uuid=None,
-    changed_at=None)  →  четыре таблицы `roles`, `role_rights`,
+    kinds=None, changed_at=None)  →  четыре таблицы `roles`, `role_rights`,
     `role_restriction_templates`, `role_sources`
 
 Порядок вызова и границы повторяют S3/S4/S4c: стадия идёт ПОСЛЕ фиксации заголовка и индекса

@@ -652,6 +652,44 @@ ROLE_TABLES: Tuple[str, ...] = (
     ROLE_TEMPLATES_TABLE,
     ROLE_SOURCES_TABLE,
 )
+
+# Группы круга S4d — нужны отдельному входу `load_roles_tool` (шаг П5, план раздел 5):
+# случай «изменились только файлы прав» или «изменились только шаблоны ограничений» стоит
+# дороже всего круга (замер П4: BGU2 11.66 с, BP3 19.01 с на 140 158 прав). Границы групп
+# держит схема, а не удобство вызова: `role_rights.role_id` ссылается на строку `roles`
+# с `ON DELETE CASCADE` (migration V49), поэтому роли и их права — одна пара, а
+# `role_restriction_templates` и `role_sources` на строки других таблиц узла не ссылаются.
+# Правила запроса называются отказом загрузки, а не молчаливой деградацией:
+#   * `roles` без `role_rights` — отказ: снятие ролей каскадом сняло бы права, и в базе
+#     остались бы роли с состоянием `with_rights` без единой строки прав — состав, которого
+#     в выгрузке нет (тот же запрет, что «половина круга» у приёмов V12/V46);
+#   * `role_rights` без `roles` — разрешено, только если строки ролей этой конфигурации уже
+#     есть в базе: права пишутся на их CURRENT-ревизии. Если ролей нет — отказ с указанием
+#     запросить `roles`. Это и есть сценарий позиции O8 («права отдельным входом»), но
+#     порога, при котором он был бы обязателен, замер П4 не дал;
+#   * `role_restrictions` — группа самостоятельна: текст шаблона выводится из условия и на
+#     строки прав не ссылается (носители — имена ролей текстом, замер 2.7).
+ROLE_KIND_ROLES = "roles"
+ROLE_KIND_RIGHTS = "role_rights"
+ROLE_KIND_RESTRICTIONS = "role_restrictions"
+ROLE_KINDS: Tuple[str, ...] = (ROLE_KIND_ROLES, ROLE_KIND_RIGHTS, ROLE_KIND_RESTRICTIONS)
+ROLE_KIND_TITLES: Dict[str, str] = {
+    ROLE_KIND_ROLES: "Роли и дескрипторы их файлов",
+    ROLE_KIND_RIGHTS: "Права ролей",
+    ROLE_KIND_RESTRICTIONS: "Шаблоны ограничений",
+}
+ROLE_TABLES_BY_KIND: Dict[str, Tuple[str, ...]] = {
+    ROLE_KIND_ROLES: (ROLE_TABLE, ROLE_SOURCES_TABLE),
+    ROLE_KIND_RIGHTS: (ROLE_RIGHTS_TABLE,),
+    ROLE_KIND_RESTRICTIONS: (ROLE_TEMPLATES_TABLE,),
+}
+# Порядок записи групп держится иерархией данных (роли раньше ссылающихся на них прав),
+# а не порядком запроса вызывающего.
+ROLE_KIND_WRITE_ORDER: Tuple[str, ...] = (
+    ROLE_KIND_ROLES, ROLE_KIND_RIGHTS, ROLE_KIND_RESTRICTIONS,
+)
+# Таблицы, чьи строки остаются нетронутыми, когда группа не запрошена: ответ обязан назвать
+# это, а не отдать нули как «в конфигурации ничего нет» (C2).
 FOREIGN_STAGE_TABLES: Tuple[str, ...] = SESSION_PARAMETER_TABLES + ROLE_TABLES
 CHILD_TABLES: Tuple[str, ...] = tuple(
     table for table in CONFIGURATION_VERSIONED_TABLES
@@ -1211,6 +1249,20 @@ def format_session_parameters_lines(result: Dict[str, Any],
 
 # ── контракт стадии S4d (узел V49, шаг П4, позиция 2.4 списка) ───────────────────
 
+def role_group_defaults() -> Dict[str, Any]:
+    """Одна группа круга S4d с нулями (C1).
+
+    `requested` отделяет «группу не просили» от «строк в конфигурации нет»: по нулям этих
+    двух ответов не различить (C2), поэтому признак запрашивания — часть контракта, а не
+    домысел вызывающего. Прецедент — `child_object_kind_defaults()` узла V46.
+    """
+    return {
+        "requested": False,
+        "written": 0,
+        "removed_previous": 0,
+    }
+
+
 def roles_defaults() -> Dict[str, Any]:
     """Закрытый контракт стадии S4d с нулями (C1, C2, C3).
 
@@ -1240,7 +1292,10 @@ def roles_defaults() -> Dict[str, Any]:
       (имя, отпечаток) видна числом, а не молчанием (замер 2.7: 1 386 вхождений дают
       9 различных текстов);
     * `index_only` / `file_only` / `uuid_mismatch` — расхождения файла и перечня: четыре
-      замеренные выгрузки дают нули, и нули обязаны быть названы, а не подразумеваться.
+      замеренные выгрузки дают нули, и нули обязаны быть названы, а не подразумеваться;
+    * `kinds_requested` / `kinds` — какие группы круга просил отдельный вход (шаг П5):
+      без признака запрашивания нули незапрошенной группы читались бы как «ролей и прав в
+      конфигурации нет» (C2), а строки незапрошенных таблиц при этом не снимались.
     """
     return {
         "status": STATUS_NOT_RUN,
@@ -1252,6 +1307,8 @@ def roles_defaults() -> Dict[str, Any]:
         "configuration_uuid": None,
         "configuration_name": None,
         "tables": list(ROLE_TABLES),
+        "kinds_requested": [],
+        "kinds": {kind: role_group_defaults() for kind in ROLE_KINDS},
         "directory": ROLE_DIR,
         "metadata_files_found": 0,
         "rights_files_found": 0,
@@ -1356,6 +1413,23 @@ def format_roles_lines(result: Dict[str, Any], indent: str = "") -> List[str]:
         f"содержимого прав {int(result.get('rights_files_found') or 0)} "
         f"(каталог {result.get('directory') or ROLE_DIR}/)"
     )
+
+    # Отдельный вход просит не весь круг (шаг П5). Незапрошенная группа обязана быть
+    # названа: её нули в перечисленных выше таблицах неотличимы от «в конфигурации нет
+    # ни ролей, ни прав» (C2), а строки этих таблиц этим вызовом не снимались.
+    kinds = result.get("kinds") or {}
+    skipped_kinds = [kind for kind in ROLE_KINDS
+                     if not (kinds.get(kind) or {}).get("requested")]
+    if skipped_kinds:
+        untouched = sorted({table for kind in skipped_kinds
+                            for table in ROLE_TABLES_BY_KIND[kind]})
+        lines.append(
+            f"{indent}Группы круга не запрашивались: "
+            + ", ".join(f"{kind} — {ROLE_KIND_TITLES[kind]}" for kind in skipped_kinds)
+            + f"; таблицы {', '.join(untouched)} этим вызовом не снимались и не "
+              "записывались, и их нули не означают, что в конфигурации нет ролей или прав "
+              "(признак `kinds` отдельного входа load_roles_tool)"
+        )
     if int(result.get("removed_previous") or 0):
         lines.append(
             f"{indent}Снято прежних строк этой конфигурации: "
@@ -1398,8 +1472,11 @@ def format_roles_lines(result: Dict[str, Any], indent: str = "") -> List[str]:
         + "; значения — "
         + ", ".join(f"{state}={int(value_counts.get(state) or 0)}"
                     for state in ROLE_RIGHT_VALUE_STATES)
-        + " — false читается состоянием `denied`, а не отсутствием строки (замер O1: в "
-          "KomMag все 2 899 прав имеют значение false)"
+        + " — состояния называют текст `<value>` файла прав (true/false), а не правомочие "
+          "роли: замер O1 (30.10.2026) даёт у роли `ПолныеПрава` все строки со значением "
+          "false при флагах `setForNewObjects=true` / `setForAttributesByDefault=true`, а у "
+          "`АдминистраторСистемы` — все со значением true; читать `denied` как «роль не "
+          "может» этот замер не позволяет (позиция O1 плана, раздел 9)"
     )
     for name, count in sorted((result.get("unknown_right_names") or {}).items())[:10]:
         lines.append(

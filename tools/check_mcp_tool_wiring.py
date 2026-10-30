@@ -92,12 +92,20 @@ DEFAULT_TARGETS = [
 # (src/configuration_session_parameters_loader.load_session_parameters); отдельного
 # контракта у инструмента нет — закрытый словарь session_parameters_defaults() и текст
 # раздела даёт configuration_load_contract.
+# Узел V49 (П5, 30.10.2026) добавил load_roles_tool: core 6 → 7. Причина та же (решение
+# оператора Q5 узла V48 — свой вход на каждую позицию нормативного списка): файлы вида
+# `Roles/` меняются, а заголовок и индекс состава — нет. Стадия S4d конвейера и инструмент
+# вызывают одну и ту же функцию слоя (src/configuration_roles_loader.load_roles); отдельного
+# контракта у инструмента нет — закрытый словарь roles_defaults() и текст раздела даёт
+# configuration_load_contract. Отличие от входов V44/V46/V48 — параметр `kinds` (три группы
+# круга): FK `role_rights_role_id_fkey` с `ON DELETE CASCADE` не даёт писать роли без их
+# прав, поэтому круг разрезан по границе внешних ключей, а не по удобству.
 EXPECTED_TOOLS = {
     "server_configurations_core.py": [
         "delete_external_report_tool", "load_1c_catalog_tool",
         "load_configuration_object_properties_tool",
         "load_configuration_root_modules_tool", "load_external_object_file_tool",
-        "load_session_parameters_tool",
+        "load_roles_tool", "load_session_parameters_tool",
     ],
     "server_configurations_enrichment.py": [
         "add_config_aliases_tool", "add_config_cross_reference_tool", "add_config_snippet_tool",
