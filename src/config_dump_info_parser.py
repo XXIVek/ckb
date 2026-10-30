@@ -505,7 +505,7 @@ def parse_config_dump_info(path):
         )
     if counts["config_versions_bad_form"]:
         warnings.append(
-            f"`configVersion` не шестнадцатеричной формы (ожидаемая — {CONFIG_VERSION_LEN} "
+            f"`configVersion` не шестнадцатеричной формы (ожидаемая — {CONFIG_VERSION_HEX_LEN} "
             f"символов) у {counts['config_versions_bad_form']} записей. Значение версии метаданных "
             "не является идентификатором объекта и в `uuid` не кладётся ни при какой форме"
         )
