@@ -37,6 +37,9 @@ from configuration_loader import OBJECTS_TABLE, register_configuration
 from configuration_load_contract import (
     CHILD_SECTION_HEADER,
     OBJECT_MODULES_SECTION_HEADER,
+    ROLES_SECTION_HEADER,
+    ROLE_META_TAG,
+    ROLE_TABLES,
     ROOT_MODULES_SECTION_HEADER,
     SESSION_PARAMETERS_SECTION_HEADER,
     SESSION_PARAMETER_META_TAG,
@@ -44,6 +47,7 @@ from configuration_load_contract import (
     STOP_STAGE_SECTION_HEADER,
     format_child_object_lines,
     format_object_module_lines,
+    format_roles_lines,
     format_root_modules_lines,
     format_session_parameters_lines,
     format_stopped_stage_lines,
@@ -429,6 +433,16 @@ def _stage_section_lines(result):
     if session_part:
         lines.append(f"{SESSION_PARAMETERS_SECTION_HEADER}:")
         lines.extend(format_session_parameters_lines(session_part, indent="   "))
+    # Узел V49 (стадия S4d, позиция 2.4 списка): свойства ролей конфигурации.
+    # Раздел печатается и при отказе стадии, и при `not_run` — по той же причине, что у
+    # S3/S4/S4c: «загружено» без него читалось бы как «состав конфигурации в БД есть весь».
+    # Ответ стадии лежит в собственном ключе, а не внутри `child_objects` или
+    # `session_parameters` (правило C3); текст даёт общий форматёр контракта — тот же, что
+    # отдаёт отдельный инструмент `load_roles_tool` (шаг П5).
+    roles_part = result.get("roles") or {}
+    if roles_part:
+        lines.append(f"{ROLES_SECTION_HEADER}:")
+        lines.extend(format_roles_lines(roles_part, indent="   "))
     # Узел V47 (стадия S4b): модули объектов конфигурации — вторая транзакция загрузки
     # (Q6, граница D7). Раздел печатается и при отказе стадии, и при `not_run` (индекс
     # состава не разобран — круг не определён): «конфигурация загружена» без него
@@ -612,6 +626,12 @@ def format_load_result(result):
                 # здесь, а не правкой словаря V46 (круг CHILD_* этим узлом не расширяется).
                 loaded_tags = dict(LOADED_META_TABLES)
                 loaded_tags[SESSION_PARAMETER_META_TAG] = (SESSION_PARAMETER_TABLE,)
+                # Узел V49 (стадия S4d, позиция 2.4 списка): Role — вид, содержимое которого
+                # сохраняется своей стадией в четыре свои таблицы (замер: MinCfg даёт 2 тега
+                # `Role` в <ChildObjects>). Словарь «тег → таблицы вида» дополняется здесь по
+                # той же причине, что и строка V48: круг CHILD_* видов стадии S4 этим узлом не
+                # расширяется, а таблицы называет тот слой, который их пишет.
+                loaded_tags[ROLE_META_TAG] = ROLE_TABLES
                 loaded = {tag: count for tag, count in child_counts.items()
                           if tag in loaded_tags}
                 rest = {tag: count for tag, count in child_counts.items()
@@ -625,10 +645,12 @@ def format_load_result(result):
                 lines.append(
                     f"Состав из <ChildObjects> Configuration.xml: объектов "
                     f"{sum(child_counts.values())}"
-                    + (f"; видов с загруженным содержимым (узлы V46 и V48): {loaded_detail} — "
-                       "их свойства и ссылки лежат в таблицах стадий S4 и S4c, разделы «"
-                       + CHILD_SECTION_HEADER + "» и «" + SESSION_PARAMETERS_SECTION_HEADER
-                       + "» ниже" if loaded_detail else "")
+                    + (f"; видов с загруженным содержимым (узлы V46, V48 и V49): "
+                       f"{loaded_detail} — "
+                       "их свойства и ссылки лежат в таблицах стадий S4, S4c и S4d, разделы «"
+                       + CHILD_SECTION_HEADER + "», «" + SESSION_PARAMETERS_SECTION_HEADER
+                       + "» и «" + ROLES_SECTION_HEADER + "» ниже"
+                       if loaded_detail else "")
                     + (f"; остальных объектов {sum(rest.values())} — по типам: {by_type}; "
                        "эти записи в БД не раскладываются (таблиц объектов метаданных по ним "
                        "в схеме нет, узел V18)" if by_type else "")

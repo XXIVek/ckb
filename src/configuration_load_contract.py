@@ -105,10 +105,23 @@ from configuration_session_parameters import (
 # Импорт нужен одному месту: назвать круг таблиц своей стадии, чтобы регистрация вида в круге
 # версионности (`CONFIGURATION_VERSIONED_TABLES`) не добавила чужие таблицы к кругу S4.
 # Разбор ничего из этого контракта не импортирует, цикл односторонний.
+# Словари состояний импортируются с префиксом ROLE_: `CONTENT_STATES` и
+# `DECLARATION_STATES` уже приходят из разбора V46 (строки подсистем и общих модулей), и
+# переиспользовать их имена для ролей значило бы, что нулевой контракт стадии S4 заполняется
+# словарём стадии S4d. Префикс — единственный способ назвать два разных словаря двумя
+# именами; сами словари задаёт разбор, повторять их здесь нельзя.
 from configuration_roles import (
+    CONDITION_STATES as ROLE_CONDITION_STATES,
+    CONTENT_STATES as ROLE_CONTENT_STATES,
+    DECLARATION_STATES as ROLE_DECLARATION_STATES,
+    DIR_NAME as ROLE_DIR,
+    OBJECT_KIND_TAG as ROLE_META_TAG,
     RIGHTS_TABLE_NAME as ROLE_RIGHTS_TABLE,
+    RIGHT_NAME_STATES as ROLE_RIGHT_NAME_STATES,
+    RIGHT_VALUE_STATES as ROLE_RIGHT_VALUE_STATES,
     SOURCES_TABLE_NAME as ROLE_SOURCES_TABLE,
     TABLE_NAME as ROLE_TABLE,
+    TARGET_RESOLVE_STATES as ROLE_TARGET_RESOLVE_STATES,
     TEMPLATES_TABLE_NAME as ROLE_TEMPLATES_TABLE,
 )
 from current_revision import CONFIGURATION_VERSIONED_TABLES
@@ -125,6 +138,13 @@ STAGE_CHILD_OBJECTS = "s4_child_objects"
 # стадия нужна потому, что правило C3 требует своего ключа ответа: разбивать содержимое
 # чужого ключа `child_objects` по видам значило бы переименовывать контракт V46.
 STAGE_SESSION_PARAMETERS = "s4c_session_parameters"
+# Узел V49 (2026-10-30, позиция 2.4 нормативного списка): свойства ролей — отдельная стадия
+# по той же причине, что и S4c узла V48: правило C3 требует своего ключа ответа `roles`,
+# а разбивать чужой ключ значило бы переименовывать контракт соседнего узла. Порядок
+# `STAGES` повторяет порядок нормативного списка (docs/CONFIGURATION_ROLES_PLAN.md,
+# раздел 5): позиция 2.4 идёт сразу за 2.3, то есть между S4c и S4b; существующие стадии
+# не перенумеровываются, номер S5 по-прежнему зарезервирован за планируемой стадией анализа.
+STAGE_ROLES = "s4d_roles"
 # Узел V47 (28.10.2026): тексты модулей объектов конфигурации. Номер S4b, а не S5:
 # S5 остаётся за планируемой стадией анализа (дополнение оператора 23.10.2026), которой
 # в `STAGES` нет. Стадия идёт сразу за S4 и является второй транзакцией загрузки (Q6,
@@ -138,6 +158,7 @@ STAGES: Tuple[Tuple[str, str], ...] = (
     (STAGE_ROOT_MODULES, "Модули предопределённых программ корня"),
     (STAGE_CHILD_OBJECTS, "Содержимое дочерних объектов конфигурации"),
     (STAGE_SESSION_PARAMETERS, "Свойства параметров сеанса (SessionParameters, позиция 2.3)"),
+    (STAGE_ROLES, "Свойства ролей конфигурации (Roles, позиция 2.4)"),
     (STAGE_OBJECT_MODULES, "Модули объектов конфигурации (тексты Ext/, вторая транзакция)"),
 )
 
@@ -184,6 +205,49 @@ SESSION_PARAMETERS_BOUNDARY = (
 )
 
 
+# ── контракт стадии S4d (узел V49, шаг П4, позиция 2.4 списка) ───────────────────
+# Заголовок раздела, подсказка о повторе и граница круга объявлены ДО
+# `CHILD_NOT_IMPLEMENTED` по той же причине, что у V48: текст незакрытой части ссылается на
+# раздел, где читается отказ стадии, и держать два написания одного заголовка нельзя.
+# Имена таблиц и словари состояний приходят импортом из разбора вида — второго перечня
+# таблиц или состояний в проекте нет (см. начало модуля).
+ROLES_SECTION_HEADER = "СВОЙСТВА РОЛЕЙ КОНФИГУРАЦИИ (узел V49, позиция 2.4)"
+
+# Что обязан сказать ответ о повторе стадии. Отдельная точка входа группы —
+# `load_roles_tool` (шаг П5 узла, тот же слой, что стадия — прецедент V44/V46/V48); строка
+# меняется одним местом, когда состав реестра инструментов меняется
+# (`tools/check_mcp_tool_wiring.py`).
+ROLES_REPEAT_HINT = (
+    "Повторить стадию можно отдельным входом группы "
+    "load_roles_tool(source_path=…) без перезагрузки конфигурации "
+    "(узел V49, шаг П5) либо полной перезагрузкой "
+    "load_1c_catalog_tool(source_path=…, force=True)"
+)
+
+# Граница круга называется и при успехе: «строки записаны» не равно «о ролях сохранено всё».
+# Формулировка держится замеров раздела 2 плана V49 и решений Q2, Q3, Q5, Q9: без неё пустой
+# перечень прав читался бы как «прав нет», а не как «содержимое не разобрано».
+ROLES_BOUNDARY = (
+    f"круг узла — файлы метаданных вида {ROLE_META_TAG} из каталога {ROLE_DIR}/ и их "
+    "содержимое `<Имя>/Ext/Rights.xml` (позиция 2.4 списка): в `roles` идут имя, синоним, "
+    "комментарий, три флага содержимого прав и состояние содержимого со счётчиками; в "
+    "`role_rights` — цель, имя права, значение, состояние условия и имена вызовов шаблонов "
+    "с порядком в файле; в `role_restriction_templates` — текст ограничения на пару "
+    "(имя, отпечаток) с перечнем ролей-носителей; в `role_sources` — дескриптор файла "
+    "содержимого (путь, размер, состояние объявления), а не его текст: 211 МБ второй "
+    "копией в базе не держат (Q9, вариант A), обратная выгрузка не реализована. Права НЕ "
+    "версионируются своей цепочкой (Q2, вариант A): своей истории у `role_rights` нет, "
+    "текущность читается витриной `v_current_roles` связкой по `role_id`, а каскад "
+    "`role_rights_role_id_fkey` снимает права вместе со строкой роли. Цель права — ссылка "
+    "на СТРОКУ индекса состава (Q3): внешнего ключа нет, потому что цель бывает "
+    "`prefix_only` или `unresolved`, и это состояние ответа, а не потерянная ссылка. "
+    "Словаря XSD у вида нет (O5): неизвестное имя права читается состоянием `unknown_name`, "
+    "а не свободным текстом. Вызов шаблона опознаётся по сигнатуре имени до первой скобки "
+    "(Q5): полное имя вызова с декларацией не совпадает никогда (замер 2.7). Позиции 2.5 "
+    "и далее нормативного списка этот узел не трогает"
+)
+
+
 # ── остановка конвейера по отказу стадии (узел V48, шаг П8, решение Q8 вариант A) ────
 #
 # Норматив: первая ошибка стадии останавливает конвейер, ответ получает `success: false` с
@@ -224,6 +288,7 @@ STAGE_FULL_RELOAD_ONLY: Dict[str, bool] = {
     STAGE_ROOT_MODULES: False,
     STAGE_CHILD_OBJECTS: False,
     STAGE_SESSION_PARAMETERS: False,
+    STAGE_ROLES: False,
     STAGE_OBJECT_MODULES: True,
 }
 
@@ -234,6 +299,8 @@ STAGE_INCOMPLETE_GROUPS: Dict[str, str] = {
     STAGE_ROOT_MODULES: "модули предопределённых программ корня (группа C модели V38)",
     STAGE_CHILD_OBJECTS: "свойства подсистем и общих модулей (часть групп B и E модели V38)",
     STAGE_SESSION_PARAMETERS: "свойства параметров сеанса (позиция 2.3 нормативного списка)",
+    STAGE_ROLES: "свойства ролей конфигурации (позиция 2.4 нормативного списка, "
+                 "группа F модели V38)",
     STAGE_OBJECT_MODULES: "модули объектов конфигурации (группа C модели V38, Ext/)",
 }
 
@@ -288,9 +355,9 @@ def stage_resume_hint(stage_id: str) -> str:
     """Чем продолжить загрузку, остановленную на стадии `stage_id`.
 
     Подсказки берутся из текстов стадий, а не переписываются: S3 и S4 имеют отдельные входы
-    групп (узлы V45, V46), S4c — свой вход (шаг П5 того же узла), S4b — не имеет (решение
-    Q4.1). Стадия без подсказки была бы ошибкой контракта, поэтому ответ по умолчанию —
-    полная перезагрузка, а не пустая строка.
+    групп (узлы V45, V46), S4c — свой вход (шаг П5 того же узла), S4d — свой вход (шаг П5
+    узла V49), S4b — не имеет (решение Q4.1). Стадия без подсказки была бы ошибкой контракта,
+    поэтому ответ по умолчанию — полная перезагрузка, а не пустая строка.
     """
     if stage_id == STAGE_ROOT_MODULES:
         return ROOT_MODULES_REPEAT_HINT
@@ -298,6 +365,8 @@ def stage_resume_hint(stage_id: str) -> str:
         return CHILD_OBJECTS_REPEAT_HINT
     if stage_id == STAGE_SESSION_PARAMETERS:
         return SESSION_PARAMETERS_REPEAT_HINT
+    if stage_id == STAGE_ROLES:
+        return ROLES_REPEAT_HINT
     if stage_id == STAGE_OBJECT_MODULES:
         return OBJECT_MODULES_RELOAD_HINT
     return "полная перезагрузка load_1c_catalog_tool(source_path=…, force=True)"
@@ -404,11 +473,14 @@ CHILD_NOT_IMPLEMENTED = (
     "содержимое дочерних объектов загружено частично: закрыты свойства подсистем и общих "
     "модулей (узел V46, по модели V38 — часть групп B и E), свойства параметров сеанса — "
     "позиция 2.3 нормативного списка (узел V48, стадия S4c, раздел «"
-    + SESSION_PARAMETERS_SECTION_HEADER + "» ниже) и тексты модулей объектов "
+    + SESSION_PARAMETERS_SECTION_HEADER + "» ниже), свойства ролей — позиция 2.4 "
+    "(узел V49, стадия S4d, раздел «" + ROLES_SECTION_HEADER
+    + "» ниже; группа F модели V38 закрыта рольями и правами, остальные её виды не "
+    "закрываются) и тексты модулей объектов "
     "конфигурации — шесть слотов Ext/ (узел V47, стадия S4b, раздел «"
     "МОДУЛИ ОБЪЕКТОВ КОНФИГУРАЦИИ» ниже); не реализованы реквизиты и "
     "табличные части объектов "
-    "конфигурации, формы и их модули, макеты, значения перечислений, роли и команды — "
+    "конфигурации, формы и их модули, макеты, значения перечислений и команды — "
     "остальные группы A–H "
     "модели V38, узел V18 остаётся открытым"
 )
@@ -569,10 +641,11 @@ SESSION_PARAMETER_TABLES: Tuple[str, ...] = (SESSION_PARAMETER_TABLE,)
 # проба `_v46_p4_writer_probe.py` упала на `KeyError: 'roles'`, потому что контракт разбора
 # `CHILD_KINDS`/`CHILD_TABLES` стал шире круга стадии, а стадия S4 снимала и анализировала
 # бы чужие строки (у BP3 это 682 строки ролей и 76 332 строки прав). Роль — не вид свойств
-# V46: у неё нет ни своей стадии в `STAGES` (её заводит шаг П5), ни ключа ответа. Пока
-# стадии нет, таблицы вида объявляются здесь своей константой и из круга S4 вычитаются — при
-# том что писатели и цепи ревизий у них уже работают (иначе версионируемая таблица
-# осталась бы без писателя, то есть без права на запись).
+# V46: своей точки входа у `load_configuration_object_properties_tool` она не имеет. Свою
+# стадию `s4d_roles` и свой ключ ответа ей дал шаг П4 этого же узла, но круг S4 от этого не
+# расширяется: таблицы вида объявляются здесь своей константой и из круга S4 вычитаются —
+# при том что писатели и цепи ревизий у них работают с шага П3 (иначе версионируемая
+# таблица осталась бы без писателя, то есть без права на запись).
 ROLE_TABLES: Tuple[str, ...] = (
     ROLE_TABLE,
     ROLE_RIGHTS_TABLE,
@@ -1133,6 +1206,320 @@ def format_session_parameters_lines(result: Dict[str, Any],
     for warning in result.get("warnings") or []:
         lines.append(f"{indent}⚠️ {warning}")
     lines.append(f"{indent}Граница: {SESSION_PARAMETERS_BOUNDARY}")
+    return lines
+
+
+# ── контракт стадии S4d (узел V49, шаг П4, позиция 2.4 списка) ───────────────────
+
+def roles_defaults() -> Dict[str, Any]:
+    """Закрытый контракт стадии S4d с нулями (C1, C2, C3).
+
+    Словарь плоский — тот же, что возвращает слой `load_roles`; конвейер вкладывает его в
+    свой ключ `roles` без переименования (C3). `status` различает «стадия не выполнялась»
+    (`not_run`, C2) и «выполнилась с отказом» (`error`).
+
+    Имена ключей сводки совпадают с именами разбора `src/configuration_roles.py` намеренно
+    (прецедент `SUMMARY_KEYS` узлов V46/V48): неперечисленный ключ контракта читается
+    нулём, а не исчезает, а незнакомый ключ разбора не попадает в ответ, которого карточка
+    не обещала. Ключей `role_rows` / `right_rows` / `template_rows` / `source_rows` здесь
+    нет намеренно: это строки записи (десятки тысяч), а не сводка состояния — ответ стадии
+    обязан называть числа, а не пересылать содержимое таблиц.
+
+    Что обязан назвать ответ отдельно (план, разделы 4 и 5):
+
+    * `removed_by_table` / `written_by_table` — четырьмя таблицами, а не одним числом:
+      круг пишется одной транзакцией, но «записано 682» и «записано 682 роли + 76 332
+      права» для читателя карточки — разные факты;
+    * `counts_by_content_state` — «прав нет» (`empty_content`) и «файла содержимого нет»
+      (`indexed_no_file`) различаются состоянием, а не нулём строки (Q6, вариант A);
+    * `counts_by_target_resolve_state` — `prefix_only` и `unresolved` являются ответом о
+      цели, а не потерянной ссылкой (Q3);
+    * `restrictions_called_own_role` / `restrictions_called_other_role` — два круга вызовов
+      шаблонов считаются раздельно, потому что круг их деклараций разный (замер 2.7);
+    * `template_occurrences` против `template_texts_distinct` — дедупликация по паре
+      (имя, отпечаток) видна числом, а не молчанием (замер 2.7: 1 386 вхождений дают
+      9 различных текстов);
+    * `index_only` / `file_only` / `uuid_mismatch` — расхождения файла и перечня: четыре
+      замеренные выгрузки дают нули, и нули обязаны быть названы, а не подразумеваться.
+    """
+    return {
+        "status": STATUS_NOT_RUN,
+        "success": False,
+        "error": None,
+        "reason": None,
+        "stage": STAGE_ROLES,
+        "configuration_id": None,
+        "configuration_uuid": None,
+        "configuration_name": None,
+        "tables": list(ROLE_TABLES),
+        "directory": ROLE_DIR,
+        "metadata_files_found": 0,
+        "rights_files_found": 0,
+        "roles_read": 0,
+        "files_failed": [],
+        "observations": [],
+        "rows_written": 0,
+        "roles_written": 0,
+        "rights_written": 0,
+        "templates_written": 0,
+        "sources_written": 0,
+        "removed_previous": 0,
+        "removed_by_table": {table: 0 for table in ROLE_TABLES},
+        "written_by_table": {table: 0 for table in ROLE_TABLES},
+        "index_available": False,
+        "index_role_records": 0,
+        "index_rights_records": 0,
+        "index_only": [],
+        "file_only": [],
+        "uuid_mismatch": [],
+        "counts_by_content_state": {state: 0 for state in ROLE_CONTENT_STATES},
+        "counts_by_target_resolve_state": {state: 0 for state in ROLE_TARGET_RESOLVE_STATES},
+        "counts_by_right_name_state": {state: 0 for state in ROLE_RIGHT_NAME_STATES},
+        "counts_by_right_value_state": {state: 0 for state in ROLE_RIGHT_VALUE_STATES},
+        "counts_by_condition_state": {state: 0 for state in ROLE_CONDITION_STATES},
+        "counts_by_declaration_state": {state: 0 for state in ROLE_DECLARATION_STATES},
+        "targets_total": 0,
+        "targets_distinct": 0,
+        "rights_total": 0,
+        "restrictions_total": 0,
+        "restrictions_with_call": 0,
+        "restrictions_no_call": 0,
+        "restrictions_with_field": 0,
+        "restrictions_called_own_role": 0,
+        "restrictions_called_other_role": 0,
+        "template_occurrences": 0,
+        "template_names_total": 0,
+        "template_texts_distinct": 0,
+        "unknown_right_names": {},
+        "unexpected_tags": {},
+        "flag_missing": {},
+        "flag_unknown_form": {},
+        "duplicate_targets": [],
+        "duplicate_right_names": [],
+        "empty_condition_elements": 0,
+        "targets_without_name": 0,
+        "rights_without_name": 0,
+        "templates_without_name": 0,
+        "templates_without_text": 0,
+        "name_file_mismatch": [],
+        "roles_without_uuid": [],
+        "sources_without_uuid": [],
+        "content_file_missing": [],
+        "ambiguous_template_calls": [],
+        "statistics_refreshed": 0,
+        "warnings": [],
+    }
+
+
+def format_roles_lines(result: Dict[str, Any], indent: str = "") -> List[str]:
+    """Текст стадии S4d по закрытому контракту `roles_defaults()` (C1, C3).
+
+    Формат один для двух контуров: раздела карточки `load_1c_catalog_tool` и ответа
+    отдельного инструмента, который заводит шаг П5 (прецедент V45/V46/V48). Отказ форматёр
+    называет сам («Стадия не выполнена» / «Стадия не удалась»), вызывающий причину не
+    повторяет. Граница круга печатается и при успехе: «строки записаны» не равно «о ролях
+    сохранено всё», а пустой перечень прав без этой строки читался бы как «прав нет».
+    Неперечисленные ключи читаются нулями (C1).
+
+    Имя — `format_roles_lines`, а не `format_roles_answer` (план, раздел 5): форматёры
+    четырёх стадий слоя называются по одному образцу (`format_root_modules_lines`,
+    `format_child_object_lines`, `format_session_parameters_lines`), и пятому дано то же
+    имя — два имени у одного действия разъезжаются при первой же правке. Уточнение
+    записано планом узла (раздел П4).
+    """
+    lines: List[str] = []
+    if not result:
+        return lines
+
+    if not result.get("success"):
+        reason = result.get("error") or result.get("reason") or "загрузчик не назвал причину"
+        prefix = ("Стадия не выполнена" if result.get("status") in (None, STATUS_NOT_RUN)
+                  else "Стадия не удалась")
+        lines.append(f"{indent}{prefix}: {reason}")
+        lines.append(f"{indent}{ROLES_REPEAT_HINT}")
+        for warning in result.get("warnings") or []:
+            lines.append(f"{indent}⚠️ {warning}")
+        return lines
+
+    removed_by_table = result.get("removed_by_table") or {}
+    written_by_table = result.get("written_by_table") or {}
+    lines.append(
+        f"{indent}Записано строк по таблицам: "
+        + ", ".join(f"{table}={int(written_by_table.get(table) or 0)}"
+                    for table in ROLE_TABLES)
+        + f"; всего {int(result.get('rows_written') or 0)} (ролей "
+          f"{int(result.get('roles_read') or 0)}, прав "
+          f"{int(result.get('rights_total') or 0)})"
+    )
+    lines.append(
+        f"{indent}Файлов: метаданных {int(result.get('metadata_files_found') or 0)}, "
+        f"содержимого прав {int(result.get('rights_files_found') or 0)} "
+        f"(каталог {result.get('directory') or ROLE_DIR}/)"
+    )
+    if int(result.get("removed_previous") or 0):
+        lines.append(
+            f"{indent}Снято прежних строк этой конфигурации: "
+            + ", ".join(f"{table}={int(removed_by_table.get(table) or 0)}"
+                        for table in ROLE_TABLES)
+            + f"; всего {int(result.get('removed_previous') or 0)} — идемпотентность "
+              "держится явным DELETE по configuration_uuid: внешнего ключа и каскада по "
+              "конфигурации в схеме нет осознанно (прецедент V20.1)"
+        )
+    else:
+        lines.append(f"{indent}Прежних строк этой конфигурации не снималось")
+
+    content_counts = result.get("counts_by_content_state") or {}
+    lines.append(
+        f"{indent}Состояния содержимого ролей: "
+        + ", ".join(f"{state}={int(content_counts.get(state) or 0)}"
+                    for state in ROLE_CONTENT_STATES)
+        + " — «прав нет» (empty_content), «файла содержимого нет» (indexed_no_file) и "
+          "«файл вне перечня» (file_not_in_index) различаются состоянием строки, а не "
+          "нулём прав (Q6 узла V49, вариант A)"
+    )
+
+    resolve_counts = result.get("counts_by_target_resolve_state") or {}
+    lines.append(
+        f"{indent}Целей {int(result.get('targets_total') or 0)} "
+        f"(различающихся {int(result.get('targets_distinct') or 0)}); состояния "
+        "разрешения: "
+        + ", ".join(f"{state}={int(resolve_counts.get(state) or 0)}"
+                    for state in ROLE_TARGET_RESOLVE_STATES)
+        + " — неразрешённая цель остаётся строкой с состоянием и неполным путём, а не "
+          "молчанием (Q3)"
+    )
+
+    name_counts = result.get("counts_by_right_name_state") or {}
+    value_counts = result.get("counts_by_right_value_state") or {}
+    lines.append(
+        f"{indent}Права {int(result.get('rights_total') or 0)}: имена — "
+        + ", ".join(f"{state}={int(name_counts.get(state) or 0)}"
+                    for state in ROLE_RIGHT_NAME_STATES)
+        + "; значения — "
+        + ", ".join(f"{state}={int(value_counts.get(state) or 0)}"
+                    for state in ROLE_RIGHT_VALUE_STATES)
+        + " — false читается состоянием `denied`, а не отсутствием строки (замер O1: в "
+          "KomMag все 2 899 прав имеют значение false)"
+    )
+    for name, count in sorted((result.get("unknown_right_names") or {}).items())[:10]:
+        lines.append(
+            f"{indent}  ⚠️ имя права вне словаря разбора: {name} ({count}) — XSD вида "
+            "отсутствует (O5), имя сохраняется текстом и состоянием `unknown_name`"
+        )
+
+    condition_counts = result.get("counts_by_condition_state") or {}
+    lines.append(
+        f"{indent}Ограничений {int(result.get('restrictions_total') or 0)}: состояния — "
+        + ", ".join(f"{state}={int(condition_counts.get(state) or 0)}"
+                    for state in ROLE_CONDITION_STATES)
+        + f"; с опознанным вызовом {int(result.get('restrictions_with_call') or 0)} "
+          f"(своей роли {int(result.get('restrictions_called_own_role') or 0)}, чужой "
+          f"{int(result.get('restrictions_called_other_role') or 0)}), без вызова "
+          f"{int(result.get('restrictions_no_call') or 0)}, с полем <field> "
+          f"{int(result.get('restrictions_with_field') or 0)} — два круга вызовов "
+          "считаются раздельно, потому что круг их деклараций разный (замер 2.7)"
+    )
+    lines.append(
+        f"{indent}Шаблоны ограничений: вхождений "
+        f"{int(result.get('template_occurrences') or 0)}, имён "
+        f"{int(result.get('template_names_total') or 0)}, различных текстов "
+        f"{int(result.get('template_texts_distinct') or 0)} — строка держится парой "
+        "(имя, отпечаток), поэтому «тот же текст под другим именем» и «то же имя с другим "
+        "текстом» различимы (Q5, O6)"
+    )
+
+    declaration_counts = result.get("counts_by_declaration_state") or {}
+    lines.append(
+        f"{indent}Дескрипторы файлов содержимого: "
+        + ", ".join(f"{state}={int(declaration_counts.get(state) or 0)}"
+                    for state in ROLE_DECLARATION_STATES)
+        + " — «запись индекса без файла» является отдельной строкой, а не отсутствием "
+          "строки (Q8 узла V49, вариант A)"
+    )
+
+    if not result.get("index_available"):
+        lines.append(
+            f"{indent}Индекс состава не читается — сверка файлов с перечнем и разрешение "
+            "целей невозможны, и «объекта нет в перечне» от «перечень этой конфигурации не "
+            "загружен» этим не отличить"
+        )
+    else:
+        index_only = result.get("index_only") or []
+        file_only = result.get("file_only") or []
+        uuid_mismatch = result.get("uuid_mismatch") or []
+        lines.append(
+            f"{indent}Сверка с индексом состава: записей `Role.<Имя>` "
+            f"{int(result.get('index_role_records') or 0)}, записей `Role.<Имя>.Rights` "
+            f"{int(result.get('index_rights_records') or 0)}; записей перечня без файла "
+            f"{len(index_only)}, файлов без записи перечня {len(file_only)}, несовпадений "
+            f"uuid {len(uuid_mismatch)} — нули названы числом, потому что четыре "
+            "замеренные выгрузки дают именно нули, а подразумевать их нельзя"
+        )
+        for name in index_only[:10]:
+            lines.append(f"{indent}  ⚠️ запись индекса без файла метаданных: {name}")
+        for name in file_only[:10]:
+            lines.append(f"{indent}  ⚠️ файл метаданных без записи индекса: {name}")
+        for item in uuid_mismatch[:10]:
+            lines.append(
+                f"{indent}  ⚠️ uuid файла роли {item.get('object_name')}: файл "
+                f"{item.get('file_uuid')} не совпадает с uuid индекса "
+                f"{item.get('index_uuid')}"
+            )
+
+    for name in (result.get("content_file_missing") or [])[:10]:
+        lines.append(
+            f"{indent}  ⚠️ у роли, описанной файлом метаданных, нет ни файла "
+            f"содержимого, ни записи индекса: {name}"
+        )
+    for name, count in sorted((result.get("flag_missing") or {}).items())[:10]:
+        lines.append(
+            f"{indent}  ⚠️ элемент флага содержимого в файле отсутствует: {name} ({count}) "
+            "— NULL означает «флага никогда не было», а не `false`"
+        )
+    for name, count in sorted((result.get("flag_unknown_form") or {}).items())[:10]:
+        lines.append(f"{indent}  ⚠️ флаг в незнакомой форме: {name} ({count})")
+    for item in (result.get("ambiguous_template_calls") or [])[:10]:
+        lines.append(
+            f"{indent}  ⚠️ вызов шаблона разрешился двум декларациям: роль "
+            f"{item.get('role')}, цель {item.get('target')}, право {item.get('right')}"
+        )
+    for item in (result.get("duplicate_targets") or [])[:10]:
+        lines.append(f"{indent}  ⚠️ повторяющаяся цель в файле роли: {item}")
+    for item in (result.get("duplicate_right_names") or [])[:10]:
+        lines.append(f"{indent}  ⚠️ повторяющееся право одной цели: {item}")
+    for item in (result.get("name_file_mismatch") or [])[:10]:
+        lines.append(
+            f"{indent}  ⚠️ <Name> файла {item.get('file')} не совпало с именем файла "
+            f"{item.get('name_expected')} (в файле {item.get('name_in_file')})"
+        )
+    for name, count in sorted((result.get("unexpected_tags") or {}).items())[:10]:
+        lines.append(f"{indent}  ⚠️ незнакомый тег файла прав: {name} ({count})")
+    for observation in (result.get("observations") or [])[:10]:
+        lines.append(f"{indent}  ⚠️ круг каталога: {observation[0]} — {observation[1]}")
+    for failure in (result.get("files_failed") or [])[:10]:
+        lines.append(f"{indent}  ⚠️ файл не разобран: {failure.get('source_path')} — "
+                     f"{failure.get('reason')}")
+    for key in ("empty_condition_elements", "targets_without_name", "rights_without_name",
+                "templates_without_name", "templates_without_text"):
+        if int(result.get(key) or 0):
+            lines.append(f"{indent}  ⚠️ {key}: {int(result.get(key) or 0)}")
+    for key in ("roles_without_uuid", "sources_without_uuid"):
+        if result.get(key):
+            lines.append(
+                f"{indent}  ⚠️ {key}: "
+                + ", ".join(str(item) for item in (result.get(key) or [])[:10])[:200]
+            )
+
+    refreshed = int(result.get("statistics_refreshed") or 0)
+    if refreshed:
+        lines.append(
+            f"{indent}Статистика таблиц {', '.join(ROLE_TABLES)} пересобрана (ANALYZE): "
+            f"{refreshed} — без неё читатели витрин текущего состояния платят минутами "
+            "(мера V46)"
+        )
+    for warning in result.get("warnings") or []:
+        lines.append(f"{indent}⚠️ {warning}")
+    lines.append(f"{indent}Граница: {ROLES_BOUNDARY}")
     return lines
 
 

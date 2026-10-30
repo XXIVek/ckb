@@ -108,6 +108,33 @@
   * отдельная точка входа группы есть — `load_session_parameters_tool` того же слоя (шаг П5
     того же узла): повтор стадии не требует пересоздания конфигурации `force=True`.
 
+Узел V49 (30.10.2026, шаг П4) — свойства ролей конфигурации, позиция 2.4 нормативного
+списка (`docs/CONFIGURATION_ROLES_PLAN.md`):
+
+    src/configuration_roles_loader.py :: load_roles(source_path, configuration_uuid=None,
+    changed_at=None)  →  четыре таблицы `roles`, `role_rights`,
+    `role_restriction_templates`, `role_sources`
+
+Порядок вызова и границы повторяют S3/S4/S4c: стадия идёт ПОСЛЕ фиксации заголовка и индекса
+состава, потому что цели прав разрешаются записями `configuration_objects` (Q3). Дальнейшее
+отличает её от соседних стадий, и эти отличия держат здесь, а не в догадках читающего:
+
+  * стадия `s4d_roles` стоит между `s4c_session_parameters` и `s4b_object_modules` — порядок
+    `STAGES` повторяет порядок нормативного списка (2.4 идёт сразу за 2.3); перенумерации
+    нет, S5 по-прежнему зарезервирован за анализом;
+  * ответ лежит в собственном ключе `roles` (правило C3), а не внутри `child_objects`;
+  * круг пишется ОДНОЙ транзакцией в четырёх таблицах, и порядок записи держится иерархией
+    данных: роли (`insert_ids`, `RETURNING id`) → права, ссылающиеся на id этих строк
+    (Q2, вариант A: своей цепи ревизий у `role_rights` нет) → тексты шаблонов ограничений →
+    дескрипторы файлов содержимого;
+  * строки вида снимаются вместе с заголовком явным `DELETE` по `configuration_uuid`
+    (`remove_roles` в `_remove_rows`), начиная с `role_rights`: её собственный FK на строку
+    роли объявлен с `ON DELETE CASCADE`, и каскад снял бы права без точного счётчика, а
+    оператор обязан видеть полное состояние, снятое `force=True` (M7);
+  * флагов круга у стадии нет: отказ стадии останавливает конвейер (Q8 узла V48), а
+    раздельный вход с `kinds` — решение по замеру времени (позиция O8 плана), а не
+    заранее обещанная возможность.
+
 
 
 Чтения идут через psycopg2 (`src/external_db.py`), а не psql-подпроцессом: `_run_psql` /
@@ -152,6 +179,13 @@ from configuration_session_parameters_loader import (
     load_session_parameters,
     remove_session_parameters,
 )
+# Узел V49 (стадия S4d, позиция 2.4 списка): свойства ролей. Точка входа одна — тот же
+# слой, что и отдельный инструмент `load_roles_tool` (шаг П5); контракт стадии и форматёр
+# текста общие (прецедент V45/V46/V48). Снятие строк четырёх таблиц по uuid заголовка держит
+# этот же слой: внешнего ключа и каскада по конфигурации в схеме нет осознанно (прецедент
+# V20.1), поэтому `_remove_rows` обязан вызвать его явно — иначе force=True оставил бы в базе
+# прежний состав вида (для BP3 это 682 строки ролей и 76 332 строки прав).
+from configuration_roles_loader import load_roles, remove_roles
 # Узел V47 (стадия S4b): модули объектов конфигурации — вторая транзакция после фиксации
 # содержимого (Q6, граница D7). Точка входа стадии одна и отдельного инструмента у неё нет
 # (Q4.1), поэтому здесь импортируется и ответ «стадия не выполнялась» (`mark_index_unavailable`):
@@ -167,6 +201,8 @@ from configuration_load_contract import (
     CHILD_SECTION_HEADER,
     NOT_RUN_STOPPED_REASON,
     OBJECT_MODULES_SECTION_HEADER,
+    ROLES_REPEAT_HINT,
+    ROLES_SECTION_HEADER,
     ROOT_MODULES_REPEAT_HINT,
     ROOT_MODULES_SECTION_HEADER,
     SESSION_PARAMETERS_REPEAT_HINT,
@@ -175,12 +211,14 @@ from configuration_load_contract import (
     STAGE_CHILD_OBJECTS,
     STAGE_INCOMPLETE_GROUPS,
     STAGE_OBJECT_MODULES,
+    STAGE_ROLES,
     STAGE_ROOT_MODULES,
     STAGE_SESSION_PARAMETERS,
     STATUS_ERROR,
     STATUS_NOT_RUN,
     build_stopped_stage,
     child_objects_defaults,
+    roles_defaults,
     root_modules_defaults,
     session_parameters_defaults,
     stage_title,
@@ -456,6 +494,15 @@ def _remove_rows(cur, cfg_id, configuration_uuid=None):
     # модулей корня и свойств V46 до соответствующих шагов).
     if configuration_uuid:
         children[SESSION_PARAMETER_TABLE] = remove_session_parameters(cur, configuration_uuid)
+    # Узел V49 (стадия S4d): строки четырёх таблиц ролей тоже адресуются uuid заголовка,
+    # а внешнего ключа и каскада по нему в схеме нет осознанно (прецедент V20.1). Значит
+    # снятие обязан выполнить этот же явный DELETE: без него force=True оставил бы в базе
+    # строки, которые ни к какой конфигурации не относятся и не читаются ни одной карточкой.
+    # Снятие начинается с `role_rights` (порядок держит `REMOVE_ORDER` слоя): её собственный
+    # FK на строку роли объявлен с ON DELETE CASCADE, и каскад снял бы права молча, без
+    # точного счётчика — оператор обязан видеть полное состояние, снятое force=True (M7).
+    if configuration_uuid:
+        children.update(remove_roles(cur, configuration_uuid))
     cur.execute("DELETE FROM configurations WHERE id = %s", [cfg_id])
     children["configurations"] = cur.rowcount
     return children
@@ -553,7 +600,8 @@ def _objects_table_available():
 
 
 def _written_before_stop_note(new_id, objects_written, header_arrays_filled,
-                              root_modules, child_objects, session_parameters):
+                              root_modules, child_objects, session_parameters,
+                              roles=None):
     """Что реально лежит в базе на момент остановки конвейера (узел V48, шаг П8).
 
     Строка обязана быть: остановка стадии откатом не является (стадии S3+ идут после коммита
@@ -575,6 +623,15 @@ def _written_before_stop_note(new_id, objects_written, header_arrays_filled,
     if session_parameters.get("success"):
         parts.append(f"свойства параметров сеанса: "
                      f"{int(session_parameters.get('rows_written') or 0)} строк")
+    # Узел V49 (стадия S4d): четыре таблицы называются своими числами — «роли записаны» без
+    # числа прав читалось бы как полный состав вида, хотя прав в базе может и не быть.
+    if roles and roles.get("success"):
+        parts.append(
+            "свойства ролей: "
+            + ", ".join(f"{table}={int((roles.get('written_by_table') or {}).get(table) or 0)}"
+                        for table in ("roles", "role_rights", "role_restriction_templates",
+                                      "role_sources"))
+        )
     return "; ".join(parts)
 
 
@@ -868,6 +925,9 @@ def register_configuration(source_path, force=False, xml_path=None):
     root_modules = root_modules_defaults()
     child_objects = child_objects_defaults()
     session_parameters = session_parameters_defaults()
+    # Узел V49 (стадия S4d, позиция 2.4 списка): свойства ролей — ответ в собственном ключе
+    # `roles` (правило C3), порядок вызова повторяет порядок нормативного списка.
+    roles = roles_defaults()
     object_modules = object_modules_defaults()
     # Узел V48 (шаг П8, правило C2): пропущенная стадия называет причину пропуска. Без неё
     # форматёр стадии печатает «загрузчик не назвал причину», и читатель карточки видит
@@ -876,7 +936,7 @@ def register_configuration(source_path, force=False, xml_path=None):
     # пропущенной стадии ставит загрузчик — право назвать состояние стадии принадлежит ему
     # (тот же приём, что `mark_index_unavailable` узла V47). Причина — в `reason`, а не в
     # `error`: «не выполнялась» и «отказала после начала работы» различаются именно так.
-    for _empty_stage in (child_objects, session_parameters, object_modules):
+    for _empty_stage in (child_objects, session_parameters, roles, object_modules):
         _empty_stage["reason"] = NOT_RUN_STOPPED_REASON
     object_modules["status"] = STATUS_NOT_RUN
     stopped_stage = stopped_stage_defaults()
@@ -894,7 +954,8 @@ def register_configuration(source_path, force=False, xml_path=None):
         return _stage_stop(
             stage_id, stage_result,
             _written_before_stop_note(new_id, objects_written, header_arrays_filled,
-                                      root_modules, child_objects, session_parameters),
+                                      root_modules, child_objects, session_parameters,
+                                      roles),
             warnings, incomplete_groups)
 
     if not stopped:
@@ -995,6 +1056,52 @@ def register_configuration(source_path, force=False, xml_path=None):
                 + f"{SESSION_PARAMETERS_REPEAT_HINT} (configuration_uuid={row['uuid']})."
             )
             stopped_stage = _stop_here(STAGE_SESSION_PARAMETERS, session_parameters)
+            stopped = True
+            load_incomplete = True
+
+    # ── узел V49 (стадия S4d, позиция 2.4 списка): свойства ролей конфигурации ─────────
+    # Порядок вызова повторяет S3/S4/S4c: ПОСЛЕ коммита транзакции заголовка (своим
+    # соединением стадия не увидела бы незакоммиченного заголовка и строк индекса состава,
+    # по которым разрешаются цели прав — Q3), ключ — uuid, каталог тот же `root_source`.
+    # Стадия отдельная, а не третий вид S4 и не расширение S4c (прецедент Q5 узла V48):
+    # правило C3 требует своего ключа ответа `roles`; порядок `STAGES` повторяет порядок
+    # нормативного списка (2.4 идёт сразу за 2.3). Отказ стадии, как у S3/S4/S4c,
+    # записанный заголовок не отменяет (C5) — но останавливает конвейер (решение Q8 узла
+    # V48, вариант A): S4b после отказа S4d не выполняется и читается `not_run`.
+    #
+    # Флагов «не читать права» у стадии нет: круг вида — четыре таблицы одной транзакции,
+    # и право без строки роли было бы составом, которого в выгрузке нет. Отдельный вход с
+    # `kinds` — решение по замеру времени (позиция O8 плана), а не заранее обещанный флаг.
+    #
+    # Штамп времени общий с остальными стадиями этой загрузки (M2) — `load_moment` задан
+    # выше, где начинается событие детей заголовка.
+    if not stopped:
+        try:
+            roles = load_roles(root_source, configuration_uuid=row["uuid"],
+                               changed_at=load_moment)
+        except Exception as exc:  # noqa: BLE001 — отказ стадии называется, а не бросается
+            roles = roles_defaults()
+            roles["configuration_id"] = new_id
+            roles["configuration_uuid"] = row["uuid"]
+            roles["configuration_name"] = row["name"]
+            roles["status"] = STATUS_ERROR
+            roles["error"] = f"исключение слоя свойств ролей конфигурации: {exc}"
+            roles["reason"] = roles["error"]
+        for role_warning in roles.get("warnings") or []:
+            warnings.append(f"роли: {role_warning}")
+        if not roles.get("success"):
+            # Заголовок, индекс состава, модули корня, свойства подсистем с общими модулями
+            # и свойства параметров сеанса уже записаны, и отказ этой стадии их не отменяет
+            # (C5). Молчать нельзя по той же причине, что у V44/V46/V48: после force=True
+            # прежние строки сняты, и «загружено» без этой строки читалось бы как полный
+            # состав конфигурации.
+            warnings.append(
+                "Свойства ролей не загружены — причина названа строкой "
+                "«Стадия не выполнена» в разделе «" + ROLES_SECTION_HEADER
+                + "» карточки. Чем продолжить: "
+                + f"{ROLES_REPEAT_HINT} (configuration_uuid={row['uuid']})."
+            )
+            stopped_stage = _stop_here(STAGE_ROLES, roles)
             stopped = True
             load_incomplete = True
 
@@ -1102,6 +1209,11 @@ def register_configuration(source_path, force=False, xml_path=None):
         # раздела даёт общий форматёр контракта — тот же, что отдаёт отдельный инструмент
         # `load_session_parameters_tool` (шаг П5).
         "session_parameters": session_parameters,
+        # узел V49: машинная часть стадии S4d (позиция 2.4 списка) — полная; ответ лежит в
+        # собственном ключе, а не внутри `child_objects` или `session_parameters` (правило
+        # C3). Текст раздела даёт общий форматёр контракта — тот же, что отдаёт отдельный
+        # инструмент `load_roles_tool` (шаг П5).
+        "roles": roles,
         # узел V47: машинная часть стадии S4b — полная (тот же закрытый контракт, который
         # читают проба П4 и проверка П5); текст раздела даёт общий форматёр контракта.
         # `load_incomplete`/`incomplete_groups` — признак того, что состав в БД неполный
