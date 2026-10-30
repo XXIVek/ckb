@@ -36,6 +36,7 @@ from configuration_loader import OBJECTS_TABLE, register_configuration
 # инструмента: карточка и инструмент обязаны рассказывать об одном слое одинаково.
 from configuration_load_contract import (
     CHILD_SECTION_HEADER,
+    COMMON_ATTRIBUTES_SECTION_HEADER,
     OBJECT_MODULES_SECTION_HEADER,
     ROLES_SECTION_HEADER,
     ROLE_META_TAG,
@@ -46,6 +47,7 @@ from configuration_load_contract import (
     SESSION_PARAMETER_TABLE,
     STOP_STAGE_SECTION_HEADER,
     format_child_object_lines,
+    format_common_attributes_lines,
     format_object_module_lines,
     format_roles_lines,
     format_root_modules_lines,
@@ -394,13 +396,16 @@ def _existing_card(existing, table):
 
 
 def _stage_section_lines(result):
-    """Разделы четырёх стадий детей — один код для успеха и для остановки.
+    """Разделы стадий детей заголовка — один код для успеха и для остановки.
 
     Узел V48 (шаг П8, решение Q8 вариант A): разделы печатались только в карточке успеха,
     но состояние стадии нужно читать и когда конвейер остановлен: `not_run` последующих
     стадий и причина отказа живут именно здесь. Держать два набора вызовов форматёров
     значило бы иметь два описания одного состава (тот же приём, по которому форматёр стадии
     один на карточку и на отдельный инструмент).
+
+    Число разделов в docstring не называется: их задаёт порядок стадий, а не этот код, и
+    названное число устаревает с каждым новым узлом (S3, S4, S4c, S4d, S4e, S4b).
     """
     lines = []
     # Узел V45 (стадия S3): код предопределённых программ корня. Текст даёт общий
@@ -443,6 +448,16 @@ def _stage_section_lines(result):
     if roles_part:
         lines.append(f"{ROLES_SECTION_HEADER}:")
         lines.extend(format_roles_lines(roles_part, indent="   "))
+    # Узел V50 (стадия S4e, позиция 2.5 списка): свойства общих реквизитов.
+    # Раздел печатается и при отказе стадии, и при `not_run` — по той же причине, что у
+    # S3/S4/S4c/S4d: «загружено» без него читалось бы как «состав конфигурации в БД есть
+    # весь». Ответ стадии лежит в собственном ключе, а не внутри `child_objects`,
+    # `session_parameters` или `roles` (правило C3); текст даёт общий форматёр контракта —
+    # тот же, что отдаёт отдельный инструмент `load_common_attributes_tool` (шаг П5).
+    common_attributes_part = result.get("common_attributes") or {}
+    if common_attributes_part:
+        lines.append(f"{COMMON_ATTRIBUTES_SECTION_HEADER}:")
+        lines.extend(format_common_attributes_lines(common_attributes_part, indent="   "))
     # Узел V47 (стадия S4b): модули объектов конфигурации — вторая транзакция загрузки
     # (Q6, граница D7). Раздел печатается и при отказе стадии, и при `not_run` (индекс
     # состава не разобран — круг не определён): «конфигурация загружена» без него

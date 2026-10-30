@@ -32,6 +32,19 @@ S4c повторяет поведение S3/S4: он не отменяет за
 же узла. Отдельная точка входа группы есть — `load_session_parameters_tool` (шаг П5 того же
 узла, реестр сервера — шесть инструментов): повтор стадии не требует перезагрузки конфигурации.
 
+Узел V49 (30.10.2026, позиция 2.4 нормативного списка) добавил стадию S4d — свойства ролей
+(`roles`, `role_rights`, `role_restriction_templates`, `role_sources`), узел V50 (30.10.2026,
+позиция 2.5) — стадию S4e — свойства общих реквизитов (`common_attributes`,
+`common_attribute_targets`). Обе стоят между S4c и S4b потому, что порядок `STAGES` повторяет
+порядок нормативного списка, а правило C3 требует своего ключа ответа (`roles`,
+`common_attributes`): разбивать чужой ключ значило бы переименовывать контракт соседнего
+узла. Отказ любой из них повторяет поведение S3/S4 (записанный заголовок не отменяется) и
+останавливает конвейер по решению Q8 узла V48; отдельный вход группы у каждой свой —
+`load_roles_tool` (шаг П5 узла V49) и `load_common_attributes_tool` (шаг П5 узла V50).
+Групп запроса (`kinds`) у S4e нет: строка применения существует только через id строки
+реквизита (Q1 узла V50, вариант A), поэтому частичная запись круга описывала бы состав,
+которого в выгрузке нет.
+
 Запланированная S5 (дополнение оператора 23.10.2026 — НЕ реализована, в `STAGES` её нет): анализ
 загруженной конфигурации по уже сохранённым строкам БД, построение необходимых сниппетов по
 объектам и при необходимости перекрёстных ссылок на документацию (`config_*`, контракт V17).
@@ -133,8 +146,20 @@ from configuration_roles import (
 # сразу после шага П1 узла V50). Разбор ничего из этого контракта не импортирует, цикл
 # односторонний.
 from configuration_common_attributes import (
+    CONTENT_STATES as CA_CONTENT_STATES,
+    DIR_NAME as COMMON_ATTRIBUTES_DIR,
+    ITEM_COND_STATES as CA_ITEM_COND_STATES,
+    MULTIPLICITY_VALUES as CA_MULTIPLICITY_VALUES,
+    OBJECT_KIND_TAG as COMMON_ATTRIBUTE_META_TAG,
+    PROPERTIES_STATES as CA_PROPERTIES_STATES,
+    RECORD_STATES as CA_TYPE_STATES,
+    SEPARATION_BLOCKS as COMMON_ATTRIBUTE_SEPARATION_BLOCKS,
+    SEPARATION_STATES as CA_SEPARATION_STATES,
     TABLE_NAME as COMMON_ATTRIBUTE_TABLE,
+    TARGET_RESOLVE_STATES as CA_TARGET_RESOLVE_STATES,
     TARGETS_TABLE_NAME as COMMON_ATTRIBUTE_TARGETS_TABLE,
+    TYPE_CLASS_VALUES as CA_TYPE_CLASS_VALUES,
+    USE_STATES as CA_USE_STATES,
 )
 from current_revision import CONFIGURATION_VERSIONED_TABLES
 
@@ -157,6 +182,16 @@ STAGE_SESSION_PARAMETERS = "s4c_session_parameters"
 # раздел 5): позиция 2.4 идёт сразу за 2.3, то есть между S4c и S4b; существующие стадии
 # не перенумеровываются, номер S5 по-прежнему зарезервирован за планируемой стадией анализа.
 STAGE_ROLES = "s4d_roles"
+# Узел V50 (30.10.2026, позиция 2.5 нормативного списка): свойства общих реквизитов —
+# отдельная стадия по той же причине, что S4c (V48) и S4d (V49): правило C3 требует своего
+# ключа ответа `common_attributes`, а разбивать чужой ключ значило бы переименовывать
+# контракт соседнего узла. Порядок `STAGES` повторяет порядок нормативного списка
+# (docs/CONFIGURATION_COMMON_ATTRIBUTES_PLAN.md, раздел 5): позиция 2.5 идёт сразу за 2.4,
+# то есть между S4d и S4b; существующие стадии не перенумеровываются, номер S5 по-прежнему
+# зарезервирован за планируемой стадией анализа. Групп запроса (`kinds`) у вида нет: круг —
+# строка реквизита и строки её применения как единое целое (Q1, вариант A), отдельный вход
+# дозагружает весь круг сразу (Q10, вариант A: порог раздельной дозыгрузки не замерен).
+STAGE_COMMON_ATTRIBUTES = "s4e_common_attributes"
 # Узел V47 (28.10.2026): тексты модулей объектов конфигурации. Номер S4b, а не S5:
 # S5 остаётся за планируемой стадией анализа (дополнение оператора 23.10.2026), которой
 # в `STAGES` нет. Стадия идёт сразу за S4 и является второй транзакцией загрузки (Q6,
@@ -171,6 +206,8 @@ STAGES: Tuple[Tuple[str, str], ...] = (
     (STAGE_CHILD_OBJECTS, "Содержимое дочерних объектов конфигурации"),
     (STAGE_SESSION_PARAMETERS, "Свойства параметров сеанса (SessionParameters, позиция 2.3)"),
     (STAGE_ROLES, "Свойства ролей конфигурации (Roles, позиция 2.4)"),
+    (STAGE_COMMON_ATTRIBUTES,
+     "Свойства общих реквизитов (CommonAttributes, позиция 2.5)"),
     (STAGE_OBJECT_MODULES, "Модули объектов конфигурации (тексты Ext/, вторая транзакция)"),
 )
 
@@ -379,6 +416,8 @@ def stage_resume_hint(stage_id: str) -> str:
         return SESSION_PARAMETERS_REPEAT_HINT
     if stage_id == STAGE_ROLES:
         return ROLES_REPEAT_HINT
+    if stage_id == STAGE_COMMON_ATTRIBUTES:
+        return COMMON_ATTRIBUTES_REPEAT_HINT
     if stage_id == STAGE_OBJECT_MODULES:
         return OBJECT_MODULES_RELOAD_HINT
     return "полная перезагрузка load_1c_catalog_tool(source_path=…, force=True)"
@@ -700,8 +739,6 @@ ROLE_TABLES_BY_KIND: Dict[str, Tuple[str, ...]] = {
 ROLE_KIND_WRITE_ORDER: Tuple[str, ...] = (
     ROLE_KIND_ROLES, ROLE_KIND_RIGHTS, ROLE_KIND_RESTRICTIONS,
 )
-# Таблицы, чьи строки остаются нетронутыми, когда группа не запрошена: ответ обязан назвать
-# это, а не отдать нули как «в конфигурации ничего нет» (C2).
 # Узел V50 (общие реквизиты, 30.10.2026): тот же дефект — третьим узлом. Регистрация двух
 # таблиц вида в круге версионности (шаг П1) молча добавила к кругу S4 `common_attributes`:
 # проба `_v46_p4_writer_probe.py` упала на `KeyError: 'common_attributes'`, потому что
@@ -716,6 +753,55 @@ COMMON_ATTRIBUTES_TABLES: Tuple[str, ...] = (
     COMMON_ATTRIBUTE_TABLE,
     COMMON_ATTRIBUTE_TARGETS_TABLE,
 )
+
+# ── контракт стадии S4e (узел V50, шаг П4, позиция 2.5 списка) ──────────────────────
+# Заголовок раздела, подсказка о повторе и граница круга объявлены рядом с кругом таблиц
+# стадии — по той же причине, что у V48 и V49: текст незакрытой части ссылается на раздел,
+# где читается отказ стадии, а держать два написания одного заголовка нельзя. Имена таблиц,
+# каталог вида и словари состояний приходят импортом из разбора
+# (`src/configuration_common_attributes.py`) — второго перечня таблиц или состояний в проекте
+# нет.
+COMMON_ATTRIBUTES_SECTION_HEADER = "СВОЙСТВА ОБЩИХ РЕКВИЗИТОВ (узел V50, позиция 2.5)"
+
+# Что обязан сказать ответ о повторе стадии. Отдельная точка входа группы —
+# `load_common_attributes_tool` (шаг П5 узла, тот же слой, что стадия — прецедент
+# V44/V46/V48/V49); строка меняется одним местом, когда состав реестра инструментов меняется
+# (`tools/check_mcp_tool_wiring.py`).
+COMMON_ATTRIBUTES_REPEAT_HINT = (
+    "Повторить стадию можно отдельным входом группы "
+    "load_common_attributes_tool(source_path=…) без перезагрузки конфигурации "
+    "(узел V50, шаг П5) либо полной перезагрузкой "
+    "load_1c_catalog_tool(source_path=…, force=True)"
+)
+
+# Граница круга называется и при успехе: «строки записаны» не равно «об общих реквизитах
+# сохранено всё». Формулировка держится замеров раздела 2 плана V50 и решений Q1–Q3, Q5, Q7:
+# без неё пустой блок разделения читался бы как «разделения нет», а неразрешённая цель —
+# как потерянная ссылка.
+COMMON_ATTRIBUTES_BOUNDARY = (
+    f"круг узла — файлы регистрации вида {COMMON_ATTRIBUTE_META_TAG} из каталога "
+    f"{COMMON_ATTRIBUTES_DIR}/ (позиция 2.5 списка): в `common_attributes` идут 38 свойств "
+    "файла регистрации (имя, синоним, комментарий, флаги, значения словарей), блок `<Type>` "
+    "в закрытом словаре записей (`types`, `type_qualifiers`, кратность) и три блока "
+    "разделения данных; в `common_attribute_targets` — строки перечня `<Content>` (цель, "
+    "порядок в файле, состояние применения, условие разделения позиции). Строка применения "
+    "версионируется НЕ своей цепью (Q2, вариант A): своей истории у неё нет, ключ "
+    "начинается с `common_attribute_id` — числового id конкретной ревизии строки реквизита, "
+    "текущность читается витриной `v_current_common_attributes` связкой по этому id, а "
+    "каскад `common_attribute_targets_common_attribute_id_fkey` снимает применение вместе со "
+    "строкой реквизита. Цель применения и ссылка разделения — ссылка на СТРОКУ индекса "
+    "состава (Q3): внешнего ключа нет, потому что цель бывает `prefix_only` или `unresolved` "
+    "(замеры 2.6 и 2.7 дают 1 512 из 1 512 `exact` — состояния обязаны быть названы, а не "
+    "подразумеваться). Значения СВОЙСТВ вида CHECK'ом не замкнуты (Q7, вариант A): "
+    "закрытость держит измеренный словарь `PROPERTY_VALUE_DICTIONARY`, незнакомое значение "
+    "остаётся значением с состоянием `unknown_value` и именем виновника, а не отказом "
+    "записи. Непустых блоков разделения на четырёх выгрузках 12 из 48 (замер 2.7): пустой "
+    "блок является состоянием `empty_value`, а не пустой строкой; непустая форма "
+    "`<xr:ConditionalSeparation>` — позиция O4 плана, узла загрузки нет. Модулей, форм и "
+    "макетов у вида нет (замер 2.1); обратных отсылок из объектов-носителей тоже (замер "
+    "2.10: ссылки дают подсистемы, роли и функциональные опции, чьи слои не загружены)"
+)
+
 # Таблицы, чьи строки остаются нетронутыми, когда группа не запрошена: ответ обязан назвать
 # это, а не отдать нули как «в конфигурации ничего нет» (C2).
 FOREIGN_STAGE_TABLES: Tuple[str, ...] = (
@@ -1629,4 +1715,366 @@ def format_roles_lines(result: Dict[str, Any], indent: str = "") -> List[str]:
     lines.append(f"{indent}Граница: {ROLES_BOUNDARY}")
     return lines
 
+
+
+
+def common_attributes_separation_defaults() -> Dict[str, Any]:
+    """Один блок разделения данных с нулями (C1).
+
+    Разбивка ведётся по двум осям, а не по одной: `by_parse_state` отвечает на вопрос
+    «было ли значение в файле» (`empty_value` — блока нет или он пуст, 12 из 16 файлов на
+    каждый блок по замеру 2.7), `by_resolve_state` — на вопрос «найдена ли цель в индексе
+    состава» (Q3). Одна ось не отличает «разделения нет» от «разделение есть, цель
+    неразрешима», а это разные факты (C2).
+    """
+    return {
+        "by_parse_state": {state: 0 for state in CA_SEPARATION_STATES},
+        "by_resolve_state": {state: 0 for state in CA_TARGET_RESOLVE_STATES},
+    }
+
+
+def common_attributes_defaults() -> Dict[str, Any]:
+    """Закрытый контракт стадии S4e с нулями (C1, C2, C3).
+
+    Словарь плоский — тот же, что возвращает слой `load_common_attributes`; конвейер
+    вкладывает его в свой ключ `common_attributes` без переименования (C3). `status`
+    различает «стадия не выполнялась» (`not_run`, C2) и «выполнилась с отказом» (`error`).
+
+    Имена ключей сводки совпадают с именами разбора
+    `src/configuration_common_attributes.py` намеренно (прецедент `SUMMARY_KEYS` узлов
+    V46/V48/V49): неперечисленный ключ контракта читается нулём, а не исчезает, а
+    незнакомый ключ разбора не попадает в ответ, которого карточка не обещала. Ключей
+    `rows` / `targets` здесь нет намеренно: это строки записи (до 817 строк применения на
+    BP3), а не сводка состояния.
+
+    Что обязан назвать ответ отдельно (план, раздел 5):
+
+    * `removed_by_table` / `written_by_table` — двумя таблицами, а не одним числом: «записано
+      7» и «записано 7 реквизитов + 817 применений» для читателя карточки — разные факты;
+    * `counts_by_properties_state` с `unknown_value_properties` / `unknown_properties` —
+      незнакомое ЗНАЧЕНИЕ словарного свойства и незнакомый ТЕГ файла различаются состоянием и
+      именами виновников, потому что второе требует пересмотра круга раньше первого (Q7, A);
+    * словари блока `<Type>` (`counts_by_type_state`, `types_multiplicity`, `types_by_class`) —
+      `absent` и `unknown_form` различаются: пустой тип не читается как «типа нет в выгрузке»
+      (замер 2.3, ограничение `type_parse_state = 'parsed' ⇒ types <> '[]'`);
+    * `counts_by_use_state` и `counts_by_target_resolve_state` — «применяется / не применяется»
+      и «цель разрешена / нет» являются ответом о цели, а не потерянной строкой (Q3, Q4);
+    * `separation_by_block` — по трём блокам отдельно: «блока нет» (`empty_value`, 12 из 16
+      файлов) и «блок есть, цель неразрешима» различимы только помесячно (замер 2.7, Q5);
+    * `index_only` / `file_only` / `uuid_mismatch` — расхождения файла и перечня: четыре
+      замеренные выгрузки дают нули, и нули обязаны быть названы, а не подразумеваться;
+    * `max_targets_per_file` — распределение, а не только итог: 688 целей в одном файле BP3 и
+      688 целей по разным файлам — разные выгрузки (замер 2.4).
+    """
+    return {
+        "status": STATUS_NOT_RUN,
+        "success": False,
+        "error": None,
+        "reason": None,
+        "stage": STAGE_COMMON_ATTRIBUTES,
+        "configuration_id": None,
+        "configuration_uuid": None,
+        "configuration_name": None,
+        "tables": list(COMMON_ATTRIBUTES_TABLES),
+        "directory": COMMON_ATTRIBUTES_DIR,
+        "files_found": 0,
+        "files_read": 0,
+        "files_failed": [],
+        "observations": [],
+        "rows_written": 0,
+        "attributes_written": 0,
+        "targets_written": 0,
+        "removed_previous": 0,
+        "removed_by_table": {table: 0 for table in COMMON_ATTRIBUTES_TABLES},
+        "written_by_table": {table: 0 for table in COMMON_ATTRIBUTES_TABLES},
+        "index_available": False,
+        "index_kind_records": 0,
+        "index_only": [],
+        "file_only": [],
+        "uuid_mismatch": [],
+        "counts_by_properties_state": {state: 0 for state in CA_PROPERTIES_STATES},
+        "unknown_properties": {},
+        "unknown_value_properties": {},
+        "unexpected_tags": {},
+        "counts_by_type_state": {state: 0 for state in CA_TYPE_STATES},
+        "types_multiplicity": {mult: 0 for mult in CA_MULTIPLICITY_VALUES},
+        "types_by_class": {kind: 0 for kind in CA_TYPE_CLASS_VALUES},
+        "types_total": 0,
+        "types_parsed": 0,
+        "types_object_ref_resolved": 0,
+        "types_unresolved_total": 0,
+        "types_unresolved": [],
+        "value_tag_mismatch": [],
+        "counts_by_content_state": {state: 0 for state in CA_CONTENT_STATES},
+        "targets_total": 0,
+        "targets_distinct": 0,
+        "max_targets_per_file": 0,
+        "counts_by_use_state": {state: 0 for state in CA_USE_STATES},
+        "counts_by_target_resolve_state": {state: 0 for state in CA_TARGET_RESOLVE_STATES},
+        "counts_by_item_cond_state": {state: 0 for state in CA_ITEM_COND_STATES},
+        "targets_by_kind": {},
+        "duplicate_targets": [],
+        "unresolved_targets": [],
+        "separation_parsed": 0,
+        "separation_empty": 0,
+        "separation_unknown_form": 0,
+        "separation_by_block": {
+            block: common_attributes_separation_defaults()
+            for block in COMMON_ATTRIBUTE_SEPARATION_BLOCKS
+        },
+        "separation_unresolved_total": 0,
+        "separation_unresolved": [],
+        "unresolved_refs": [],
+        "namespace_prefixes": [],
+        "statistics_refreshed": 0,
+        "warnings": [],
+    }
+
+
+
+def format_common_attributes_lines(result: Dict[str, Any], indent: str = "") -> List[str]:
+    """Текст стадии S4e по закрытому контракту `common_attributes_defaults()` (C1, C3).
+
+    Формат один для двух контуров: раздела карточки `load_1c_catalog_tool` и ответа
+    отдельного инструмента, который заводит шаг П5 (прецедент V45/V46/V48/V49). Отказ
+    форматёр называет сам («Стадия не выполнена» / «Стадия не удалась»), вызывающий причину
+    не повторяет. Граница круга печатается и при успехе: «строки записаны» не равно «об общих
+    реквизитах сохранено всё», а пустой блок разделения без этой строки читался бы как
+    «разделения нет». Неперечисленные ключи читаются нулями (C1).
+
+    Имя — `format_common_attributes_lines`, а не `format_common_attributes_answer`: форматёры
+    стадий слоя называются по одному образцу (`format_root_modules_lines`,
+    `format_child_object_lines`, `format_session_parameters_lines`, `format_roles_lines`),
+    и пятому дано то же имя — два имени у одного действия разъезжаются при первой же правке
+    (план узла, раздел 5).
+    """
+    lines: List[str] = []
+    if not result:
+        return lines
+
+    if not result.get("success"):
+        reason = result.get("error") or result.get("reason") or "загрузчик не назвал причину"
+        prefix = ("Стадия не выполнена" if result.get("status") in (None, STATUS_NOT_RUN)
+                  else "Стадия не удалась")
+        lines.append(f"{indent}{prefix}: {reason}")
+        lines.append(f"{indent}{COMMON_ATTRIBUTES_REPEAT_HINT}")
+        for warning in result.get("warnings") or []:
+            lines.append(f"{indent}⚠️ {warning}")
+        return lines
+
+    removed_by_table = result.get("removed_by_table") or {}
+    written_by_table = result.get("written_by_table") or {}
+    lines.append(
+        f"{indent}Записано строк по таблицам: "
+        + ", ".join(f"{table}={int(written_by_table.get(table) or 0)}"
+                    for table in COMMON_ATTRIBUTES_TABLES)
+        + f"; всего {int(result.get('rows_written') or 0)} (реквизитов "
+          f"{int(result.get('files_read') or 0)}, применений "
+          f"{int(result.get('targets_total') or 0)})"
+    )
+    lines.append(
+        f"{indent}Файлов регистрации: {int(result.get('files_found') or 0)} "
+        f"(каталог {result.get('directory') or COMMON_ATTRIBUTES_DIR}/, позиция 2.5 списка)"
+    )
+    if int(result.get("removed_previous") or 0):
+        lines.append(
+            f"{indent}Снято прежних строк этой конфигурации: "
+            + ", ".join(f"{table}={int(removed_by_table.get(table) or 0)}"
+                        for table in COMMON_ATTRIBUTES_TABLES)
+            + f"; всего {int(result.get('removed_previous') or 0)} — идемпотентность "
+              "держится явным DELETE по configuration_uuid: внешнего ключа и каскада по "
+              "конфигурации в схеме нет осознанно (прецедент V20.1); строки применения "
+              "снимаются раньше строк реквизита, иначе каскад FK снял бы их молча (M7)"
+        )
+    else:
+        lines.append(f"{indent}Прежних строк этой конфигурации не снималось")
+
+    props = result.get("counts_by_properties_state") or {}
+    lines.append(
+        f"{indent}Состояния свойств: "
+        + ", ".join(f"{state}={int(props.get(state) or 0)}"
+                    for state in CA_PROPERTIES_STATES)
+        + " — незнакомое ЗНАЧЕНИЕ словарного свойства и незнакомый ТЕГ файла различаются "
+          "состоянием и именами виновников: второе требует пересмотра круга свойств раньше "
+          "первого (Q7, вариант A; CHECK на значения свойств не ставится намеренно)"
+    )
+    for name, count in sorted((result.get("unknown_value_properties") or {}).items())[:10]:
+        lines.append(
+            f"{indent}  ⚠️ значение свойства вне измеренного словаря: {name} ({count}) — "
+            "значение сохранено текстом, состояние строки `unknown_value`"
+        )
+    for name, count in sorted((result.get("unknown_properties") or {}).items())[:10]:
+        lines.append(f"{indent}  ⚠️ тег свойства вне словаря 38 тегов (замер 2.2): {name} "
+                     f"({count}) — круг вида требует пересмотра")
+    for tag, count in sorted((result.get("unexpected_tags") or {}).items())[:10]:
+        lines.append(f"{indent}  ⚠️ незнакомый тег файла: {tag} ({count})")
+
+    type_states = result.get("counts_by_type_state") or {}
+    multiplicity = result.get("types_multiplicity") or {}
+    classes = result.get("types_by_class") or {}
+    lines.append(
+        f"{indent}Блок Type: состояний — "
+        + ", ".join(f"{state}={int(type_states.get(state) or 0)}"
+                    for state in CA_TYPE_STATES)
+        + "; кратность — "
+        + ", ".join(f"{mult}={int(multiplicity.get(mult) or 0)}"
+                    for mult in CA_MULTIPLICITY_VALUES)
+        + f"; записей значений {int(result.get('types_total') or 0)}: "
+        + ", ".join(f"{kind}={int(classes.get(kind) or 0)}"
+                    for kind in CA_TYPE_CLASS_VALUES)
+        + f"; записей распознано {int(result.get('types_parsed') or 0)}, ссылок на объект "
+          f"разрешено {int(result.get('types_object_ref_resolved') or 0)}, неразрешённых "
+          f"записей {int(result.get('types_unresolved_total') or 0)} — `absent` и "
+          "`unknown_form` различаются состоянием строки: пустой тип не читается как «типа "
+          "нет в выгрузке» (замер 2.3)"
+    )
+
+    for item in (result.get("types_unresolved") or [])[:10]:
+        lines.append(
+            f"{indent}  ⚠️ запись типа не разрешена: файл {item.get('source_path')}, "
+            f"значение {item.get('value')}, класс {item.get('class')} — "
+            "ссылка остаётся записью с состоянием, а не пустым типом"
+        )
+    for item in (result.get("value_tag_mismatch") or [])[:10]:
+        lines.append(
+            f"{indent}  ⚠️ тегов <v8:Type>/<xs:type> в файле {item.get('tags')}, "
+            f"разобранных записей {item.get('entries')} (файл "
+            f"{item.get('source_path')}) — расчёт кратности по числу записей требует проверки"
+        )
+
+    content_counts = result.get("counts_by_content_state") or {}
+    use_counts = result.get("counts_by_use_state") or {}
+    resolve_counts = result.get("counts_by_target_resolve_state") or {}
+    cond_counts = result.get("counts_by_item_cond_state") or {}
+    lines.append(
+        f"{indent}Перечни применения: состояний — "
+        + ", ".join(f"{state}={int(content_counts.get(state) or 0)}"
+                    for state in CA_CONTENT_STATES)
+        + f"; строк применения {int(result.get('targets_total') or 0)} (различающихся целей "
+          f"{int(result.get('targets_distinct') or 0)}, максимум в одном файле "
+          f"{int(result.get('max_targets_per_file') or 0)} — распределение называется, "
+          "потому что 688 целей в одном файле и 688 целей по разным файлам это разные "
+          "выгрузки, замер 2.4)"
+    )
+    lines.append(
+        f"{indent}Применение: "
+        + ", ".join(f"{state}={int(use_counts.get(state) or 0)}" for state in CA_USE_STATES)
+        + "; разрешение целей — "
+        + ", ".join(f"{state}={int(resolve_counts.get(state) or 0)}"
+                    for state in CA_TARGET_RESOLVE_STATES)
+        + "; условие разделения позиции — "
+        + ", ".join(f"{state}={int(cond_counts.get(state) or 0)}"
+                    for state in CA_ITEM_COND_STATES)
+        + " — `empty_value` у условия разделения является состоянием пустого "
+          "самозакрывающегося тега (замер 2.4: такая форма во всех строках корпуса), "
+          "непустая форма — позиция O4 плана, узла загрузки нет"
+    )
+    kinds = result.get("targets_by_kind") or {}
+    if kinds:
+        lines.append(
+            f"{indent}Цели применения по видам: "
+            + ", ".join(f"{kind}={int(count)}" for kind, count in sorted(kinds.items())[:20])
+            + f" (видов {len(kinds)}) — виды названы замером 2.5; объекты этих видов этим "
+              "узлом не загружаются, связь разрешается именем строки индекса состава (Q3)"
+        )
+    for item in (result.get("unresolved_targets") or [])[:10]:
+        lines.append(
+            f"{indent}  ⚠️ цель применения не разрешена: файл {item.get('source_path')}, "
+            f"цель {item.get('target_full_name')}, состояние "
+            f"{item.get('target_resolve_state')}, неполный путь "
+            f"{item.get('unresolved_path')} — строка остаётся с состоянием, а не теряется"
+        )
+    for item in (result.get("duplicate_targets") or [])[:10]:
+        lines.append(
+            f"{indent}  ⚠️ повторяющаяся цель в перечне одного реквизита: файл "
+            f"{item.get('source_path')}, цель {item.get('target')} — ключ строки применения "
+            "держится порядком (`ordinal`), повтор называется, а не схлопывается (замер 2.10 "
+            "даёт нули)"
+        )
+
+    separation = result.get("separation_by_block") or {}
+    for block in COMMON_ATTRIBUTE_SEPARATION_BLOCKS:
+        block_state = separation.get(block) or {}
+        parse_counts = block_state.get("by_parse_state") or {}
+        resolve_state_counts = block_state.get("by_resolve_state") or {}
+        lines.append(
+            f"{indent}Разделение, блок {block}: "
+            + ", ".join(f"{state}={int(parse_counts.get(state) or 0)}"
+                        for state in CA_SEPARATION_STATES)
+            + "; разрешение — "
+            + ", ".join(f"{state}={int(resolve_state_counts.get(state) or 0)}"
+                        for state in CA_TARGET_RESOLVE_STATES)
+        )
+    lines.append(
+        f"{indent}Разделение всего: непустых ссылок "
+        f"{int(result.get('separation_parsed') or 0)}, пустых блоков "
+        f"{int(result.get('separation_empty') or 0)}, незнакомых форм "
+        f"{int(result.get('separation_unknown_form') or 0)}, неразрешённых "
+        f"{int(result.get('separation_unresolved_total') or 0)} — по замеру 2.7 непустых "
+        "блоков 12 из 48 на четырёх выгрузках; пустой блок является состоянием строки, а не "
+        "пустой ссылкой"
+    )
+    for item in (result.get("separation_unresolved")
+                 or result.get("unresolved_refs") or [])[:10]:
+        lines.append(
+            f"{indent}  ⚠️ ссылка разделения не разрешена: файл {item.get('source_path')}, "
+            f"свойство {item.get('property')}, текст {item.get('ref_text')}, состояние "
+            f"{item.get('state')} — ссылка остаётся текстом и состоянием (Q3)"
+        )
+
+    if not result.get("index_available"):
+        lines.append(
+            f"{indent}Индекс состава не читается — сверка файлов с перечнем и разрешение "
+            "целей применения и ссылок разделения невозможны, и «объекта нет в перечне» от "
+            "«перечень этой конфигурации не загружен» этим не отличить"
+        )
+    else:
+        index_only = result.get("index_only") or []
+        file_only = result.get("file_only") or []
+        uuid_mismatch = result.get("uuid_mismatch") or []
+        lines.append(
+            f"{indent}Сверка с индексом состава: записей `CommonAttribute.<Имя>` "
+            f"{int(result.get('index_kind_records') or 0)}; записей перечня без файла "
+            f"{len(index_only)}, файлов без записи {len(file_only)}, расхождений uuid "
+            f"{len(uuid_mismatch)} — все четыре замеренные выгрузки дают нули (замер 2.9), "
+            "и нули обязаны быть названы, а не подразумеваться"
+        )
+        for name in index_only[:10]:
+            lines.append(f"{indent}  ⚠️ запись индекса без файла регистрации: {name}")
+        for name in file_only[:10]:
+            lines.append(f"{indent}  ⚠️ файл регистрации без записи индекса: {name}")
+        for item in uuid_mismatch[:10]:
+            lines.append(
+                f"{indent}  ⚠️ uuid файла {item.get('source_path')}: файл "
+                f"{item.get('file_uuid')} не совпадает с uuid индекса "
+                f"{item.get('index_uuid')}"
+            )
+
+    prefixes = result.get("namespace_prefixes") or []
+    if prefixes:
+        lines.append(
+            f"{indent}Префиксы пространств имён файлов вида: "
+            + ", ".join(str(item) or "(по умолчанию)" for item in prefixes[:20])
+            + f" (префиксов {len(prefixes)}) — словарь URI круга назван замером 2.1; "
+              "префикс вне этого словаря требует объяснения, а не молчаливой поддержки "
+              "(пустой префикс — корневой xmlns файла регистрации, он есть во всех "
+              "четырех выгрузках)"
+        )
+    for observation in (result.get("observations") or [])[:10]:
+        lines.append(f"{indent}  ⚠️ круг каталога: {observation[0]} — {observation[1]}")
+    for failure in (result.get("files_failed") or [])[:10]:
+        lines.append(f"{indent}  ⚠️ файл не разобран: {failure.get('source_path')} — "
+                     f"{failure.get('reason')}")
+
+    refreshed = int(result.get("statistics_refreshed") or 0)
+    if refreshed:
+        lines.append(
+            f"{indent}Статистика таблиц {', '.join(COMMON_ATTRIBUTES_TABLES)} пересобрана "
+            f"(ANALYZE): {refreshed} — без неё читатели витрин текущего состояния платят "
+            "минутами (мера V46)"
+        )
+    for warning in result.get("warnings") or []:
+        lines.append(f"{indent}⚠️ {warning}")
+    lines.append(f"{indent}Граница: {COMMON_ATTRIBUTES_BOUNDARY}")
+    return lines
 

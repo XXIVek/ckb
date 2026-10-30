@@ -135,6 +135,35 @@
     раздельный вход с `kinds` — решение по замеру времени (позиция O8 плана), а не
     заранее обещанная возможность.
 
+Узел V50 (30.10.2026, шаг П4) — свойства общих реквизитов, позиция 2.5 нормативного списка
+(`docs/CONFIGURATION_COMMON_ATTRIBUTES_PLAN.md`):
+
+    src/configuration_common_attributes_loader.py :: load_common_attributes(source_path,
+    configuration_uuid=None, changed_at=None)  →  две таблицы `common_attributes`,
+    `common_attribute_targets`
+
+Порядок вызова повторяет S3/S4/S4c/S4d: стадия идёт ПОСЛЕ фиксации заголовка и индекса
+состава, потому что цели применения и ссылки разделения разрешаются записями
+`configuration_objects` (Q3). Дальнейшее отличает её от соседних стадий:
+
+  * стадия `s4e_common_attributes` стоит между `s4d_roles` и `s4b_object_modules` — порядок
+    `STAGES` повторяет порядок нормативного списка (2.5 идёт сразу за 2.4); перенумерации
+    нет, S5 по-прежнему зарезервирован за анализом;
+  * ответ лежит в собственном ключе `common_attributes` (правило C3);
+  * групп запроса (`kinds`) у вида нет, и это решение, а не упущение: строка применения
+    существует только через id строки реквизита (Q1, вариант A), поэтому состояния «записать
+    реквизиты без применения» в модели нет (Q10, вариант A);
+  * круг пишется ОДНОЙ транзакцией в двух таблицах, порядок записи держится иерархией
+    данных: реквизиты (`insert_ids`, `RETURNING id`) → строки применения, ссылающиеся на id
+    этих строк (Q2, вариант A: своей цепи ревизий у `common_attribute_targets` нет);
+  * строки вида снимаются вместе с заголовком явным `DELETE` по `configuration_uuid`
+    (`remove_common_attributes` в `_remove_rows`), начиная с `common_attribute_targets`: её
+    собственный FK на строку реквизита объявлен с `ON DELETE CASCADE`, и каскад снял бы
+    применение без точного счётчика (M7);
+  * ключ цепочки строки реквизита включает `configuration_uuid`: семь имён общих реквизитов
+    совпадают в BGU2 и BP3 (замер 2.8), и без ключа конфигурации две выгрузки слились бы в
+    одну строку.
+
 
 
 Чтения идут через psycopg2 (`src/external_db.py`), а не psql-подпроцессом: `_run_psql` /
@@ -186,6 +215,18 @@ from configuration_session_parameters_loader import (
 # V20.1), поэтому `_remove_rows` обязан вызвать его явно — иначе force=True оставил бы в базе
 # прежний состав вида (для BP3 это 682 строки ролей и 76 332 строки прав).
 from configuration_roles_loader import load_roles, remove_roles
+# Узел V50 (стадия S4e, позиция 2.5 нормативного списка): свойства общих реквизитов — тот же
+# слой, что и отдельный инструмент `load_common_attributes_tool` (шаг П5); контракт стадии и
+# форматёр — в configuration_load_contract. Строки двух таблиц снимаются вместе с заголовком
+# явным DELETE по uuid (внешнего ключа и каскада в схеме нет осознанно — прецедент V20.1),
+# поэтому `_remove_rows` обязан вызвать его явно: без этого force=True оставил бы в базе
+# прежний состав вида (для BP3 это 7 строк реквизитов и 817 строк применения). Снятие
+# начинается с `common_attribute_targets`: её FK на строку реквизита объявлен с
+# ON DELETE CASCADE, и каскад снял бы применение без точного счётчика (M7).
+from configuration_common_attributes_loader import (
+    load_common_attributes,
+    remove_common_attributes,
+)
 # Узел V47 (стадия S4b): модули объектов конфигурации — вторая транзакция после фиксации
 # содержимого (Q6, граница D7). Точка входа стадии одна и отдельного инструмента у неё нет
 # (Q4.1), поэтому здесь импортируется и ответ «стадия не выполнялась» (`mark_index_unavailable`):
@@ -199,6 +240,8 @@ from configuration_object_modules_loader import (
 from configuration_load_contract import (
     CHILD_OBJECTS_REPEAT_HINT,
     CHILD_SECTION_HEADER,
+    COMMON_ATTRIBUTES_REPEAT_HINT,
+    COMMON_ATTRIBUTES_SECTION_HEADER,
     NOT_RUN_STOPPED_REASON,
     OBJECT_MODULES_SECTION_HEADER,
     ROLES_REPEAT_HINT,
@@ -209,6 +252,7 @@ from configuration_load_contract import (
     SESSION_PARAMETERS_SECTION_HEADER,
     SESSION_PARAMETER_TABLE,
     STAGE_CHILD_OBJECTS,
+    STAGE_COMMON_ATTRIBUTES,
     STAGE_INCOMPLETE_GROUPS,
     STAGE_OBJECT_MODULES,
     STAGE_ROLES,
@@ -218,6 +262,7 @@ from configuration_load_contract import (
     STATUS_NOT_RUN,
     build_stopped_stage,
     child_objects_defaults,
+    common_attributes_defaults,
     roles_defaults,
     root_modules_defaults,
     session_parameters_defaults,
@@ -503,6 +548,16 @@ def _remove_rows(cur, cfg_id, configuration_uuid=None):
     # точного счётчика — оператор обязан видеть полное состояние, снятое force=True (M7).
     if configuration_uuid:
         children.update(remove_roles(cur, configuration_uuid))
+    # Узел V50 (стадия S4e): строки двух таблиц общих реквизитов тоже адресуются uuid
+    # заголовка, а внешнего ключа и каскада по нему в схеме нет осознанно (прецедент V20.1).
+    # Значит снятие обязан выполнить этот же явный DELETE: без него force=True оставил бы в
+    # базе строки, которые ни к какой конфигурации не относятся и не читаются ни одной
+    # карточкой. Снятие начинается с `common_attribute_targets` (порядок держит `REMOVE_ORDER`
+    # слоя): её собственный FK на строку реквизита объявлен с ON DELETE CASCADE, и каскад снял
+    # бы применение молча, без точного счётчика — оператор обязан видеть полное состояние,
+    # снятое force=True (M7).
+    if configuration_uuid:
+        children.update(remove_common_attributes(cur, configuration_uuid))
     cur.execute("DELETE FROM configurations WHERE id = %s", [cfg_id])
     children["configurations"] = cur.rowcount
     return children
@@ -601,7 +656,7 @@ def _objects_table_available():
 
 def _written_before_stop_note(new_id, objects_written, header_arrays_filled,
                               root_modules, child_objects, session_parameters,
-                              roles=None):
+                              roles=None, common_attributes=None):
     """Что реально лежит в базе на момент остановки конвейера (узел V48, шаг П8).
 
     Строка обязана быть: остановка стадии откатом не является (стадии S3+ идут после коммита
@@ -631,6 +686,16 @@ def _written_before_stop_note(new_id, objects_written, header_arrays_filled,
             + ", ".join(f"{table}={int((roles.get('written_by_table') or {}).get(table) or 0)}"
                         for table in ("roles", "role_rights", "role_restriction_templates",
                                       "role_sources"))
+        )
+    # Узел V50 (стадия S4e): две таблицы называются своими числами — «общие реквизиты
+    # записаны» без числа применения читалось бы как полный состав вида, хотя строк
+    # применения в базе может и не быть (Q1 узла V50: круг — строка и её применение).
+    if common_attributes and common_attributes.get("success"):
+        parts.append(
+            "свойства общих реквизитов: "
+            + ", ".join(
+                f"{table}={int((common_attributes.get('written_by_table') or {}).get(table) or 0)}"
+                for table in ("common_attributes", "common_attribute_targets"))
         )
     return "; ".join(parts)
 
@@ -928,6 +993,10 @@ def register_configuration(source_path, force=False, xml_path=None):
     # Узел V49 (стадия S4d, позиция 2.4 списка): свойства ролей — ответ в собственном ключе
     # `roles` (правило C3), порядок вызова повторяет порядок нормативного списка.
     roles = roles_defaults()
+    # Узел V50 (стадия S4e, позиция 2.5 списка): свойства общих реквизитов — ответ в
+    # собственном ключе `common_attributes` (правило C3); групп запроса у стадии нет (Q10
+    # вариант A: строка применения существует только через id строки реквизита, Q1).
+    common_attributes = common_attributes_defaults()
     object_modules = object_modules_defaults()
     # Узел V48 (шаг П8, правило C2): пропущенная стадия называет причину пропуска. Без неё
     # форматёр стадии печатает «загрузчик не назвал причину», и читатель карточки видит
@@ -936,7 +1005,8 @@ def register_configuration(source_path, force=False, xml_path=None):
     # пропущенной стадии ставит загрузчик — право назвать состояние стадии принадлежит ему
     # (тот же приём, что `mark_index_unavailable` узла V47). Причина — в `reason`, а не в
     # `error`: «не выполнялась» и «отказала после начала работы» различаются именно так.
-    for _empty_stage in (child_objects, session_parameters, roles, object_modules):
+    for _empty_stage in (child_objects, session_parameters, roles, common_attributes,
+                         object_modules):
         _empty_stage["reason"] = NOT_RUN_STOPPED_REASON
     object_modules["status"] = STATUS_NOT_RUN
     stopped_stage = stopped_stage_defaults()
@@ -955,7 +1025,7 @@ def register_configuration(source_path, force=False, xml_path=None):
             stage_id, stage_result,
             _written_before_stop_note(new_id, objects_written, header_arrays_filled,
                                       root_modules, child_objects, session_parameters,
-                                      roles),
+                                      roles, common_attributes),
             warnings, incomplete_groups)
 
     if not stopped:
@@ -1105,6 +1175,56 @@ def register_configuration(source_path, force=False, xml_path=None):
             stopped = True
             load_incomplete = True
 
+    # ── узел V50 (стадия S4e, позиция 2.5 списка): свойства общих реквизитов ──────────
+    # Порядок вызова повторяет S3/S4/S4c/S4d: ПОСЛЕ коммита транзакции заголовка (своим
+    # соединением стадия не увидела бы незакоммиченного заголовка и строк индекса состава,
+    # по которым разрешаются цели применения и ссылки разделения — Q3), ключ — uuid, каталог
+    # тот же `root_source`. Стадия отдельная, а не расширение S4d (прецедент Q5 узлов V48 и
+    # V49): правило C3 требует своего ключа ответа `common_attributes`; порядок `STAGES`
+    # повторяет порядок нормативного списка (2.5 идёт сразу за 2.4). Отказ стадии, как у
+    # S3/S4/S4c/S4d, записанный заголовок не отменяет (C5) — но останавливает конвейер
+    # (решение Q8 узла V48, вариант A): S4b после отказа S4e не выполняется и читается
+    # `not_run`.
+    #
+    # Групп «записать реквизиты без применения» у стадии нет: строка применения существует
+    # только через id строки реквизита (Q1, вариант A), и реквизит без применения был бы
+    # составом, которого в выгрузке нет. Отсутствие каталога `CommonAttributes/` — не отказ,
+    # а ответ о выгрузке: `files_found = 0` с наблюдением `directory_missing` (Q9), так что
+    # KomMag проходит стадию с нулями, а не падает.
+    #
+    # Штамп времени общий с остальными стадиями этой загрузки (M2) — `load_moment` задан
+    # выше, где начинается событие детей заголовка.
+    if not stopped:
+        try:
+            common_attributes = load_common_attributes(
+                root_source, configuration_uuid=row["uuid"], changed_at=load_moment)
+        except Exception as exc:  # noqa: BLE001 — отказ стадии называется, а не бросается
+            common_attributes = common_attributes_defaults()
+            common_attributes["configuration_id"] = new_id
+            common_attributes["configuration_uuid"] = row["uuid"]
+            common_attributes["configuration_name"] = row["name"]
+            common_attributes["status"] = STATUS_ERROR
+            common_attributes["error"] = (
+                f"исключение слоя свойств общих реквизитов: {exc}")
+            common_attributes["reason"] = common_attributes["error"]
+        for attribute_warning in common_attributes.get("warnings") or []:
+            warnings.append(f"общие реквизиты: {attribute_warning}")
+        if not common_attributes.get("success"):
+            # Заголовок, индекс состава, модули корня, свойства подсистем с общими модулями,
+            # параметры сеанса и роли уже записаны, и отказ этой стадии их не отменяет (C5).
+            # Молчать нельзя по той же причине, что у V44/V46/V48/V49: после force=True
+            # прежние строки сняты, и «загружено» без этой строки читалось бы как полный
+            # состав конфигурации.
+            warnings.append(
+                "Свойства общих реквизитов не загружены — причина названа строкой "
+                "«Стадия не выполнена» в разделе «" + COMMON_ATTRIBUTES_SECTION_HEADER
+                + "» карточки. Чем продолжить: "
+                + f"{COMMON_ATTRIBUTES_REPEAT_HINT} (configuration_uuid={row['uuid']})."
+            )
+            stopped_stage = _stop_here(STAGE_COMMON_ATTRIBUTES, common_attributes)
+            stopped = True
+            load_incomplete = True
+
     # ── узел V47 (стадия S4b): модули объектов конфигурации ────────────────────────────
     # Вторая транзакция ПОСЛЕ фиксации содержимого конфигурации (решение Q6, граница D7
     # узла V46): отказ стадии не откатывает заголовок, индекс состава, модули корня и
@@ -1214,6 +1334,11 @@ def register_configuration(source_path, force=False, xml_path=None):
         # C3). Текст раздела даёт общий форматёр контракта — тот же, что отдаёт отдельный
         # инструмент `load_roles_tool` (шаг П5).
         "roles": roles,
+        # узел V50: машинная часть стадии S4e (позиция 2.5 списка) — полная; ответ лежит в
+        # собственном ключе, а не внутри `child_objects`, `session_parameters` или `roles`
+        # (правило C3). Текст раздела даёт общий форматёр контракта — тот же, что отдаёт
+        # отдельный инструмент `load_common_attributes_tool` (шаг П5).
+        "common_attributes": common_attributes,
         # узел V47: машинная часть стадии S4b — полная (тот же закрытый контракт, который
         # читают проба П4 и проверка П5); текст раздела даёт общий форматёр контракта.
         # `load_incomplete`/`incomplete_groups` — признак того, что состав в БД неполный

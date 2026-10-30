@@ -191,6 +191,18 @@ SEP_PARSED = "parsed"
 SEP_UNKNOWN_FORM = "unknown_form"
 SEPARATION_STATES: Tuple[str, ...] = (SEP_EMPTY, SEP_PARSED, SEP_UNKNOWN_FORM)
 
+# Колонки трёх блоков разделения — в порядке файловых тегов (замер 2.7). Константа, а не
+# литерал внутри разбора, потому что круг читают трое: разбор заполняет эти колонки, стадия
+# (шаг П4) считает по ним сводку «РАЗДЕЛЕНИЕ» по каждому блоку, а проверка узла (шаг П6)
+# требует пустых блоков нулями. Литерал в трёх местах разъехался бы с первым же переименованием
+# колонки — и именно поэтому имена колонок задаёт перечень `COMMON_ATTRIBUTE_PROPERTIES`.
+SEPARATION_BLOCKS: Tuple[str, ...] = (
+    "data_separation_value",
+    "data_separation_use",
+    "conditional_separation",
+)
+
+
 # Разрешение ссылки индексом состава — тот же словарь, что у целей прав узла V49:
 # exact — имя цели есть в индексе целиком, prefix_only — индекс моделирует только
 # префикс, unresolved — ничем. На корпусе все 1 512 целей применения и все 12 ссылок
@@ -1052,8 +1064,7 @@ def read_registration_file(path, source_path: Optional[str] = None,
         column: None for _n, column, kind in COMMON_ATTRIBUTE_PROPERTIES
         if kind not in (KIND_TYPE, KIND_CONTENT, KIND_REFERENCE)
     }
-    for column in ("data_separation_value", "data_separation_use",
-                   "conditional_separation"):
+    for column in SEPARATION_BLOCKS:
         values[column + "_parse_state"] = SEP_EMPTY
 
     for child in list(properties):
@@ -1125,8 +1136,7 @@ def read_registration_file(path, source_path: Optional[str] = None,
     # корректным: CHECK схемы требует, чтобы у empty_value не было ни текста ссылки, ни
     # результата разрешения.
     unresolved_refs: List[Dict] = []
-    for column in ("data_separation_value", "data_separation_use",
-                   "conditional_separation"):
+    for column in SEPARATION_BLOCKS:
         parsed_ref = parse_reference_property(reference_elements.get(column),
                                              index_by_name, PROPERTY_BY_COLUMN[column])
         warnings.extend(parsed_ref["warnings"])
@@ -1355,8 +1365,7 @@ def collect_common_attributes(source_dir, index_rows: Optional[Iterable[Dict]] =
                 resolve_counts.get(target["target_resolve_state"], 0) + 1
             kind_counts[target["target_kind"]] = kind_counts.get(target["target_kind"], 0) + 1
         max_targets_per_file = max(max_targets_per_file, row["targets_count"])
-        for column in ("data_separation_value", "data_separation_use",
-                       "conditional_separation"):
+        for column in SEPARATION_BLOCKS:
             state = row[column + "_parse_state"]
             if state == SEP_PARSED:
                 separation_parsed += 1
