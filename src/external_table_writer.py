@@ -1528,6 +1528,191 @@ class RoleSourcesRowWriter(TableRowWriter):
     })
 
 
+class CommonAttributesRowWriter(TableRowWriter):
+    """Строка общего реквизита конфигурации (таблица `common_attributes`, узел V50, позиция 2.5).
+
+    Имена колонок совпадают с полями контракта разбора
+    (`src/configuration_common_attributes.py::read_registration_file`) намеренно — чтобы
+    маппинг читался текстом, а не по памяти (приём узлов V33 и V48).
+
+    Колонки, смысл которых не выводится из имени:
+
+      * ключом цепочки состояния является (`configuration_uuid`, `object_name`,
+        `revision_no`), а НЕ `object_uuid`: 7 имён вида имеют идентичные uuid в BGU2 и BP3
+        (замер 2.8) — тот же урок, что V47 и V48. `object_uuid` — отдельная колонка и
+        поисковый индекс, но не ключ;
+      * `full_name` совпадает с `object_name`: иерархии раскладки у вида нет — 16/16 записей
+        индекса состава имеют верхний уровень и имя `CommonAttribute.<Имя файла>` (замер 2.9).
+        Колонка заведена для единой формы чтения детей конфигурации (у V46 и V49 именем
+        служит `full_name`), а не для дублирования;
+      * `type_raw`, `types`, `type_qualifiers`, `type_parse_state`, `type_multiplicity` —
+        тот же контракт, что узел V48: классификация типа является ОТВЕТОМ разбора, и без
+        исходного блока `<Type>` этот ответ не перепроверить ни постоянной проверке узла,
+        ни читающему. Закрытый словарь записей `types` задаёт разбор константами
+        `TYPE_ENTRY_KEYS` / `TYPE_ENTRY_TARGET_KEYS` / `TYPE_ENTRY_REASON_KEY`; CHECK схемы
+        выражает только форму верхнего уровня и согласованность кратности (замер V48 2.5).
+        Вид `jsonb_array`, а не `jsonb_nullable`: пустой массив является состоянием `absent`,
+        а не отсутствующим значением;
+      * три блока разделения хранятся пятью колонками каждый (`*_ref_text`, `*_parse_state`,
+        `*_object_id`, `*_object_uuid`, `*_resolve_state`): значением свойства является ОДНО
+        индексное имя либо пусто (замер 2.7: внутренних тегов 0), отдельной таблицы условий
+        модель не заводит (Q5, вариант A). `*_object_id` — текст, а не uuid: идентификаторы
+        индекса состава бывают составными и с суффиксом (замер V33 D2);
+      * `targets_count`, `targets_used_count`, `targets_not_used_count` — счётчики перечня
+        применения. Равенство «применено + не применено = перечень» остаётся текстом
+        комментария и проверкой П6, а не CHECK: ограничение требовало бы связки с таблицей
+        строк применения (те же соображения, что у счётчиков `roles` узла V49);
+      * `properties_state` и `unknown_property_names` — виновник состояния называется, а не
+        теряется (Q7, вариант A): словарь значений замкнут замером 2.7, но значение вне него
+        возможно в другой выгрузке, и молчать об этом строка не вправе;
+      * `source_path` — путь относительно КОРНЯ выгрузки (`CommonAttributes/<Имя>.xml`),
+        а не каталога вида (поправка V46).
+
+    `synonym` и `tool_tip` — `jsonb_nullable`, а не `jsonb_object`: «свойства в выгрузке
+    нет» и «свойство есть, но пустое» — разные состояния (тот же контракт, что V48).
+
+    Строки без `object_uuid` или без `object_name` разбор не отдаёт: без имени строку нечем
+    ключить, а без uuid она не является ссылкой на объект метаданных. Такой файл называется
+    отказом разбора в отчёте стадии, а не превращается в NULL-колонку.
+    """
+
+    TABLE = "common_attributes"
+    COLUMNS = versioned_columns({
+        "configuration_uuid": "uuid",
+        "object_uuid": "uuid",
+        "object_name": "text",
+        "full_name": "text",
+        "comment": "text",
+        "synonym": "jsonb_nullable",
+        "tool_tip": "jsonb_nullable",
+        "password_mode": "bool",
+        "format": "text",
+        "edit_format": "text",
+        "mark_negatives": "bool",
+        "mask": "text",
+        "multi_line": "bool",
+        "extended_edit": "bool",
+        "min_value": "text",
+        "max_value": "text",
+        "fill_from_filling_value": "bool",
+        "fill_value": "text",
+        "fill_checking": "text",
+        "choice_folders_and_items": "text",
+        "choice_parameter_links": "text",
+        "choice_parameters": "text",
+        "quick_choice": "text",
+        "create_on_input": "text",
+        "choice_form": "text",
+        "link_by_type": "text",
+        "choice_history_on_input": "text",
+        "auto_use": "text",
+        "data_separation": "text",
+        "separated_data_use": "text",
+        "users_separation": "text",
+        "authentication_separation": "text",
+        "configuration_extensions_separation": "text",
+        "data_separation_value_ref_text": "text",
+        "data_separation_value_parse_state": "text",
+        "data_separation_value_object_id": "text",
+        "data_separation_value_object_uuid": "uuid",
+        "data_separation_value_resolve_state": "text",
+        "data_separation_use_ref_text": "text",
+        "data_separation_use_parse_state": "text",
+        "data_separation_use_object_id": "text",
+        "data_separation_use_object_uuid": "uuid",
+        "data_separation_use_resolve_state": "text",
+        "conditional_separation_ref_text": "text",
+        "conditional_separation_parse_state": "text",
+        "conditional_separation_object_id": "text",
+        "conditional_separation_object_uuid": "uuid",
+        "conditional_separation_resolve_state": "text",
+        "indexing": "text",
+        "full_text_search": "text",
+        "data_history": "text",
+        "type_raw": "text",
+        "type_multiplicity": "text",
+        "type_parse_state": "text",
+        "types": "jsonb_array",
+        "type_qualifiers": "jsonb_nullable",
+        "content_state": "text",
+        "targets_count": "int",
+        "targets_used_count": "int",
+        "targets_not_used_count": "int",
+        "properties_state": "text",
+        "unknown_property_names": "text_array_nullable",
+        "source_path": "text",
+    })
+
+
+class CommonAttributeTargetsRowWriter(TableRowWriter):
+    """Строка применения общего реквизита (таблица `common_attribute_targets`, узел V50).
+
+    Таблица НЕ версионируется своей цепочкой — та же форма, что `role_rights` узла V49
+    (Q2, вариант A): ключ начинается с `common_attribute_id`, то есть со ссылки на
+    КОНКРЕТНУЮ строку `common_attributes`, а значит на конкретную ревизию. Текущность
+    строки применения выводится витриной `v_current_common_attribute_targets` связкой, а не
+    поиском максимума по собственной цепи. Запись в реестре
+    `CONFIGURATION_OBJECT_WRITERS` при этом есть намеренно: реестр выбирает писателя по
+    таблице, и её отсутствие означало бы выбор класса по имени. Исключение названо
+    константой `CONFIGURATION_UNVERSIONED_TABLES`, а не молча.
+
+    Колонки, смысл которых не выводится из имени:
+
+      * `common_attribute_id` подставляет вызывающий слой (стадия П4) из id, полученного
+        `CommonAttributesRowWriter.insert_ids`; в контракте разбора для этой связи служит
+        `attribute_full_name` (`target_row`), и колонкой строки реквизита он не становится
+        намеренно — иначе строка применения могла бы ссылаться на имя вместо ревизии
+        (прецедент `role_name` узла V49);
+      * `configuration_uuid` повторяет значение строки реквизита осознанно: запрос «какие
+        общие реквизиты доступны `Catalog.Товары`» идёт по строкам применения, и без колонки
+        он требовал бы связки с `common_attributes` и с её витриной на каждом шаге;
+      * `attribute_object_uuid` / `attribute_full_name` — указатель на реквизит в форме
+        индекса состава: он остаётся читаемым и тогда, когда строка реквизита снята
+        (перезагрузка индекса), то есть отвечает на вопрос «о каком реквизите шла речь»;
+      * `ordinal` — позиция записи перечня `<content>` в файле. Порядок писатель не меняет:
+        он и есть обещание смысловой сборки перечня обратно (Q9, вариант A — перечень
+        упорядочен); CHECK `common_attribute_targets_ordinal_non_negative` запрещает лишь
+        отрицательные значения;
+      * `use_state` различает «реквизит объекту доступен» (`used`) и «объект перечислен, но
+        реквизит к нему не применяется» (`not_used`): без этой колонки ответ «где
+        применяется» неотличим от «где перечислено» (Q4, вариант A; `<xr:Use>` со значением
+        `DontUse` — 1 253 из 1 512 записей перечня корпуса, замер 2.4);
+      * `conditional_separation_state` — состояние `<xr:ConditionalSeparation/>` ДАННОЙ
+        записи перечня: замер 2.4 даёт пустой самозакрывающийся тег во всех 1 512 записей,
+        то есть на корпусе состояние `empty_value`; непустая форма — позиция O4 раздела 9
+        плана, и она называется состоянием `unknown_form`, а не молчанием. Отдельной колонки
+        значения у записи нет: разделение включается точкой применения, поэтому повторять
+        его в строке реквизита нельзя;
+      * `target_object_id` / `target_object_uuid` — ссылка на СТРОКУ ИНДЕКСА состава, а не
+        на таблицу содержимого цели: внешнего ключа нет осознанно, потому что цель может быть
+        не разрешена (`prefix_only` / `unresolved`), а разрешённая ссылка ведёт к строке,
+        которую снимает перезагрузка индекса (тот же контракт, что `role_rights` V49);
+      * `target_unresolved_path` остаётся NULL при `exact` — CHECK согласует состояние со
+        ссылкой и остатком пути, поэтому «не разрешено» и «не читалось» различимы запросом;
+      * `target_kind` — вид цели из индексного имени (`Catalog`, `InformationRegister`,
+        `ChartOfAccounts`, `CommonForm`, `CommonModule`, `AccumulationRecordType`, …), а не
+        таблица: вид нужен ответу «реквизит доступен регистру сведений», и он не зависит от
+        того, загружено ли содержимое этого вида (круг V38 шире круга V50).
+    """
+
+    TABLE = "common_attribute_targets"
+    COLUMNS = {
+        "common_attribute_id": "int",
+        "configuration_uuid": "uuid",
+        "attribute_object_uuid": "uuid",
+        "attribute_full_name": "text",
+        "ordinal": "int",
+        "target_kind": "text",
+        "target_full_name": "text",
+        "target_object_id": "text",
+        "target_object_uuid": "uuid",
+        "target_resolve_state": "text",
+        "target_unresolved_path": "text",
+        "use_state": "text",
+        "conditional_separation_state": "text",
+    }
+
+
 # Контракт разбора → писатель: выбор по словарю, а не по имени таблицы (приём
 # ROOT_MODULE_WRITERS: ошибка выбора превращается в запись не в ту таблицу).
 # Узел V49 (роли): писатели группы свои, реестр — общий механизм
@@ -1546,6 +1731,21 @@ CONFIGURATION_OBJECT_WRITERS = {
     "role_rights": RoleRightsRowWriter,
     "role_restriction_templates": RoleRestrictionTemplatesRowWriter,
     "role_sources": RoleSourcesRowWriter,
+    # Узел V50 (2026-10-30, позиция 2.5 нормативного списка): круг — две таблицы, а не
+    # одна (Q1, вариант A). Строка применения не существует без строки реквизита: без неё
+    # вопрос «где применяется этот общий реквизит» остаётся без ответа, а без строки
+    # реквизита строка применения ниоткуда не берётся. Разделение двух таблиц — не
+    # косметика: у строки реквизита есть своя цепочка ревизий (Q2, вариант A), а у строки
+    # применения её нет, потому что ключ второй таблицы начинается со ссылки на КОНКРЕТНУЮ
+    # ревизию первой. Таблица без собственной цепи названа исключением
+    # `CONFIGURATION_UNVERSIONED_TABLES`, а не молча (тот же приём, что `role_rights` V49).
+    # Спецификация писателя повторяет закрытый словарь свойств разбора
+    # (`COMMON_ATTRIBUTE_PROPERTIES`, замер 2.2: ровно 38 тегов в 16/16 файлов): прямого
+    # CHECK на словарь значений в схеме нет осознанно (Q7, вариант A), поэтому список
+    # колонок и есть контракт записи, а неизвестное свойство называется колонками
+    # `properties_state` и `unknown_property_names`, а не теряется.
+    "common_attributes": CommonAttributesRowWriter,
+    "common_attribute_targets": CommonAttributeTargetsRowWriter,
 }
 
 # Таблицы, чей писатель зарегистрирован общим реестром, но своей ЦЕПИ РЕВИЗИЙ у таблицы
@@ -1556,7 +1756,13 @@ CONFIGURATION_OBJECT_WRITERS = {
 # писатель, а не «ручной INSERT», иначе выбор класса уходит в вызывающий код. Формулировка
 # проверки меняется с равенства на `версионные таблицы ∪ этот список`, и расхождение
 # называется списком, а не молчит.
-CONFIGURATION_UNVERSIONED_TABLES = ("role_rights",)
+# Узел V50 добавляет в список `common_attribute_targets` по тому же основанию: ключ строки
+# применения начинается с `common_attribute_id` — ссылки на конкретную ревизию строки
+# реквизита (Q2, вариант A). Держать свою цепочку ревизий в этой таблице значило бы
+# повторять свойства реквизита в двух местах и давать две разные «текущие» строки об одном
+# и том же применении; каскад `ON DELETE CASCADE` при этом и остаётся средством снятия
+# строк применения вместе с ревизией (проверка П3/П6 узла).
+CONFIGURATION_UNVERSIONED_TABLES = ("role_rights", "common_attribute_targets")
 
 
 class ConfigCrossReferenceRowWriter(TableRowWriter):

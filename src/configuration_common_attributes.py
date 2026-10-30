@@ -247,6 +247,59 @@ MULT_SINGLE = "single"
 MULT_COMPOSITE = "composite"
 MULTIPLICITY_VALUES: Tuple[str, ...] = (MULT_ABSENT, MULT_SINGLE, MULT_COMPOSITE)
 
+# ЗАКРЫТЫЕ СЛОВАРИ СОСТОЯНИЙ ВИДА — одна точка, где они перечислены по колонкам (шаг П3,
+# приём узла V49). Схема держит их CHECK'ами, но CHECK — строка SQL: сравнить её со
+# словарём разбора можно только вытащив предикат из `pg_get_constraintdef`. Расхождение в
+# одном значении означает либо состояние, которого разбор не отдаёт никогда (мёртвая ветка
+# CHECK), либо состояние, которое схема отвергнет при загрузке круга.
+#
+# Домены трёх `*_resolve_state` колонок строки реквизита в схеме существуют, но не отдельным
+# ограничением, а внутри парных `*_ref_matches_state` (замер DDL П1): состояние разрешения
+# там замкнуто вместе с формой ссылки, потому что «пустое значение» и «неразрешённая ссылка»
+# различаются состоянием разбора (`*_parse_state`), а не самим разрешением. Поэтому ключом
+# словаря остаётся имя колонки — по нему прогон П3 находит предикат в тексте ограничения,
+# каким бы именем оно ни было названо.
+#
+# Словарей значений СВОЙСТВ вида (fill_checking, auto_use, data_separation, indexing, …) в
+# этом словаре нет намеренно: CHECK на них в схеме нет по решению Q7 (вариант A), а
+# закрытость значений замкнута только измеренным корпусом (`PROPERTY_VALUE_DICTIONARY`).
+# Вне словаря значение остаётся значением с состоянием `unknown_value` и именем виновника, а
+# не отказом записи строки.
+STATE_VOCABULARIES: Dict[str, Tuple[str, ...]] = {
+    "type_parse_state": RECORD_STATES,
+    "type_multiplicity": MULTIPLICITY_VALUES,
+    "content_state": CONTENT_STATES,
+    "properties_state": PROPERTIES_STATES,
+    "data_separation_value_parse_state": SEPARATION_STATES,
+    "data_separation_use_parse_state": SEPARATION_STATES,
+    "conditional_separation_parse_state": SEPARATION_STATES,
+    "data_separation_value_resolve_state": TARGET_RESOLVE_STATES,
+    "data_separation_use_resolve_state": TARGET_RESOLVE_STATES,
+    "conditional_separation_resolve_state": TARGET_RESOLVE_STATES,
+    "target_resolve_state": TARGET_RESOLVE_STATES,
+    "use_state": USE_STATES,
+    "conditional_separation_state": ITEM_COND_STATES,
+}
+
+# Таблица, где стоит это состояние (прогон П3 сверяет CHECK конкретной таблицы, а не
+# «где-нибудь в схеме»; имена колонок двух таблиц узла не пересекаются, поэтому одной
+# связки колонка → таблица достаточно).
+STATE_VOCABULARY_TABLES: Dict[str, str] = {
+    "type_parse_state": TABLE_NAME,
+    "type_multiplicity": TABLE_NAME,
+    "content_state": TABLE_NAME,
+    "properties_state": TABLE_NAME,
+    "data_separation_value_parse_state": TABLE_NAME,
+    "data_separation_use_parse_state": TABLE_NAME,
+    "conditional_separation_parse_state": TABLE_NAME,
+    "data_separation_value_resolve_state": TABLE_NAME,
+    "data_separation_use_resolve_state": TABLE_NAME,
+    "conditional_separation_resolve_state": TABLE_NAME,
+    "target_resolve_state": TARGETS_TABLE_NAME,
+    "use_state": TARGETS_TABLE_NAME,
+    "conditional_separation_state": TARGETS_TABLE_NAME,
+}
+
 TYPE_CLASS_VALUES: Tuple[str, ...] = (
     CLASS_PRIMITIVE, CLASS_OBJECT_REF, CLASS_DEFINED_TYPE_REF, CLASS_UNKNOWN,
 )

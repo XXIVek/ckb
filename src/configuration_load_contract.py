@@ -124,6 +124,18 @@ from configuration_roles import (
     TARGET_RESOLVE_STATES as ROLE_TARGET_RESOLVE_STATES,
     TEMPLATES_TABLE_NAME as ROLE_TEMPLATES_TABLE,
 )
+# Узел V50 (позиция 2.5 нормативного списка, Q1 вариант A): имена таблиц вида «общие
+# реквизиты» задаёт разбор (src/configuration_common_attributes.py), а не этот модуль — тот
+# же порядок, что у V48 и V49. Импорт нужен одному месту: назвать круг таблиц своей стадии,
+# чтобы регистрация вида в круге версионности (`CONFIGURATION_VERSIONED_TABLES`) не добавила
+# чужие таблицы к кругу S4 — проба `_v46_p4_writer_probe.py` падает на `KeyError` ровно на
+# той таблице, которую стадия не объявила (замер 30.10.2026: `KeyError: 'common_attributes'`
+# сразу после шага П1 узла V50). Разбор ничего из этого контракта не импортирует, цикл
+# односторонний.
+from configuration_common_attributes import (
+    TABLE_NAME as COMMON_ATTRIBUTE_TABLE,
+    TARGETS_TABLE_NAME as COMMON_ATTRIBUTE_TARGETS_TABLE,
+)
 from current_revision import CONFIGURATION_VERSIONED_TABLES
 
 # ── стадии конвейера: один перечень на контракт, карточку и проверку ───────────────
@@ -690,7 +702,25 @@ ROLE_KIND_WRITE_ORDER: Tuple[str, ...] = (
 )
 # Таблицы, чьи строки остаются нетронутыми, когда группа не запрошена: ответ обязан назвать
 # это, а не отдать нули как «в конфигурации ничего нет» (C2).
-FOREIGN_STAGE_TABLES: Tuple[str, ...] = SESSION_PARAMETER_TABLES + ROLE_TABLES
+# Узел V50 (общие реквизиты, 30.10.2026): тот же дефект — третьим узлом. Регистрация двух
+# таблиц вида в круге версионности (шаг П1) молча добавила к кругу S4 `common_attributes`:
+# проба `_v46_p4_writer_probe.py` упала на `KeyError: 'common_attributes'`, потому что
+# контракт `CHILD_TABLES` стал шире круга стадии S4, а стадия снимала и анализировала бы
+# чужие строки. Групп запроса у вида нет (Q10, вариант A: порог не замерен, отдельный вход
+# дозагружает весь круг сразу), поэтому константа называет только круг стадии — без
+# `*_TABLES_BY_KIND`, которых у V49 четыре. Строка применения версионируется не своей цепью
+# (Q2, вариант A), но в круг версионности она внесена осознанно — её снимает и загружает
+# стадия, а писатель у неё есть; отсутствие в круге означало бы, что перезагрузка вида
+# оставила бы прежние строки применения.
+COMMON_ATTRIBUTES_TABLES: Tuple[str, ...] = (
+    COMMON_ATTRIBUTE_TABLE,
+    COMMON_ATTRIBUTE_TARGETS_TABLE,
+)
+# Таблицы, чьи строки остаются нетронутыми, когда группа не запрошена: ответ обязан назвать
+# это, а не отдать нули как «в конфигурации ничего нет» (C2).
+FOREIGN_STAGE_TABLES: Tuple[str, ...] = (
+    SESSION_PARAMETER_TABLES + ROLE_TABLES + COMMON_ATTRIBUTES_TABLES
+)
 CHILD_TABLES: Tuple[str, ...] = tuple(
     table for table in CONFIGURATION_VERSIONED_TABLES
     if table not in FOREIGN_STAGE_TABLES
