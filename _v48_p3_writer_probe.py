@@ -73,7 +73,9 @@ from current_revision import (  # noqa: E402
     FIRST_REVISION, REVISION_COLUMNS, current_view, stamp_revision_rows,
 )
 from external_db import connect  # noqa: E402
-from external_table_writer import CONFIGURATION_OBJECT_WRITERS  # noqa: E402
+from external_table_writer import (  # noqa: E402
+    CONFIGURATION_OBJECT_WRITERS, CONFIGURATION_UNVERSIONED_TABLES,
+)
 
 TABLE = "session_parameters"
 DUMP_ROOT = Path(r"C:\1C_LLM\LoadDoc\Configurations\XML_files")
@@ -122,8 +124,15 @@ def one(cur, sql, params=None):
 # ── статическая часть: круг таблиц, спецификация против живой схемы ────────────────────
 def check_registry():
     print("\n=== писатель и круг версионных таблиц конфигурации ===")
-    check("словарь писателей покрывает круг версионных таблиц ровно",
-          sorted(CONFIGURATION_OBJECT_WRITERS) == sorted(CONFIGURATION_VERSIONED_TABLES),
+    # С узла V49 (роли, Q2 вариант A) круг писателей шире круга версионных таблиц ровно на
+    # один элемент — `role_rights`: своей цепи ревизий у строк права нет (их ключ начинается
+    # с `role_id` — ссылки на конкретную ревизию строки роли), но писать в таблицу обязан
+    # писатель. Исключение названо константой `CONFIGURATION_UNVERSIONED_TABLES`, поэтому
+    # проверяется объединение кругов, а не молчаливое равенство.
+    expected = sorted(set(CONFIGURATION_VERSIONED_TABLES)
+                      | set(CONFIGURATION_UNVERSIONED_TABLES))
+    check("словарь писателей покрывает круг версионных таблиц плюс именованное исключение",
+          sorted(CONFIGURATION_OBJECT_WRITERS) == expected,
           ", ".join(sorted(CONFIGURATION_OBJECT_WRITERS)))
     for table in CONFIGURATION_VERSIONED_TABLES:
         writer = CONFIGURATION_OBJECT_WRITERS.get(table)

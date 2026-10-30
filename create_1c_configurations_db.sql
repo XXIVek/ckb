@@ -774,6 +774,278 @@ CREATE TABLE IF NOT EXISTS session_parameters (
 );
 
 
+-- Узел V49 (29.10.2026, позиция 2.4 нормативного списка «Структура конфигурации.txt»,
+-- группа F модели A–H): содержимое ролей — права, ограничения (RLS), дескрипторы файлов.
+-- Норматив — docs/CONFIGURATION_ROLES_PLAN.md (раздел 2 — замеры П0, раздел 3 — решения
+-- Q0…Q10, раздел 4 — модель схемы). Для живой БД, где таблицы уже созданы, —
+-- migrate_v49_roles.sql (тот же текст).
+--
+-- Граница «таблица ≠ колонка заголовка»: таблица `roles` — СОДЕРЖИМОЕ вида, а колонка
+-- configurations.roles (TEXT[], узел V43) — ПЕРЕЧЕНЬ ИМЁН ролей в строке заголовка;
+-- внешнего ключа нет осознанно (прецедент V20.1), равенство множеств сторожит проверка
+-- узла tools/check_v49_roles.py, а не схема (тот же порядок, что session_parameters
+-- против одноимённой колонки узла V48).
+--
+-- `object_uuid` — NOT NULL осознанно: uuid держится АТРИБУТОМ элемента `<Role>` в файле
+-- метаданных (1 202 из 1 202 файлов, пустых — 0) и той же строкой индекса состава
+-- `Role.<Имя>` (_v49_p0_rolefile_probe.py, 29.10.2026). `<Name>` совпадает с именем
+-- файла во всех 1 202 случаях, `<ChildObjects>` — 0 файлов.
+-- `synonym` — jsonb_nullable: «свойства в выгрузке нет» и «свойство есть, но пустое» —
+-- разные состояния (замер: 1 201 файл с `<v8:item>`, 1 файл с `<Synonym/>`).
+-- `comment` — текст или NULL (замер: 41 файл с текстом, 1 161 файл с `<Comment/>`).
+-- Три флага — свойства СОДЕРЖИМОГО прав (по одному на файл, 1 202/1 202), а не
+-- отдельного права (замер 2.5 плана). Счётчики — вывод разбора всего круга роли: пустое
+-- содержимое (11 файлов без `<object>`: BGU2 2, BP3 9) обязано называться состоянием
+-- `empty_content`, а не отсутствием строки (Q7).
+CREATE TABLE IF NOT EXISTS roles (
+    id BIGSERIAL PRIMARY KEY,
+    configuration_uuid UUID NOT NULL,
+    object_uuid UUID NOT NULL,
+    object_name TEXT NOT NULL,
+    full_name TEXT NOT NULL,
+    comment TEXT,
+    synonym JSONB,
+    set_for_new_objects BOOLEAN,
+    set_for_attributes_by_default BOOLEAN,
+    independent_rights_of_child_objects BOOLEAN,
+    content_state TEXT NOT NULL,
+    source_path TEXT NOT NULL,
+    targets_count INTEGER NOT NULL DEFAULT 0,
+    rights_count INTEGER NOT NULL DEFAULT 0,
+    conditions_count INTEGER NOT NULL DEFAULT 0,
+    templates_count INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT NOW(),
+    revision_no INTEGER NOT NULL DEFAULT 1,
+    changed_at TIMESTAMP,
+    changed_by TEXT,
+    is_committed BOOLEAN NOT NULL DEFAULT FALSE,
+    CONSTRAINT roles_content_state_known
+        CHECK (content_state IN ('with_rights', 'empty_content',
+                                 'indexed_no_file', 'file_not_in_index')),
+    -- счётчики согласованы с состоянием содержимого: «прав нет» не соседствует с
+    -- состоянием with_rights, «роль без прав» не даёт ненулевых счётчиков
+    CONSTRAINT roles_counters_match_content_state
+        CHECK (targets_count >= 0 AND rights_count >= 0 AND conditions_count >= 0
+               AND templates_count >= 0
+               AND (rights_count > 0 OR content_state <> 'with_rights')
+               AND (rights_count = 0
+                    OR content_state NOT IN ('empty_content', 'indexed_no_file',
+                                             'file_not_in_index'))),
+    CONSTRAINT roles_revision_no_positive CHECK (revision_no >= 1),
+    CONSTRAINT roles_changed_by_known
+        CHECK (changed_by IS NULL OR changed_by IN ('load', 'edit', 'restore')),
+    CONSTRAINT roles_changed_pair_check
+        CHECK ((changed_at IS NULL) = (changed_by IS NULL)),
+    CONSTRAINT roles_configuration_object_revision_key
+        UNIQUE (configuration_uuid, object_name, revision_no)
+);
+
+-- Строка права. Одна строка = право `right_name` цели `target_full_name` в границах одной
+-- ревизии одной роли. Цепочки ревизий у таблицы СВОЕЙ НЕТ (Q2, вариант A): ключ
+-- начинается с `role_id`, а `role_id` указывает на конкретную строку `roles`, то есть на
+-- конкретную ревизию; текущность права следует из текущности строки роли. Поэтому колонок
+-- `revision_no`/`changed_*` здесь нет — и нет записи в CONFIGURATION_VERSIONED_TABLES:
+-- запись в словаре означала бы цепь, которой у таблицы нет. Витрина
+-- `v_current_role_rights` при этом есть (требование п.2 «у каждого блока своя витрина
+-- текущего состояния») — она читается связкой с `v_current_roles`, а не поиском максимума
+-- по своей цепи.
+-- Замер, разрешающий такой ключ: повторов цели внутри файла — 0, повторов имени права у
+-- одной цели — 0, максимум прав на цель — 27.
+-- `target_object_id`/`target_object_uuid` — ссылка на строку индекса состава
+-- configuration_objects (не на таблицу содержимого: содержимое цели — другие узлы).
+-- Внешнего ключа нет: цель может быть не разрешена (prefix_only/unresolved), а
+-- разрешённая ссылка ведёт к строке, которую снимает перезагрузка индекса состава — битая
+-- ссылка хуже состояния. Разрешение цели (Q3, вариант A): 47 650 из 52 722 целей
+-- разрешаются именем целиком, 5 072 — только префиксом (из них 5 052 —
+-- StandardAttribute), неразрешимых — 0 (замер 2.6); остаток пути называется колонкой
+-- `target_unresolved_path`, а не теряется (приём `unknown_form` V48,
+-- `content_unresolved` V46).
+-- Имя права — текст, а не справочник (Q4, вариант A): словарь 69 имён закрыт по корпусу,
+-- XSD вида `Role` в слое схемы нет, поэтому внешний ключ означал бы отказ записать право,
+-- которого мы не ждали; неизвестное имя называется состоянием `unknown_name`. Значение
+-- права выражается состоянием по значению ВЫГРУЗКИ (`granted`/`denied`), а не смыслом
+-- «роль может»: в KomMag все 2 899 прав имеют значение false, в MinCfg 361 из 362
+-- (позиция O1).
+CREATE TABLE IF NOT EXISTS role_rights (
+    id BIGSERIAL PRIMARY KEY,
+    role_id BIGINT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    configuration_uuid UUID NOT NULL,
+    target_kind TEXT NOT NULL,
+    target_full_name TEXT NOT NULL,
+    target_object_id TEXT,
+    target_object_uuid UUID,
+    target_resolve_state TEXT NOT NULL,
+    target_unresolved_path TEXT,
+    right_name TEXT NOT NULL,
+    right_name_state TEXT NOT NULL,
+    right_value_state TEXT NOT NULL,
+    -- `<field>` внутри `<restrictionByCondition>` — имя поля объекта, к которому
+    -- относится право (замер `_v49_p2_restriction_probe.py`: 3 вхождения корпуса).
+    -- Текст, а не ссылка: индекс состава поля не моделирует (замер 2.5).
+    restriction_field_name TEXT,
+    condition_text TEXT,
+    condition_state TEXT NOT NULL,
+    restriction_template_names TEXT[],
+    target_ordinal INTEGER NOT NULL,
+    right_ordinal INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW(),
+    CONSTRAINT role_rights_names_not_blank
+        CHECK (target_full_name <> '' AND right_name <> '' AND target_kind <> ''),
+    -- имя поля из `<field>` пустым не бывает: пустой элемент — состояние разбора
+    -- (наблюдение), а не строка с пустым именем
+    CONSTRAINT role_rights_field_name_not_blank
+        CHECK (restriction_field_name IS NULL OR restriction_field_name <> ''),
+    CONSTRAINT role_rights_target_resolve_state_known
+        CHECK (target_resolve_state IN ('exact', 'prefix_only', 'unresolved')),
+    CONSTRAINT role_rights_right_name_state_known
+        CHECK (right_name_state IN ('known', 'unknown_name')),
+    CONSTRAINT role_rights_right_value_state_known
+        CHECK (right_value_state IN ('granted', 'denied', 'unknown_form')),
+    CONSTRAINT role_rights_condition_state_known
+        CHECK (condition_state IN ('no_condition', 'with_call', 'no_call')),
+    -- состояние условия и его содержимое не противоречат друг другу: «без условия» не
+    -- держит текста, «с вызовом» держит хотя бы одно имя шаблона
+    CONSTRAINT role_rights_condition_matches_state
+        CHECK ((condition_state = 'no_condition' AND condition_text IS NULL
+                AND restriction_template_names IS NULL)
+               OR (condition_state = 'with_call' AND condition_text IS NOT NULL
+                   AND COALESCE(array_length(restriction_template_names, 1), 0) > 0)
+               OR (condition_state = 'no_call' AND condition_text IS NOT NULL
+                   AND COALESCE(array_length(restriction_template_names, 1), 0) = 0)),
+    -- состояние разрешения цели согласовано со ссылкой и с остатком пути
+    CONSTRAINT role_rights_target_resolve_matches_reference
+        CHECK ((target_resolve_state = 'exact' AND target_object_id IS NOT NULL
+                AND target_unresolved_path IS NULL)
+               OR (target_resolve_state = 'prefix_only'
+                   AND target_object_id IS NOT NULL
+                   AND target_unresolved_path IS NOT NULL)
+               OR (target_resolve_state = 'unresolved'
+                   AND target_object_id IS NULL
+                   AND target_unresolved_path IS NOT NULL)),
+    CONSTRAINT role_rights_ordinals_non_negative
+        CHECK (target_ordinal >= 0 AND right_ordinal >= 0),
+    -- Q2, вариант A: повтор цели или повтор имени права у цели — ошибка разбора, а не
+    -- вторая строка (замеров таких повторов — 0)
+    CONSTRAINT role_rights_role_target_right_key
+        UNIQUE (role_id, target_full_name, right_name)
+);
+
+-- Текст ограничения шаблона (Q5, вариант A1: дедуп по паре (имя, отпечаток)).
+-- Строка = ОДИН текст ограничения в границах конфигурации. Дедупликация выведена из
+-- замера: 1 386 вхождений дают 107 389 085 символов, различных текстов — 9
+-- (776 550 символов): один и тот же текст в одной роли повторяется до 33 раз, а объявляют
+-- его до 664 ролей. Хранить его по числу вхождений — раздуть слой в 138 раз без нового
+-- знания. Встроенных условий 8 915 на 4 010 051 символ при 3 686 различных текстах
+-- (дедуп дал бы экономию 2,3 МБ) — он неводится, условие остаётся колонкой строки права.
+-- ЯВНОЙ ссылки права на шаблон в выгрузке нет: словарь элементов замкнут и называет состав
+-- `<right>` — `name`, `value`, `restrictionByCondition` (_v49_p0_element_probe.py). Детей у
+-- самого `<restrictionByCondition>` прогон `_v49_p2_restriction_probe.py` даёт два:
+-- `condition` (8 915) и `field` (3) — П0 их не измерял, потому что останавливался на детях
+-- `<right>`; `<field>` хранится колонкой `restriction_field_name`, а один пустой
+-- `<condition/>` — это наблюдение разбора, а не строка с условием. Связь — вывод разбора:
+-- вызов пишется `#Имя(`, платформенные функции пишутся без `#`, поэтому
+-- 8 887 из 8 914 условий с текстом (99,7 %) вызывают шаблон своей роли, висячих вызовов — 0,
+-- условий без вызова — 27 (_v49_p0_rls_link_probe.py, пересчёт П2). Имена шаблонов несут сигнатуру
+-- параметров (`ДляОбъекта(ПолеОбъекта)`), вызов пишется `#ДляОбъекта("")` — сопоставление
+-- возможно только по сигнатуре до `(`, она и хранится колонкой `name_signature`.
+-- Перечень ролей-носителей — факт выгрузки (прецедент перечней заголовка V43: скаляры
+-- текстом, перечни массивом).
+CREATE TABLE IF NOT EXISTS role_restriction_templates (
+    id BIGSERIAL PRIMARY KEY,
+    configuration_uuid UUID NOT NULL,
+    name TEXT NOT NULL,
+    name_signature TEXT NOT NULL,
+    digest TEXT NOT NULL,
+    condition_text TEXT NOT NULL,
+    condition_length INTEGER NOT NULL,
+    holder_role_names TEXT[],
+    holders_count INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW(),
+    revision_no INTEGER NOT NULL DEFAULT 1,
+    changed_at TIMESTAMP,
+    changed_by TEXT,
+    is_committed BOOLEAN NOT NULL DEFAULT FALSE,
+    CONSTRAINT role_restriction_templates_names_not_blank
+        CHECK (name <> '' AND name_signature <> ''),
+    -- сигнатура — начало полного имени: иначе строка описывала бы шаблон, которого
+    -- в выгрузке нет
+    CONSTRAINT role_restriction_templates_signature_is_name_prefix
+        CHECK (left(name, char_length(name_signature)) = name_signature),
+    -- отпечаток — sha1 в hex: он ключ дедупликации, пустой означал бы «текст неизвестен»
+    CONSTRAINT role_restriction_templates_digest_shape
+        CHECK (digest ~ '^[0-9a-f]{40}$'),
+    CONSTRAINT role_restriction_templates_condition_not_blank
+        CHECK (condition_text <> '' AND condition_length > 0),
+    -- длина текста совпадает с его фактической длиной: счётчик не переписывается вручную
+    CONSTRAINT role_restriction_templates_length_matches_text
+        CHECK (condition_length = char_length(condition_text)),
+    -- перечень носителей и его длина не расходятся; шаблон без носителя описывает
+    -- текст, которого ни одна роль не объявляет, — такого в выгрузке не бывает
+    CONSTRAINT role_restriction_templates_holders_match_count
+        CHECK (holders_count >= 1
+               AND COALESCE(array_length(holder_role_names, 1), 0) = holders_count),
+    CONSTRAINT role_restriction_templates_revision_no_positive
+        CHECK (revision_no >= 1),
+    CONSTRAINT role_restriction_templates_changed_by_known
+        CHECK (changed_by IS NULL OR changed_by IN ('load', 'edit', 'restore')),
+    CONSTRAINT role_restriction_templates_changed_pair_check
+        CHECK ((changed_at IS NULL) = (changed_by IS NULL)),
+    -- пара (имя, отпечаток) различает случаи «тот же текст под другим именем» и
+    -- «то же имя с другим текстом» — оба наблюдаются (позиция O3), и ни один из них
+    -- нельзя терять. Имя ограничения сокращено до `config`: полное `configuration_...`
+    -- даёт 64 знака, а PostgreSQL обрезает идентификатор до 63 молча
+    CONSTRAINT role_restriction_templates_config_name_digest_revision_key
+        UNIQUE (configuration_uuid, name, digest, revision_no)
+);
+
+-- Дескриптор файла содержимого прав (текста файла узел не читает — Q9, вариант A:
+-- исходный XML не хранится; замер веса _v49_p0_weight_probe.py — 211 544 827 байт
+-- корпуса, 9 242 576 байт после сжатия при 8 696 706 символах нормализуемых данных:
+-- `ext` стал бы второй копией содержимого, устаревающей при правке строк. Граница узла:
+-- побайтовое воспроизведение Rights.xml не обещается, смысловая сборка — из строк по
+-- target_ordinal и right_ordinal).
+-- Каждая строка подтверждается записью индекса состава `Role.<Имя>.Rights`
+-- (child_type='Rights', uuid у неё отсутствует, object_id = '<uuid роли>.0'), а не
+-- повторным разбором ConfigDumpInfo.xml (тот же порядок, что common_module_sources узла
+-- V46 и session_parameters узла V48). В четырёх замеренных выгрузках круг замкнут
+-- (1 202/1 202). Особого случая BP3 здесь нет — замер П2 (29.10.2026) даёт в BP3 каталог
+-- Roles/ из 682 подкаталогов и 682 файла прав, прежняя формулировка «в BP3 каталога
+-- Roles/ нет» неверна и снята. Состояния `indexed_no_file` и `file_not_in_index` корпусом
+-- не даны, но заглушками не являются: круг по каталогу и круг по индексу — разные
+-- круга (Q6), достигаются синтетическими фикстурами шага П2.
+CREATE TABLE IF NOT EXISTS role_sources (
+    id BIGSERIAL PRIMARY KEY,
+    configuration_uuid UUID NOT NULL,
+    object_name TEXT NOT NULL,
+    object_uuid UUID NOT NULL,
+    source_path TEXT NOT NULL,
+    file_size BIGINT,
+    declaration_state TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW(),
+    revision_no INTEGER NOT NULL DEFAULT 1,
+    changed_at TIMESTAMP,
+    changed_by TEXT,
+    is_committed BOOLEAN NOT NULL DEFAULT FALSE,
+    CONSTRAINT role_sources_names_not_blank
+        CHECK (object_name <> '' AND source_path <> ''),
+    CONSTRAINT role_sources_declaration_state_known
+        CHECK (declaration_state IN ('file_and_index', 'indexed_no_file',
+                                     'file_not_in_index')),
+    -- размер и состояние согласованы: файла нет — размера нет; ожидаемого файла нет —
+    -- это состояние, а не нулевой размер
+    CONSTRAINT role_sources_size_matches_state
+        CHECK ((declaration_state = 'file_and_index' AND file_size IS NOT NULL)
+               OR (declaration_state <> 'file_and_index' AND file_size IS NULL)),
+    CONSTRAINT role_sources_revision_no_positive CHECK (revision_no >= 1),
+    CONSTRAINT role_sources_changed_by_known
+        CHECK (changed_by IS NULL OR changed_by IN ('load', 'edit', 'restore')),
+    CONSTRAINT role_sources_changed_pair_check
+        CHECK ((changed_at IS NULL) = (changed_by IS NULL)),
+    CONSTRAINT role_sources_configuration_object_revision_key
+        UNIQUE (configuration_uuid, object_name, revision_no)
+);
+
+
 -- --------------------------------------------
 -- ИНДЕКСЫ (только для таблиц этого файла; индексы внешнего отчёта — в src/ddl_external_report.sql)
 -- --------------------------------------------
@@ -921,6 +1193,64 @@ WHERE NOT EXISTS (SELECT 1 FROM session_parameters h
                     AND h.object_name = sp.object_name
                     AND h.revision_no > sp.revision_no);
 
+-- Витрины текущего состояния содержимого ролей (узел V49). Предикат — тот же, что у
+-- витрин V46/V48: строка относится к максимальной ревизии в пределах ключа цепочки;
+-- признак коммита на круг не влияет (решение A1). Имена витрин задаёт не этот файл: их
+-- отдаёт current_view() по реестру CONFIGURATION_VERSIONED_TABLES
+-- (src/current_revision.py), а расхождение имени ловит tools/check_v19_revisions.py —
+-- кроме `v_current_role_rights`: своей цепи ревизий у прав нет (Q2, вариант A), поэтому
+-- таблица в реестре не значится, а витрина строится связкой с `v_current_roles`.
+CREATE OR REPLACE VIEW v_current_roles AS
+SELECT r.id,
+       r.configuration_uuid, r.object_uuid, r.object_name, r.full_name,
+       r.comment, r.synonym, r.set_for_new_objects,
+       r.set_for_attributes_by_default, r.independent_rights_of_child_objects,
+       r.content_state, r.source_path, r.targets_count, r.rights_count,
+       r.conditions_count, r.templates_count, r.created_at,
+       r.revision_no, r.changed_at, r.changed_by, r.is_committed
+FROM roles r
+WHERE NOT EXISTS (SELECT 1 FROM roles h
+                  WHERE h.configuration_uuid = r.configuration_uuid
+                    AND h.object_name = r.object_name
+                    AND h.revision_no > r.revision_no);
+
+-- Витрина прав строит текущность связкой с `v_current_roles`: своей цепи ревизий у
+-- прав нет (раздел 3 шапки), `role_id` указывает на конкретную ревизию строки роли.
+CREATE OR REPLACE VIEW v_current_role_rights AS
+SELECT rr.id,
+       rr.role_id, rr.configuration_uuid, rr.target_kind, rr.target_full_name,
+       rr.target_object_id, rr.target_object_uuid, rr.target_resolve_state,
+       rr.target_unresolved_path, rr.right_name, rr.right_name_state,
+       rr.right_value_state, rr.restriction_field_name, rr.condition_text,
+       rr.condition_state, rr.restriction_template_names, rr.target_ordinal,
+       rr.right_ordinal, rr.created_at
+FROM role_rights rr
+JOIN v_current_roles rc ON rc.id = rr.role_id;
+
+CREATE OR REPLACE VIEW v_current_role_restriction_templates AS
+SELECT t.id,
+       t.configuration_uuid, t.name, t.name_signature, t.digest,
+       t.condition_text, t.condition_length, t.holder_role_names,
+       t.holders_count, t.created_at, t.revision_no, t.changed_at,
+       t.changed_by, t.is_committed
+FROM role_restriction_templates t
+WHERE NOT EXISTS (SELECT 1 FROM role_restriction_templates h
+                  WHERE h.configuration_uuid = t.configuration_uuid
+                    AND h.name = t.name
+                    AND h.digest = t.digest
+                    AND h.revision_no > t.revision_no);
+
+CREATE OR REPLACE VIEW v_current_role_sources AS
+SELECT s.id,
+       s.configuration_uuid, s.object_name, s.object_uuid, s.source_path,
+       s.file_size, s.declaration_state, s.created_at, s.revision_no,
+       s.changed_at, s.changed_by, s.is_committed
+FROM role_sources s
+WHERE NOT EXISTS (SELECT 1 FROM role_sources h
+                  WHERE h.configuration_uuid = s.configuration_uuid
+                    AND h.object_name = s.object_name
+                    AND h.revision_no > s.revision_no);
+
 -- Индексы configuration_objects (узел V33). Перечень объекта читают по конфигурации и по
 -- виду, дочерние элементы — по parent_name, поиск по идентификатору — по object_id/uuid.
 CREATE INDEX IF NOT EXISTS idx_config_objects_config
@@ -1003,6 +1333,29 @@ CREATE INDEX IF NOT EXISTS idx_session_parameters_object_uuid_revision
 -- по этому выбору о применимости индекса не судят).
 CREATE INDEX IF NOT EXISTS idx_session_parameters_types_gin
     ON session_parameters USING gin (types jsonb_path_ops);
+
+-- Индексы узла V49 (содержимое ролей). Отдельного индекса по configuration_uuid нет в
+-- roles, role_restriction_templates, role_sources: его обслуживает уникальный индекс
+-- цепочки с той же ведущей колонкой — им же пользуются предикат витрины и чистка узла
+-- (тот же порядок, что V44/V46/V48). В role_rights индекс по configuration_uuid
+-- заводится: ведущая колонка её уникального индекса — role_id, а на configuration_uuid
+-- работает чистка узла и вопрос «права какой конфигурации».
+-- Индексы по цели и по имени права отвечают на карточку запроса «какие роли дают Edit на
+-- Catalog.Товары» и «какие права даёт роль» без сканирования 140 115 строк; частичный
+-- индекс по target_object_uuid покрывает только разрешённые ссылки (5 072 из 52 722 их не
+-- имеют). Индекса по name_signature нет: вызов уже разрешён в строку права
+-- (restriction_template_names), а поиск по паре (configuration_uuid, name) обслуживает
+-- уникальный индекс цепочки.
+CREATE INDEX IF NOT EXISTS idx_roles_object_uuid_revision
+    ON roles(object_uuid, revision_no);
+CREATE INDEX IF NOT EXISTS idx_role_rights_configuration_uuid
+    ON role_rights(configuration_uuid);
+CREATE INDEX IF NOT EXISTS idx_role_rights_target_full_name
+    ON role_rights(target_full_name);
+CREATE INDEX IF NOT EXISTS idx_role_rights_right_name
+    ON role_rights(right_name);
+CREATE INDEX IF NOT EXISTS idx_role_rights_target_object_uuid
+    ON role_rights(target_object_uuid) WHERE target_object_uuid IS NOT NULL;
 
 
 -- --------------------------------------------

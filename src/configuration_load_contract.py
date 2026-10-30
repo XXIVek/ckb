@@ -100,6 +100,17 @@ from configuration_session_parameters import (
     TABLE_NAME as SESSION_PARAMETER_TABLE,
     TYPE_CLASS_VALUES,
 )
+# Узел V49 (позиция 2.4 нормативного списка, узел Q2 вариант A): имена таблиц вида «роли»
+# задаёт разбор (src/configuration_roles.py), а не этот модуль — тот же порядок, что у V48.
+# Импорт нужен одному месту: назвать круг таблиц своей стадии, чтобы регистрация вида в круге
+# версионности (`CONFIGURATION_VERSIONED_TABLES`) не добавила чужие таблицы к кругу S4.
+# Разбор ничего из этого контракта не импортирует, цикл односторонний.
+from configuration_roles import (
+    RIGHTS_TABLE_NAME as ROLE_RIGHTS_TABLE,
+    SOURCES_TABLE_NAME as ROLE_SOURCES_TABLE,
+    TABLE_NAME as ROLE_TABLE,
+    TEMPLATES_TABLE_NAME as ROLE_TEMPLATES_TABLE,
+)
 from current_revision import CONFIGURATION_VERSIONED_TABLES
 
 # ── стадии конвейера: один перечень на контракт, карточку и проверку ───────────────
@@ -553,9 +564,25 @@ def format_root_modules_lines(result: Dict[str, Any],
 # не объявит свои таблицы, попадёт в круг S4 — и проверка П4 это ловит строкой «круг стадии
 # S4 не тронут».
 SESSION_PARAMETER_TABLES: Tuple[str, ...] = (SESSION_PARAMETER_TABLE,)
+# Узел V49 (роли, 30.10.2026): тот же дефект повторился ровно через один узел. Регистрация
+# таблиц вида «роли» в круге версионности (шаг П1) молча добавила к кругу S4 четыре таблицы:
+# проба `_v46_p4_writer_probe.py` упала на `KeyError: 'roles'`, потому что контракт разбора
+# `CHILD_KINDS`/`CHILD_TABLES` стал шире круга стадии, а стадия S4 снимала и анализировала
+# бы чужие строки (у BP3 это 682 строки ролей и 76 332 строки прав). Роль — не вид свойств
+# V46: у неё нет ни своей стадии в `STAGES` (её заводит шаг П5), ни ключа ответа. Пока
+# стадии нет, таблицы вида объявляются здесь своей константой и из круга S4 вычитаются — при
+# том что писатели и цепи ревизий у них уже работают (иначе версионируемая таблица
+# осталась бы без писателя, то есть без права на запись).
+ROLE_TABLES: Tuple[str, ...] = (
+    ROLE_TABLE,
+    ROLE_RIGHTS_TABLE,
+    ROLE_TEMPLATES_TABLE,
+    ROLE_SOURCES_TABLE,
+)
+FOREIGN_STAGE_TABLES: Tuple[str, ...] = SESSION_PARAMETER_TABLES + ROLE_TABLES
 CHILD_TABLES: Tuple[str, ...] = tuple(
     table for table in CONFIGURATION_VERSIONED_TABLES
-    if table not in SESSION_PARAMETER_TABLES
+    if table not in FOREIGN_STAGE_TABLES
 )
 CHILD_KINDS: Tuple[str, ...] = (KIND_SUBSYSTEMS, KIND_COMMON_MODULES)
 CHILD_KIND_TITLES: Dict[str, str] = {

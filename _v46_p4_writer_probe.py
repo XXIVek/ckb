@@ -56,17 +56,35 @@ import configuration_object_properties as props  # noqa: E402
 # эти два круга разошлись: чужую таблицу проба ни снимает, ни считает — иначе она проверяла бы
 # запись чужой стадии и мешала ей. Реестр писателей ниже по-прежнему сверяется с полным кругом
 # `CONFIGURATION_VERSIONED_TABLES`: он обязан покрывать все версионируемые таблицы.
-from configuration_load_contract import CHILD_TABLES  # noqa: E402
+# Узел V49 (роли, 30.10.2026) наступил в тот же грабель: регистрация четырёх таблиц вида
+# в круге версионности молча расширила круг стадии S4, и проба упала на `KeyError: 'roles'`.
+# Исправление — не в пробе, а в контракте: круг стадии защищает вычитание констант чужих
+# стадий (`SESSION_PARAMETER_TABLES`, `ROLE_TABLES`). Проба берёт `CHILD_TABLES` как круг S4 и
+# проверяет, что защита не снята: чужие таблицы в круг не вошли, имена круга — свои четыре.
+from configuration_load_contract import (  # noqa: E402
+    CHILD_TABLES, ROLE_TABLES, SESSION_PARAMETER_TABLES,
+)
 from configuration_root_module_loader import configuration_uuid_from_layout  # noqa: E402
 from current_revision import (  # noqa: E402
     CHANGED_BY_EDIT, CHANGED_BY_LOAD, COMMIT_FLAG_COLUMN, CONFIGURATION_VERSIONED_TABLES,
     FIRST_REVISION, REVISION_COLUMNS, current_view, stamp_revision_rows,
 )
 from external_db import connect  # noqa: E402
-from external_table_writer import CONFIGURATION_OBJECT_WRITERS  # noqa: E402
+from external_table_writer import (  # noqa: E402
+    CONFIGURATION_OBJECT_WRITERS, CONFIGURATION_UNVERSIONED_TABLES,
+)
 
 BASE = Path(r"C:\1C_LLM\LoadDoc\Configurations\XML_files")
 DUMP_NAMES = ("MinCfg", "BGU2", "BP3")
+
+# Круг пробы — круг стадии S4 (`CHILD_TABLES` контракта), а не производное от круга
+# версионности и не список, заведенный в пробе заново: узел V48 (параметры сеанса) показал,
+# что производный круг молча включает таблицы узла, появившиеся позже, — V49 (роли) наступил
+# в тот же грабель. Теперь круг стадии защищает сам контракт (константы `SESSION_PARAMETER_TABLES`
+# и `ROLE_TABLES`), а проба проверяет, что защита не снята: имена круга сверяются здесь.
+V46_TABLES = list(CHILD_TABLES)
+EXPECTED_V46_TABLES = ["subsystems", "subsystem_content", "common_modules",
+                       "common_module_sources"]
 
 # Колонки, которых в контракте разбора нет по замыслу: их подставляет вызывающий
 # (загрузчик) перед вставкой. uuid заголовка знает вызывающий, а не XML объекта — тот же
@@ -109,8 +127,15 @@ def one(cur, sql, params=None):
 # ── статическая часть: круг таблиц и спецификации ─────────────────────────────────────
 def check_registry():
     print("\n=== писатели и круг версионных таблиц ===")
-    check("словарь писателей покрывает круг версионных таблиц конфигурации ровно",
-          sorted(CONFIGURATION_OBJECT_WRITERS) == sorted(CONFIGURATION_VERSIONED_TABLES),
+    # С узла V49 (роли, Q2 вариант A) круг писателей шире круга версионных таблиц ровно на
+    # один элемент — `role_rights`: своей цепи ревизий у строк права нет (их ключ начинается
+    # с `role_id` — ссылки на конкретную ревизию строки роли), но писать в таблицу обязан
+    # писатель. Исключение названо константой `CONFIGURATION_UNVERSIONED_TABLES`, поэтому
+    # проверяется объединение кругов, а не молчаливое равенство.
+    expected = sorted(set(CONFIGURATION_VERSIONED_TABLES)
+                      | set(CONFIGURATION_UNVERSIONED_TABLES))
+    check("словарь писателей покрывает круг версионных таблиц плюс именованное исключение",
+          sorted(CONFIGURATION_OBJECT_WRITERS) == expected,
           ", ".join(sorted(CONFIGURATION_OBJECT_WRITERS)))
     for table in CONFIGURATION_VERSIONED_TABLES:
         writer = CONFIGURATION_OBJECT_WRITERS.get(table)
@@ -127,6 +152,18 @@ def check_registry():
         check(f"{table}: писатель не объяляет вычисляемых колонок (id, tsv)",
               "id" not in writer.COLUMNS and "tsv" not in writer.COLUMNS,
               str(len(writer.COLUMNS)) + " колонок")
+    # Круг стадии S4 защищает сам контракт: `CHILD_TABLES` = круг версионности минус таблицы
+    # чужих стадий (`SESSION_PARAMETER_TABLES` узла V48, `ROLE_TABLES` узла V49). Проверка
+    # держит защиту в двух направлениях: имена круга остаются четырьмя таблицами V46, и чужие
+    # таблицы в круг не входят. Без этой строки регистрация следующего вида молча отдала бы
+    # стадии чужие таблицы — так проба теряла их на `KeyError` (BP3, 30.10.2026).
+    check("круг стадии S4 остаётся кругом узла V46",
+          sorted(CHILD_TABLES) == sorted(EXPECTED_V46_TABLES), ", ".join(sorted(CHILD_TABLES)))
+    check("круг стадии S4 не включает таблиц чужих стадий",
+          not (set(CHILD_TABLES) & set(SESSION_PARAMETER_TABLES + ROLE_TABLES)),
+          ", ".join(sorted(set(CHILD_TABLES) & set(SESSION_PARAMETER_TABLES + ROLE_TABLES))))
+    note("круг S4: %s; чужие круги: V48 %s, V49 %s"
+         % (", ".join(CHILD_TABLES), ", ".join(SESSION_PARAMETER_TABLES), ", ".join(ROLE_TABLES)))
 
 
 def check_contract_matches_writer(rows_by_table):
@@ -172,7 +209,7 @@ def write_all(cur, cfg_uuid, collected):
 
 def check_written(cur, cfg_uuid, collected, written):
     print("\n--- записанные строки ---")
-    for table in CHILD_TABLES:
+    for table in V46_TABLES:
         expected = len(collected[table])
         view = current_view(table)
         total = one(cur, "SELECT count(*) FROM " + table + " WHERE configuration_uuid = %s",
@@ -333,7 +370,7 @@ def check_paths_resolve(cur, cfg_uuid, dump_dir, limit=5):
 def check_duplicate_rejected(cur, cfg_uuid, collected):
     """Ключ цепочки существует фактом: повтор той же строки отклонён."""
     print("\n--- ключ цепочки состояния ---")
-    for table in CHILD_TABLES:
+    for table in V46_TABLES:
         if not collected[table]:
             continue
         writer = CONFIGURATION_OBJECT_WRITERS[table]
@@ -511,7 +548,7 @@ def run_dump(name):
     conn_base = connect()
     try:
         cur_base = conn_base.cursor()
-        for table in CHILD_TABLES:
+        for table in V46_TABLES:
             baseline[table] = int(one(cur_base, "SELECT count(*) FROM " + table) or 0)
             baseline_cfg[table] = int(one(cur_base, "SELECT count(*) FROM " + table
                                               + " WHERE configuration_uuid = %s",
@@ -534,12 +571,12 @@ def run_dump(name):
         # в её транзакции и в код загрузчика не попадает.
         cur.execute("SET LOCAL enable_nestloop = off")
         removed_pre = {}
-        for table in CHILD_TABLES:
+        for table in V46_TABLES:
             cur.execute("DELETE FROM " + table + " WHERE configuration_uuid = %s", (cfg_uuid,))
             removed_pre[table] = cur.rowcount
         check("прежние строки этой конфигурации сняты внутри транзакции (запись начинается "
               "с чистого круга)",
-              all(removed_pre[table] == baseline_cfg[table] for table in CHILD_TABLES),
+              all(removed_pre[table] == baseline_cfg[table] for table in V46_TABLES),
               str(removed_pre))
         written, moment = write_all(cur, cfg_uuid, collected)
         check("метка события одна и та же для всех четырёх групп (M2)", bool(moment), str(moment))
@@ -561,7 +598,7 @@ def run_dump(name):
     try:
         cur_after = conn_after.cursor()
         drift = {}
-        for table in CHILD_TABLES:
+        for table in V46_TABLES:
             count = int(one(cur_after, "SELECT count(*) FROM " + table) or 0)
             if count != baseline[table]:
                 drift[table] = f"{baseline[table]} → {count}"

@@ -1325,8 +1325,213 @@ class SessionParametersRowWriter(TableRowWriter):
     })
 
 
+class RolesRowWriter(TableRowWriter):
+    """Строка роли конфигурации (таблица `roles`, узел V49, позиция 2.4 списка).
+
+    Имена колонок совпадают с полями контракта разбора
+    (`src/configuration_roles.py::role_row`) намеренно — чтобы маппинг был виден по
+    тексту, а не по памяти (приём узла V33).
+
+    Колонки, смысл которых не выводится из имени:
+
+      * ключом цепочки состояния является (`configuration_uuid`, `object_name`,
+        `revision_no`): роль различается именем в границах конфигурации, а её uuid
+        совпадает со строкой индекса состава в 1 202 случаях из 1 202 (замер 2.9).
+        Позиция O9 называет причину, по которой `configuration_uuid` в ключе обязателен:
+        `Role.АдминистраторСистемы` существует и в BGU2, и в BP3 — с разными uuid и
+        `configVersion`. `object_uuid` — отдельная колонка и поисковый индекс, но не ключ
+        (тот же порядок, что `subsystems` V46 и `session_parameters` V48);
+      * `content_state` — состояние содержимого прав роли, а не «права есть/нет»:
+        словарь замкнут разбор (`CONTENT_STATES`) и повторён CHECK'ом схемы; сверку
+        словаря с CHECK ведёт `_v49_p3_writer_probe.py` по `STATE_VOCABULARIES`
+        (повторять словарь в двух местах без сверки — значит разъезжаться с кодом);
+      * три флага — свойства СОДЕРЖИМОГО прав (по одному на файл, 1 202/1 202, замер 2.5),
+        а не отдельного права. NULL означает «элемента флага в файле нет»
+        (`parse_flag_value`), а не `false`: «флаг снят» и «флага никогда не было» —
+        разные состояния выгрузки;
+      * счётчики `targets_count` / `rights_count` / `conditions_count` /
+        `templates_count` — вывод разбора ВСЕГО круга роли; писатель их не пересчитывает,
+        согласование со состоянием делает CHECK `roles_counters_match_content_state`;
+      * `source_path` при состоянии `indexed_no_file` — ожидаемый путь, выведенный из
+        имени: файла нет, а колонка обязана называть, где он ожидался (иначе строка
+        читалась бы обезличенной);
+      * `synonym` — `jsonb_nullable`, а не `jsonb_object`: «свойства в выгрузке нет» и
+        «свойство есть, но пустое» — разные состояния (прецеденты `origin_manifest` V31,
+        `picture` V46, `synonym` V48).
+
+    Дочерняя таблица `role_rights` ссылается на ЧИСЛОВОЙ id этой строки, то есть на
+    конкретную ревизию (Q2, вариант A) — вызывающий обязан вставлять роли через
+    `insert_ids()` и подставлять полученный id в строки прав.
+    """
+
+    TABLE = "roles"
+    COLUMNS = versioned_columns({
+        "configuration_uuid": "uuid",
+        "object_uuid": "uuid",
+        "object_name": "text",
+        "full_name": "text",
+        "comment": "text",
+        "synonym": "jsonb_nullable",
+        "set_for_new_objects": "bool",
+        "set_for_attributes_by_default": "bool",
+        "independent_rights_of_child_objects": "bool",
+        "content_state": "text",
+        "source_path": "text",
+        "targets_count": "int",
+        "rights_count": "int",
+        "conditions_count": "int",
+        "templates_count": "int",
+    })
+
+
+class RoleRightsRowWriter(TableRowWriter):
+    """Строка права роли (таблица `role_rights`, узел V49).
+
+    Таблица НЕ версионируется своей цепочкой (Q2, вариант A): ключ начинается с
+    `role_id`, а `role_id` указывает на конкретную строку `roles`, то есть на конкретную
+    ревизию. Поэтому спецификация собрана БЕЗ `versioned_columns()` — колонок `revision_no`
+    / `changed_*` у таблицы нет, и текущность права выводится из витрины `v_current_roles`
+    связкой, а не поиском максимума по своей цепи. Запись в реестре
+    `CONFIGURATION_OBJECT_WRITERS` при этом есть намеренно: реестр выбирает писателя по
+    таблице, и отсутствие записи означало бы выбор класса по имени — ту самую ошибку
+    «записал не в ту таблицу», ради которой реестр и существует. Исключение названо
+    константой `CONFIGURATION_UNVERSIONED_TABLES`, а не молча.
+
+    Колонки, смысл которых не выводится из имени:
+
+      * `role_id` подставляет вызывающий слой (стадия П4) из id, полученного
+        `RolesRowWriter.insert_ids`; в контракте разбора для этой связи служит
+        `role_name` (`right_row`), и колонкой он не становится намеренно — иначе строка
+        права могла бы ссылаться на имя вместо ревизии;
+      * `configuration_uuid` повторяет значение строки роли осознанно: запрос «какие роли
+        дают `Edit` на `Catalog.Товары`» идёт по правам, и без колонки он требовал бы
+        связки с `roles` и с её витриной на каждом шаге;
+      * `restriction_template_names` — вид `text_array_nullable`, а не `text_array`: при
+        состояниях `no_condition` и `no_call` колонка обязана остаться NULL (CHECK
+        `role_rights_condition_matches_state`), а пустой массив читался бы как «с вызовом,
+        но без имени»;
+      * `condition_text` — вид `text`: пустая строка становится NULL. Состояния «пустое
+        условие» в словаре нет (CHECK требует текст при любом состоянии с условием), а
+        случай пустого `<condition/>` называется наблюдением разбора
+        `empty_condition_elements` (замер `_v49_p2_restriction_probe.py`: 1 на корпус);
+      * `restriction_field_name` — текст `<field>` внутри `<restrictionByCondition>`
+        (3 вхождения корпуса). Текст, а не ссылка: индекс состава поля не моделирует
+        (замер 2.5), поэтому второй ссылки здесь нет, а есть сохранённое имя;
+      * `target_object_id` / `target_object_uuid` — ссылка на СТРОКУ ИНДЕКСА состава, а не
+        на таблицу содержимого цели; внешнего ключа нет осознанно: цель может быть не
+        разрешена (`prefix_only` / `unresolved`), а разрешённая ссылка ведёт к строке,
+        которую снимает перезагрузка индекса — битая ссылка хуже состояния;
+      * `target_ordinal` / `right_ordinal` — позиция цели и права в файле. Порядок
+        писатель не меняет: он и есть обещание смысловой сборки `Rights.xml` из строк
+        (Q9, вариант A), CHECK `role_rights_ordinals_non_negative` запрещает лишь
+        отрицательные значения.
+
+    PAGE_SIZE назван намеренно: 60 565 строк в BGU2 и 76 332 в BP3 (замер
+    `_v49_p3_rowcounts.txt`). Одна команда на весь список держала бы в памяти SQL из
+    десятков тысяч кортежей (тот же порядок, что `ConfigurationObjectRowWriter`).
+    """
+
+    TABLE = "role_rights"
+    PAGE_SIZE = 2000
+    COLUMNS = {
+        "role_id": "int",
+        "configuration_uuid": "uuid",
+        "target_kind": "text",
+        "target_full_name": "text",
+        "target_object_id": "text",
+        "target_object_uuid": "uuid",
+        "target_resolve_state": "text",
+        "target_unresolved_path": "text",
+        "right_name": "text",
+        "right_name_state": "text",
+        "right_value_state": "text",
+        "restriction_field_name": "text",
+        "condition_text": "text",
+        "condition_state": "text",
+        "restriction_template_names": "text_array_nullable",
+        "target_ordinal": "int",
+        "right_ordinal": "int",
+    }
+
+
+class RoleRestrictionTemplatesRowWriter(TableRowWriter):
+    """Текст ограничения шаблона роли (таблица `role_restriction_templates`, узел V49).
+
+    Одна строка на пару (имя, отпечаток текста) в границах конфигурации, а не на
+    вхождение: 1 386 вхождений корпуса дают 10 имён и 9 различных текстов (замер 2.7),
+    в BGU2 664 вхождения дают 8 строк, в BP3 721 вхождение даёт 9 (замер
+    `_v49_p3_rowcounts.txt`). Ключ `(configuration_uuid, name, digest, revision_no)`
+    различает оба наблюдаемых случая (позиция O6): «тот же текст под другим именем» и
+    «то же имя с другим текстом».
+
+    Колонки, смысл которых не выводится из имени:
+
+      * `digest` — sha1 в hex нормализованного текста (`condition_digest`); CHECK формы
+        запрещает пустой отпечаток, потому что пустой означал бы «текст неизвестен»;
+      * `name_signature` — имя до первой скобки. Именно по сигнатуре вызов `#Имя(`
+        сопоставляется с декларацией: полное имя вызова никогда не совпадает с полным
+        именем декларации (замер 2.7: сравнение полных имён сделало бы ложными 4 735
+        «необъявленных» вызовов из 4 744). CHECK схемы требует, чтобы сигнатура была
+        началом имени — иначе строка описывала бы шаблон, которого в выгрузке нет;
+      * `condition_text` / `condition_length` — текст и его длина: CHECK
+        `..._length_matches_text` сверяет счётчик с `char_length`, поэтому писатель не
+        имеет права его пересчитывать;
+      * `holder_role_names` / `holders_count` — перечень ролей, объявляющих этот текст
+        (факт выгрузки, а не вывод), согласованы CHECK'ом числа носителей.
+    """
+
+    TABLE = "role_restriction_templates"
+    COLUMNS = versioned_columns({
+        "configuration_uuid": "uuid",
+        "name": "text",
+        "name_signature": "text",
+        "digest": "text",
+        "condition_text": "text",
+        "condition_length": "int",
+        "holder_role_names": "text_array",
+        "holders_count": "int",
+    })
+
+
+class RoleSourcesRowWriter(TableRowWriter):
+    """Дескриптор файла `Roles/<Имя>/Ext/Rights.xml` (таблица `role_sources`, узел V49).
+
+    Дескриптор, а не текст (Q9, вариант A): 211 МБ корпуса (замер
+    `_v49_p0_weight_probe.py`) второй копией в базе не стали бы — обратная выгрузка не
+    реализована, а побайтовое воспроизведение нечем проверить.
+
+    Колонки, смысл которых не выводится из имени:
+
+      * `object_name` — ИМЯ РОЛИ, а не имя файла: файл один на роль, и ключ цепочки
+        (`configuration_uuid`, `object_name`, `revision_no`) совпадает с ключом строки
+        роли ровно для того, чтобы «индекс есть, файла нет» был ОТДЕЛЬНОЙ строкой, а не
+        отсутствием строки (Q8, вариант A);
+      * `file_size` заполняется только состояниям с файлом — CHECK
+        `role_sources_size_matches_state`: «ожидаемого файла нет» является состоянием
+        `indexed_no_file`, а не нулевым размером (тот же порядок, что
+        `common_module_sources` V46);
+      * `declaration_state` различает файл и запись индекса состава `Role.<Имя>.Rights`
+        (uuid у записи отсутствует, `object_id = '<uuid роли>.0'`). Четыре замеренные
+        выгрузки дают 1 202/1 202 состояний `file_and_index`; состояния `indexed_no_file`
+        и `file_not_in_index` существуют фикстурами шага П2, а не нулями корпуса, и
+        именно они проверяются в пробе П3 отдельной парой строк.
+    """
+
+    TABLE = "role_sources"
+    COLUMNS = versioned_columns({
+        "configuration_uuid": "uuid",
+        "object_name": "text",
+        "object_uuid": "uuid",
+        "source_path": "text",
+        "file_size": "int",
+        "declaration_state": "text",
+    })
+
+
 # Контракт разбора → писатель: выбор по словарю, а не по имени таблицы (приём
 # ROOT_MODULE_WRITERS: ошибка выбора превращается в запись не в ту таблицу).
+# Узел V49 (роли): писатели группы свои, реестр — общий механизм
+# (правило rules:core-rules:functional:add-object-block, п. 6).
 CONFIGURATION_OBJECT_WRITERS = {
     "subsystems": SubsystemsRowWriter,
     "subsystem_content": SubsystemContentRowWriter,
@@ -1335,7 +1540,23 @@ CONFIGURATION_OBJECT_WRITERS = {
     # Узел V48 (параметры сеанса): писатель группы свой, реестр — общий механизм
     # (правило rules:core-rules:functional:add-object-block, п. 6).
     "session_parameters": SessionParametersRowWriter,
+    # Узел V49 (роли): три таблицы ведут цепочку состояний по своему ключу, `role_rights`
+    # — в исключении (следующая константа).
+    "roles": RolesRowWriter,
+    "role_rights": RoleRightsRowWriter,
+    "role_restriction_templates": RoleRestrictionTemplatesRowWriter,
+    "role_sources": RoleSourcesRowWriter,
 }
+
+# Таблицы, чей писатель зарегистрирован общим реестром, но своей ЦЕПИ РЕВИЗИЙ у таблицы
+# нет (узел V49, Q2 вариант A). Существование списка — не поблажка: до V49 круг писателей
+# и круг версионных таблиц совпадали ровно, и пробы П3/П4 узлов V46 и V48 сверяли именно
+# равенство. У строк права своей цепи нет потому, что их ключ начинается с `role_id` —
+# ссылки на конкретную ревизию строки роли; писать в такую таблицу всё равно обязан
+# писатель, а не «ручной INSERT», иначе выбор класса уходит в вызывающий код. Формулировка
+# проверки меняется с равенства на `версионные таблицы ∪ этот список`, и расхождение
+# называется списком, а не молчит.
+CONFIGURATION_UNVERSIONED_TABLES = ("role_rights",)
 
 
 class ConfigCrossReferenceRowWriter(TableRowWriter):
