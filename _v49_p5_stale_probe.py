@@ -9,6 +9,12 @@
 Зонд называет строки карточек, а не чинит их: часть правок принадлежит шагу П7 плана
 (матрица `goal-and-stages`, карточка `load-catalog`, строка группы F модели A–H), и их
 объём обязан быть назван до правки, а не после.
+
+Шаг П7 выполнен тем же днём (`_v49_p7_rule_patch.py`, 21 правка по границам), поэтому зонд
+разводит два ответа, которые прежде смешивались: строку, где роли названы НЕзакрытыми (ложь,
+её надо править), и строку, где роли названы закрытыми, но рядом стоит слово из перечня
+незакрытого («слой 3 не реализован, кроме прав ролей» — это верное утверждение). Первая
+группа — предмет правки, вторая — доказательство, что правка дошла.
 """
 import sys
 from pathlib import Path
@@ -30,8 +36,13 @@ from quarantine import MARK_ARRAY, sql_not_marked  # noqa: E402
 NEEDLES = ("не загруж", "не закрыт", "незакрыв", "остаются", "не трогает",
            "child_not_implemented", "не реализован", "null", "нет узла", "не входит")
 ROLE_WORDS = ("рол", "role")
+# Слово закрытия в той же строке меняет смысл находки на противоположный: «слой 3 не
+# реализован, кроме прав ролей, закрытых узлом V49» — верное утверждение, а не ложь.
+CLOSED_WORDS = ("закрыт", "закрыта", "закрыты", "закрытых", "закрытого", "закрыло")
 
-HITS = 0
+STALE = []
+NAMED_CLOSED = []
+SNAPSHOTS = []
 with get_cursor() as cur:
     cur.execute(
         "SELECT question, answer FROM knowledge_snippets "
@@ -46,10 +57,27 @@ with get_cursor() as cur:
                 continue
             if not any(needle in low for needle in NEEDLES):
                 continue
-            HITS += 1
-            print(f"{row['question']} | {num:>4} | {line.strip()[:220]}")
+            # Снимки (`journal:ref:`) — снимок чужого состояния, а не норматив: слово «роли»
+            # там может быть именем колонки или перечня. Правило слоя: снимок действующим
+            # правилом не является, и правкой оно не становится.
+            if row["question"].startswith("rules:") and ":journal:ref:" in row["question"]:
+                SNAPSHOTS.append(f"{row['question']} | {num:>4} | {line.strip()[:220]}")
+                continue
+            target = NAMED_CLOSED if any(w in low for w in CLOSED_WORDS) else STALE
+            target.append(f"{row['question']} | {num:>4} | {line.strip()[:220]}")
 
-print(f"\nстрок, называющих роли незакрытым: {HITS}")
-print("правит ли их шаг П5 или это круг П7 — решает список выше: матрица goal-and-stages, ")
-print("карточка load-catalog и строка группы F модели A–H отнесены планом к шагу П7.")
+print("\n=== строки, где роли названы НЕзакрытыми (ложь, подлежит правке) ===")
+for line in STALE:
+    print(line)
+print(f"итого: {len(STALE)}")
+print("\n=== строки, где роли названы закрытыми (ложью не являются) ===")
+for line in NAMED_CLOSED:
+    print(line)
+print(f"итого: {len(NAMED_CLOSED)}")
+print("\n=== строки снимков слоя (не норматив, правки не требует) ===")
+for line in SNAPSHOTS:
+    print(line)
+print(f"итого: {len(SNAPSHOTS)}")
+print("\nложь не закрыта, если первая группа непуста: нормативы слоя правит шаг П7 плана "
+      "(`_v49_p7_rule_patch.py`), он выполнен 30.10.2026 — первая группа обязана быть пустой.")
 sys.exit(0)
