@@ -109,12 +109,23 @@ DEFAULT_TARGETS = [
 # configuration_load_contract. Отличие от входа V49 — групп `kinds` нет (решение Q10,
 # вариант A): строка применения существует только через числовой id строки реквизита (Q1,
 # вариант A), поэтому частичная запись круга описывала бы состав, которого в выгрузке нет.
+# Узел V51 (П5, 31.10.2026) добавил load_exchange_plans_tool: core 8 → 9. Причина та же
+# (решение оператора Q5 узла V48 — свой вход на каждую позицию нормативного списка): файлы
+# регистрации вида `ExchangePlans/` (позиция 2.6) меняются, а заголовок и индекс состава —
+# нет. Стадия S4f конвейера и инструмент вызывают одну и ту же функцию слоя
+# (src/configuration_exchange_plans_loader.load_exchange_plans); отдельного контракта у
+# инструмента нет — закрытый словарь exchange_plans_defaults() и текст раздела даёт
+# configuration_load_contract. Отличие от входа V50 — группы `kinds` есть (решение Q5 узла
+# V51, раздел 5.4 плана): круг вида несимметричен по цене (46 строк свойств против 22 515
+# строк перечня `<Content>` и 33.2 МБ текстов макетов), а риск V50 отсутствует физически —
+# перечни детей выводятся из атрибутов uuid выгрузки, а не из записанных строк детей.
 EXPECTED_TOOLS = {
     "server_configurations_core.py": [
         "delete_external_report_tool", "load_1c_catalog_tool",
         "load_common_attributes_tool",
         "load_configuration_object_properties_tool",
         "load_configuration_root_modules_tool", "load_external_object_file_tool",
+        "load_exchange_plans_tool",
         "load_roles_tool", "load_session_parameters_tool",
     ],
     "server_configurations_enrichment.py": [

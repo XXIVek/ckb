@@ -36,7 +36,12 @@ from configuration_loader import OBJECTS_TABLE, register_configuration
 # инструмента: карточка и инструмент обязаны рассказывать об одном слое одинаково.
 from configuration_load_contract import (
     CHILD_SECTION_HEADER,
+    COMMON_ATTRIBUTE_META_TAG,
     COMMON_ATTRIBUTES_SECTION_HEADER,
+    COMMON_ATTRIBUTES_TABLES,
+    EXCHANGE_PLAN_META_TAG,
+    EXCHANGE_PLAN_SECTION_HEADER,
+    EXCHANGE_PLAN_TABLES,
     OBJECT_MODULES_SECTION_HEADER,
     ROLES_SECTION_HEADER,
     ROLE_META_TAG,
@@ -48,6 +53,7 @@ from configuration_load_contract import (
     STOP_STAGE_SECTION_HEADER,
     format_child_object_lines,
     format_common_attributes_lines,
+    format_exchange_plans_lines,
     format_object_module_lines,
     format_roles_lines,
     format_root_modules_lines,
@@ -458,6 +464,17 @@ def _stage_section_lines(result):
     if common_attributes_part:
         lines.append(f"{COMMON_ATTRIBUTES_SECTION_HEADER}:")
         lines.extend(format_common_attributes_lines(common_attributes_part, indent="   "))
+    # Узел V51 (стадия S4f, позиция 2.6 списка): свойства планов обмена.
+    # Раздел печатается и при отказе стадии, и при `not_run` — по той же причине, что у
+    # S3/S4/S4c/S4d/S4e: «загружено» без него читалось бы как «состав конфигурации в БД есть
+    # весь». Ответ стадии лежит в собственном ключе, а не внутри `child_objects`,
+    # `session_parameters`, `roles` или `common_attributes` (правило C3); текст даёт общий
+    # форматёр контракта — тот же, что отдаёт отдельный инструмент
+    # `load_exchange_plans_tool` (шаг П5).
+    exchange_plans_part = result.get("exchange_plans") or {}
+    if exchange_plans_part:
+        lines.append(f"{EXCHANGE_PLAN_SECTION_HEADER}:")
+        lines.extend(format_exchange_plans_lines(exchange_plans_part, indent="   "))
     # Узел V47 (стадия S4b): модули объектов конфигурации — вторая транзакция загрузки
     # (Q6, граница D7). Раздел печатается и при отказе стадии, и при `not_run` (индекс
     # состава не разобран — круг не определён): «конфигурация загружена» без него
@@ -647,6 +664,17 @@ def format_load_result(result):
                 # той же причине, что и строка V48: круг CHILD_* видов стадии S4 этим узлом не
                 # расширяется, а таблицы называет тот слой, который их пишет.
                 loaded_tags[ROLE_META_TAG] = ROLE_TABLES
+                # Узел V50 (стадия S4e, позиция 2.5 списка) и узел V51 (стадия S4f,
+                # позиция 2.6): CommonAttribute и ExchangePlan тоже относятся к видам,
+                # содержимое которых сохраняется своими стадиями в свои таблицы. Строка V50
+                # здесь отсутствует неслучайно: узел V50 её не обновлял, и карточка
+                # относила общие реквизиты к «остальным объектам … в БД не раскладываются»,
+                # противореча собственному разделу СВОЙСТВА ОБЩИХ РЕКВИЗИТОВ. Названо это
+                # тем же шагом, что подключает стадию S4f, — правка одной строки покрытия
+                # чинит оба узла сразу (замер П0: ExchangePlan дают 2/18/26 тегов в
+                # <ChildObjects> трёх содержательных выгрузок).
+                loaded_tags[COMMON_ATTRIBUTE_META_TAG] = COMMON_ATTRIBUTES_TABLES
+                loaded_tags[EXCHANGE_PLAN_META_TAG] = EXCHANGE_PLAN_TABLES
                 loaded = {tag: count for tag, count in child_counts.items()
                           if tag in loaded_tags}
                 rest = {tag: count for tag, count in child_counts.items()
@@ -660,11 +688,14 @@ def format_load_result(result):
                 lines.append(
                     f"Состав из <ChildObjects> Configuration.xml: объектов "
                     f"{sum(child_counts.values())}"
-                    + (f"; видов с загруженным содержимым (узлы V46, V48 и V49): "
+                    + (f"; видов с загруженным содержимым (узлы V46, V48, V49, V50 и V51): "
                        f"{loaded_detail} — "
-                       "их свойства и ссылки лежат в таблицах стадий S4, S4c и S4d, разделы «"
+                       "их свойства и ссылки лежат в таблицах стадий S4, S4c, S4d, S4e и "
+                       "S4f, разделы «"
                        + CHILD_SECTION_HEADER + "», «" + SESSION_PARAMETERS_SECTION_HEADER
-                       + "» и «" + ROLES_SECTION_HEADER + "» ниже"
+                       + "», «" + ROLES_SECTION_HEADER + "», «"
+                       + COMMON_ATTRIBUTES_SECTION_HEADER + "» и «"
+                       + EXCHANGE_PLAN_SECTION_HEADER + "» ниже"
                        if loaded_detail else "")
                     + (f"; остальных объектов {sum(rest.values())} — по типам: {by_type}; "
                        "эти записи в БД не раскладываются (таблиц объектов метаданных по ним "

@@ -24,6 +24,10 @@ psycopg2 (параметры запроса), поэтому экраниров�
                  первое; тот же контракт, что `jsonb_nullable` у манифеста V31.
                  Список НЕ сортируется и не меняется писателем: порядок задаёт источник
                  значений (src/configuration_child_properties.py, правило K6);
+   uuid_array_nullable - UUID[] либо NULL (перечни uuid детей строки плана обмена, узел V51):
+                 тот же контракт пустоты, что у text_array_nullable. Параметру нужен явный
+                 каст (`PARAM_CASTS`): psycopg2 отдаёт список Python как text[], а PostgreSQL
+                 text[] к uuid[] неявно не приводит;
   int          - целое (размеры, счётчики, идентификаторы родителя); пусто -> NULL;
   timestamp    - метка времени строкой 'YYYY-MM-DD HH:MM:SS' (origin_recorded_at, узел V31);
                  пусто -> NULL; PostgreSQL приводит параметр без типа к колонке сам;
@@ -78,6 +82,17 @@ from configuration_child_properties import header_array_columns
 # которого проверка сверяет живую схему. Выписывать их здесь нельзя: четыре имени в двух
 # местах разъезжаются (тот же дефект, что 48 имён перечней до V43).
 from configuration_root_modules import MODULE_BY_KIND, TABLE_BY_KIND
+# Узел V51 (план обмена, шаг П4, 31.10.2026): вид родителя детей объекта конфигурации задаёт
+# разбор вида (`src/configuration_exchange_plans.py::PARENT_TYPE_CONFIGURATION`), а не писатель:
+# это то же значение, которым дети конфигурации описаны узлом V47 (`bsl_modules`, 10 872 строки
+# по замеру живой базы). Выписать его здесь вторым написанием — значит получить два места, где
+# вид родителя разъезжается при первой же правке.
+from configuration_exchange_plans import (
+    COMMANDS_TABLE_NAME as EXCHANGE_PLAN_COMMANDS_TABLE,
+    CONTENT_TABLE_NAME as EXCHANGE_PLAN_CONTENT_TABLE,
+    PARENT_TYPE_CONFIGURATION,
+    TABLE_NAME as EXCHANGE_PLAN_TABLE,
+)
 
 # Ревизионные колонки в спецификациях версионированных писателей (M1). Порядок -
 # тот же, что в DDL (шаг 1 src/generate_ddl.py): integer / timestamp / text / boolean.
@@ -135,6 +150,16 @@ def _quote(identifier):
 # слоя, а не свойство выгрузки, и повторять его в каждом разборе значило бы получить N
 # мест, где оно может разойтись.
 COLUMN_COPY_PREFIX = "copy:"
+
+# Узел V51 (проба П5): виды значений, которым нужен явный каст параметра INSERT.
+# psycopg2 передаёт список Python как `text[]`, а PostgreSQL не приводит `text[]` к `uuid[]`
+# неявно: первая же вставка строки плана обмена (`attribute_uuids UUID[]`) отклонялась с
+# «column "attribute_uuids" is of type uuid[] but expression is of type text[]». Держится
+# словарь один раз у базового писателя: тип — свойство вида значения, а не конкретной таблицы,
+# поэтому второй перечень таких кастов по таблицам появился бы только ради того, чтобы
+# разойтись с первым.
+PARAM_CASTS: dict = {"uuid_array_nullable": "::uuid[]"}
+
 
 
 class TableRowWriter:
@@ -237,6 +262,23 @@ class TableRowWriter:
             else:
                 items = [str(item) for item in value if str(item).strip()]
             return items or None
+        if kind == "uuid_array_nullable":
+            # узел V51 (П4): перечни uuid детей строки вида (`attribute_uuids`,
+            # `tabular_section_uuids`, `command_uuids` — колонки `UUID[]` таблицы
+            # `exchange_plans`, Q2 закрыт постановкой оператора). Пустой перечень остаётся
+            # NULL по той же причине, что `text_array_nullable` узла V43: «детей этого вида у
+            # объекта нет» («») и «перечень не читался» — разные состояния, и `'{}'::uuid[]`
+            # стёр бы границу. Порядок элементов не трогается — его задаёт источник
+            # (COLLATE "C" в DDL). Значения приводятся к тексту uuid; вид колонки `UUID[]`
+            # проверяет PostgreSQL, и не-uuid элемент назовётся отказом вставки, а не тихим
+            # NULL.
+            if value is None or value == "" or value == []:
+                return None
+            if isinstance(value, str):
+                items = [part.strip() for part in value.split(",") if part.strip()]
+            else:
+                items = [str(item).strip() for item in value if str(item).strip()]
+            return items or None
         if kind == "bytes":
             if value is None:
                 return None
@@ -296,18 +338,47 @@ class TableRowWriter:
         """
         if column in cls.CONSTANTS:
             return cls._adapt(kind, cls.CONSTANTS[column])
+        effective = cls._effective_kind(column, kind)
         if kind.startswith(COLUMN_COPY_PREFIX):
-            source = kind[len(COLUMN_COPY_PREFIX):]
-            return cls._adapt(cls.COLUMNS.get(source, "uuid"), row.get(source))
-        return cls._adapt(kind, row.get(column))
+            return cls._adapt(effective, row.get(kind[len(COLUMN_COPY_PREFIX):]))
+        return cls._adapt(effective, row.get(column))
 
+
+    @classmethod
+    def _effective_kind(cls, column: str, kind: str) -> str:
+        """Вид, по которому значение колонки приводится к типу.
+
+        Для `"copy:<колонка>"` (узел V51) значение берётся из колонки-источника, значит и
+        тип обязан быть видом источника — копия не может получить тип, которого нет у колонки,
+        с которой её скопировали.
+        """
+        if kind.startswith(COLUMN_COPY_PREFIX):
+            return cls.COLUMNS.get(kind[len(COLUMN_COPY_PREFIX):], kind)
+        return kind
+
+    @classmethod
+    def _placeholders(cls) -> str:
+        """Список параметров INSERT (порядок = порядок COLUMNS).
+
+        Узел V51 (проба П5): видам, которые psycopg2 отдаёт как `text[]`, нужен явный каст
+        параметра. Перечни uuid детей строки вида (`attribute_uuids` и две соседние колонки
+        таблицы `exchange_plans`) в схеме имеют тип `UUID[]`, а PostgreSQL не приводит
+        `text[]` к `uuid[]` неявно — первая же вставка строки плана обмена падала с
+        `column "attribute_uuids" is of type uuid[] but expression is of type text[]`.
+        Каст держится у параметра, а не у имени колонки: тип задаёт значение, и одна и та же
+        колонка в другом писателе могла бы иметь другой вид.
+        """
+        return ", ".join(
+            "%s" + PARAM_CASTS.get(cls._effective_kind(column, kind), "")
+            for column, kind in cls.COLUMNS.items()
+        )
 
     @classmethod
     def insert_sql(cls):
         """Одиночный INSERT с параметрами (для основной записи, возвращает id)."""
         columns = ", ".join(_quote(column) for column in cls.COLUMNS)
-        placeholders = ", ".join(["%s"] * len(cls.COLUMNS))
-        return f"INSERT INTO {_quote(cls.TABLE)} ({columns}) VALUES ({placeholders})"
+        return f"INSERT INTO {_quote(cls.TABLE)} ({columns}) VALUES ({cls._placeholders()})"
+
 
     @classmethod
     def insert(cls, cursor, row):
@@ -328,8 +399,9 @@ class TableRowWriter:
         if not rows:
             return 0
         columns = ", ".join(_quote(column) for column in cls.COLUMNS)
-        template = "(" + ", ".join(["%s"] * len(cls.COLUMNS)) + ")"
+        template = "(" + cls._placeholders() + ")"
         sql = f"INSERT INTO {_quote(cls.TABLE)} ({columns}) VALUES %s"
+
         values = [cls.values(row) for row in rows]
         page_size = cls.PAGE_SIZE or max(len(values), 1)
         for offset in range(0, len(values), page_size):
@@ -1759,6 +1831,302 @@ class CommonAttributeTargetsRowWriter(TableRowWriter):
     }
 
 
+# ── узел V51 (план обмена, шаг П4, позиция 2.6 нормативного списка) ──────────────────
+#
+# Норматив — docs/CONFIGURATION_EXCHANGE_PLANS_PLAN.md (раздел 5 — решения Q1…Q8,
+# раздел 7 — шаг П4). Писателей у узла семь: три таблицы вида (строка вида, строки
+# перечня `<Content>`, строки команд) и четыре писателя детей вида, которые строятся
+# НАСЛЕДОВАНИЕМ писателей внешнего контура.
+#
+# Почему наследование, а не новая спецификация: колонки строк детей — общие для двух
+# контуров (шаг П1 добавил `attributes` три свойства вида, `tabular_sections` — одно,
+# `forms`/`templates` свойств не потребовали), и выписать их заново значило бы получить
+# два описания одной строки, разъезжающихся при первой правке. Меняются ровно две вещи,
+# обе — следствие Q1:
+#
+# * нога области видимости. Смысл колонки один и записан в комментарии DDL: для объекта
+#   конфигурации `configuration_uuid` равен uuid конфигурации, для внешнего объекта — uuid
+#   самого внешнего объекта (правило (б)). Писатель внешнего контура выводит её правилом
+#   `copy:parent_uuid` (узел V51 П1); у детей вида нога иная, поэтому спецификация ноги
+#   заменяется на явное значение, которое подставляет стадия;
+# * вид родителя — `configuration_objects` (значение держит разбор вида; прецедент формы
+#   связи — V47, 10 872 строки `bsl_modules` с этим значением по замеру живой базы).
+#
+# `form_ext` своего писателя не имеет: описания форм пишет общий `FormExtRowWriter`,
+# потому что ноги у таблицы нет намеренно (шаг 1.5 `migrate_v51_exchange_plans.sql`:
+# область видимости описания формы задаёт строка формы, и витрина
+# `v_current_form_ext` разрешает её через форму).
+
+
+def configuration_scoped_columns(parent_writer):
+    """Спецификация детей объекта конфигурации: те же колонки, явная нога видимости.
+
+    Меняется один вид — `configuration_uuid`. Копия, а не правка исходного словаря:
+    писатели внешнего контура должны остаться при своём правиле `copy:parent_uuid`
+    (правило (б) Q1 для них верно по построению: родителя у них нет вне выгрузки).
+    Колонки ревизии уже входят в спецификацию родителя, поэтому `versioned_columns`
+    здесь не вызывается — повторное добавление дублировало бы ключ словаря.
+    """
+    spec = dict(parent_writer.COLUMNS)
+    spec["configuration_uuid"] = "uuid"
+    return spec
+
+
+class ExchangePlanAttributesRowWriter(AttributesRowWriter):
+    """Реквизиты вида и колонки его табличных частей (таблица `attributes`, узел V51).
+
+    Отличий от `AttributesRowWriter` ровно два (нога и вид родителя), оба названы выше.
+    Разбор даёт строки тем же словарём, которым покрыта живая схема (`_v51_p2_dict_check.py`:
+    28 тегов реквизита, из них 26 применимы к колонке табличной части — замер 5.5);
+    колонки `data_history`/`full_text_search`/`indexing` добавляет шаг П1.
+
+    `parent_uuid` колонки табличной части — uuid табличной части, а не вида: так же её
+    описывает индекс состава (`parent_name` — точечное имя табличной части, замер 3.4).
+    """
+
+    CONSTANTS = dict(AttributesRowWriter.CONSTANTS,
+                     parent_type=PARENT_TYPE_CONFIGURATION)
+    COLUMNS = configuration_scoped_columns(AttributesRowWriter)
+
+
+class ExchangePlanTabularSectionsRowWriter(TabularSectionsRowWriter):
+    """Табличные части вида (таблица `tabular_sections`, узел V51).
+
+    Перечень `column_uuids` уже является манифестом колонок самой табличной части
+    (узел V19), второго перечня колонок на строке вида нет; седьмой тег вида —
+    `line_number_length` — добавлен шагом П1.
+    """
+
+    CONSTANTS = dict(TabularSectionsRowWriter.CONSTANTS,
+                     parent_type=PARENT_TYPE_CONFIGURATION)
+    COLUMNS = configuration_scoped_columns(TabularSectionsRowWriter)
+
+
+class ExchangePlanFormsRowWriter(FormsRowWriter):
+    """Регистрация формы вида `Forms/<Имя>.xml` (таблица `forms`, узел V51).
+
+    Ключом строки является (`configuration_uuid`, `parent_uuid`, `name`, revision_no) —
+    имя, а не uuid ребёнка (Q1, уточнение (а)): uuid формы повторяется между
+    конфигурациями, выросшими из общей базы (замер 3.2: 42 349 общих uuid, из них 14 у
+    детей планов обмена), а имя уникально внутри вида. `uuid` остаётся обычным столбцом
+    и служит для сопоставления со строкой индекса состава.
+    """
+
+    CONSTANTS = {"parent_type": PARENT_TYPE_CONFIGURATION}
+    COLUMNS = configuration_scoped_columns(FormsRowWriter)
+
+
+class ExchangePlanTemplatesRowWriter(TemplatesRowWriter):
+    """Макет вида `Templates/<Имя>.xml` с содержимым (таблица `templates`, узел V51).
+
+    Тот же ключ по имени, что у форм (Q1, уточнение (а)). Содержимое макета плана обмена
+    бывает текстовым (`Template.txt`, ветка добавлена шагом П3 общего слоя) и XML;
+    порог `MAX_TEXT_CHARS` с `ext_truncated`/`ext_size`/`ext_path` — общий контракт
+    слоя V14, узел вида его не переопределяет.
+    """
+
+    CONSTANTS = {"parent_type": PARENT_TYPE_CONFIGURATION}
+    COLUMNS = configuration_scoped_columns(TemplatesRowWriter)
+
+
+class ExchangePlanRowWriter(TableRowWriter):
+    """Строка плана обмена конфигурации (таблица `exchange_plans`, узел V51, позиция 2.6).
+
+    Имена колонок совпадают с полями контракта разбора
+    (`src/configuration_exchange_plans.py::read_object_file`) намеренно — чтобы маппинг
+    читался текстом, а не по памяти (приём узлов V33, V48, V50).
+
+    Колонки, смысл которых не выводится из имени:
+
+      * ключом цепочки состояния является (`configuration_uuid`, `object_name`,
+        `revision_no`), а НЕ `object_uuid`: имя вида уникально в конфигурации, а uuid вида
+        повторяется между конфигурациями, выросшими из общей базы (замер 3.2) — тот же
+        урок, что V47/V48/V49/V50. `object_uuid` — отдельная колонка: на неё ссылаются
+        строки детей и строки перечня;
+      * `full_name` — индексная форма `ExchangePlan.<Имя>`: ею описывают детей записи
+        индекса состава (замер 3.1) и ею ключится строка перечня `<Content>`;
+      * пять перечней детей (Q2 закрыт постановкой оператора): реквизиты, табличные части
+        и команды адресуются uuid (их даёт файл вида, индекс состава подтверждает), формы и
+        макеты — ИМЕНЕМ (uuid формы повторяется между конфигурациями, имя уникально внутри
+        вида — `Forms/<Имя>.xml`). Пустой перечень остаётся NULL, а не `'{}'`
+        (границы K1–K6 узла V43, контракт `===EMPTY`);
+      * `help_*` и `additional_indexes_*` — слоты `Ext/Help.xml` и
+        `Ext/AdditionalIndexes.xml` (Q4): исходный XML в jsonb по прецеденту
+        `subsystems.Content` (V46). CHECK `exchange_plans_slot_content_matches_state`
+        согласует состояние с наличием тела, поэтому состояние обязан называть каждый
+        вызов — отсюда неотделимость группы `slots` от строки вида на шаге П4;
+      * `content_state`/`content_count` — наличие и размер перечня `<Content>`: сам
+        перечень разбирается отдельной таблицей, а его состояние называется строкой вида,
+        потому что «пустой план обмена» и «перечень не читался» — разные ответы;
+      * `standard_attributes_state` — состояние блока `Properties/StandardAttributes` (Q7):
+        строк по стандартным реквизитам в схеме нет (их нет в индексе состава), но их
+        наличие обязано быть названо состоянием `present_not_indexed`, иначе 371 вхождение
+        трёх выгрузок читались бы потерянными;
+      * `properties_state`/`unknown_property_names` — виновник состояния называется, а не
+        теряется (Q7, вариант A);
+      * `source_path` — путь относительно КОРНЯ выгрузки (`ExchangePlans/<Имя>.xml`),
+        а не каталога вида (поправка V46).
+    """
+
+    TABLE = "exchange_plans"
+    COLUMNS = versioned_columns({
+        "configuration_uuid": "uuid",
+        "object_uuid": "uuid",
+        "object_name": "text",
+        "full_name": "text",
+        "synonym": "jsonb_nullable",
+        "comment": "text",
+        "use_standard_commands": "bool",
+        "code_length": "int",
+        "code_allowed_length": "text",
+        "description_length": "int",
+        "default_presentation": "text",
+        "edit_type": "text",
+        "quick_choice": "bool",
+        "choice_mode": "text",
+        "input_by_string": "jsonb_nullable",
+        "search_string_mode_on_input_by_string": "text",
+        "full_text_search_on_input_by_string": "text",
+        "choice_data_get_mode_on_input_by_string": "text",
+        "default_object_form": "text",
+        "default_list_form": "text",
+        "default_choice_form": "text",
+        "auxiliary_object_form": "text",
+        "auxiliary_list_form": "text",
+        "auxiliary_choice_form": "text",
+        "standard_attributes": "jsonb_nullable",
+        "characteristics": "jsonb_nullable",
+        "based_on": "jsonb_nullable",
+        "distributed_info_base": "bool",
+        "include_configuration_extensions": "bool",
+        "create_on_input": "text",
+        "choice_history_on_input": "text",
+        "include_help_in_contents": "bool",
+        "data_lock_fields": "jsonb_nullable",
+        "data_lock_control_mode": "text",
+        "full_text_search": "text",
+        "object_presentation": "jsonb_nullable",
+        "extended_object_presentation": "jsonb_nullable",
+        "list_presentation": "jsonb_nullable",
+        "extended_list_presentation": "jsonb_nullable",
+        "explanation": "jsonb_nullable",
+        "data_history": "text",
+        "update_data_history_immediately_after_write": "bool",
+        "execute_after_write_data_history_version_processing": "bool",
+        "attribute_uuids": "uuid_array_nullable",
+        "tabular_section_uuids": "uuid_array_nullable",
+        "command_uuids": "uuid_array_nullable",
+        "form_names": "text_array_nullable",
+        "template_names": "text_array_nullable",
+        "help_state": "text",
+        "help_content": "jsonb_nullable",
+        "additional_indexes_state": "text",
+        "additional_indexes_content": "jsonb_nullable",
+        "properties_state": "text",
+        "unknown_property_names": "text_array_nullable",
+        "children_state": "text",
+        "standard_attributes_state": "text",
+        "content_state": "text",
+        "content_count": "int",
+        "source_path": "text",
+    })
+
+
+class ExchangePlanContentRowWriter(TableRowWriter):
+    """Строка перечня `<Content>` плана обмена (таблица `exchange_plan_content`, Q4).
+
+    Модель — `subsystem_content` (V46): своей отдельной цепи ревизий у строки нет, она
+    относится к `revision_no` строки вида (ключ
+    `exchange_plan_content_plan_revision_ordinal_key`
+    держит размерность конфигурации осознанно: uuid плана обмена общий для конфигураций,
+    выросших из общей базы). Отдельной таблицы условий разрешения не заводим: разрешения у
+    записей перечня нет (замер `_v51_p1_content_probe.py`: каждая из 22 515 записей держит
+    ровно два поля — `Metadata` и `AutoRecord`).
+
+    Колонки, смысл которых не выводится из имени:
+
+      * `exchange_plan_object_uuid` + `revision_no` — ссылка на КОНКРЕТНУЮ ревизию строки
+        вида; `exchange_plan_full_name` — индексное имя вида, остающееся читаемым и тогда,
+        когда строка вида снята перезагрузкой (прецедент `role_name` V49,
+        `attribute_full_name` V50);
+      * `ordinal` — позиция записи в файле `Ext/Content.xml`; порядок писатель не меняет
+        (прецедент `target_ordinal` V49, `ordinal` V50);
+      * `target_tag` — тег цели внутри записи (`Metadata` во всех записях корпуса):
+        колонка есть, потому что форма перечня является свойством выгрузки, а не обещанием
+        разбора;
+      * `target_object_type` — вид цели из точечного имени (`InformationRegister`,
+        `Document`, `Constant`, `Catalog`, `Sequence`, `ChartOfCalculationTypes`, …);
+      * `target_object_id`/`target_object_uuid`/`target_unresolved_path` — ссылка на СТРОКУ
+        индекса состава: внешнего ключа нет осознанно, потому что цель бывает `prefix_only`
+        или `unresolved` (CHECK согласует состояние со ссылкой и остатком пути — тот же
+        контракт, что `role_rights` V49 и `common_attribute_targets` V50);
+      * `auto_record_state` — значение `<AutoRecord>` выгрузки как есть (замером замкнут
+        домен `Allow`/`Deny`) плюс граница `unknown_form`.
+
+    Размер страницы вставки назван (приём V33 и V47): 22 515 строк на три выгрузки, у
+    одного плана BGU2 (`ОбновлениеИнформационнойБазы`) — 2 587 целей; один `execute_values`
+    на весь список держал бы весь SQL-текст в памяти и не давал бы ничего наблюдать.
+    """
+
+    PAGE_SIZE = 200
+    TABLE = "exchange_plan_content"
+    COLUMNS = versioned_columns({
+        "configuration_uuid": "uuid",
+        "exchange_plan_object_uuid": "uuid",
+        "exchange_plan_full_name": "text",
+        "ordinal": "int",
+        "target_tag": "text",
+        "target_full_name": "text",
+        "target_object_type": "text",
+        "target_object_id": "text",
+        "target_object_uuid": "uuid",
+        "target_resolve_state": "text",
+        "target_unresolved_path": "text",
+        "auto_record_state": "text",
+    })
+
+
+class CommandsRowWriter(TableRowWriter):
+    """Строка команды вида (таблица `commands`, узел V51; замер 5.5 — 1 запись корпуса).
+
+    Таблица построена по образцу `attributes`: та же форма ключа детей
+    (`configuration_uuid`, `parent_uuid`, `uuid`, `revision_no`) и та же цепь ревизий
+    (Q6, вариант A: `revision_no` обязана значить одно и то же для строк внешнего объекта
+    и объекта конфигурации). Относится она к выгрузке конфигурации, поэтому писатель лежит
+    здесь, а не в шаге 1 (`src/generate_ddl.py`): у внешнего объекта команд метаданных нет,
+    его команды интерфейса живут jsonb-колонкой `form_ext.commands`.
+
+    Колонка тега `Group` названа `command_group`, потому что `group` является ключевым
+    словом SQL; несовпадение имени XML и колонки хранит один словарь —
+    `COMMAND_PROPERTIES` разбора вида. Значения свойств CHECK'ом не замкнуты по той же
+    причине, что свойства вида и общие реквизиты V50 (Q7, вариант A): закрытость держит
+    измеренный `COMMAND_VALUE_DICTIONARY`.
+    """
+
+    CONSTANTS = {"parent_type": PARENT_TYPE_CONFIGURATION}
+    TABLE = "commands"
+    COLUMNS = versioned_columns({
+        "configuration_uuid": "uuid",
+        "parent_uuid": "uuid",
+        "parent_type": "text",
+        "uuid": "uuid",
+        "name": "text",
+        "synonym": "jsonb_nullable",
+        "comment": "text",
+        "command_group": "text",
+        "command_parameter_type": "text",
+        "parameter_use_mode": "text",
+        "modifies_data": "bool",
+        "representation": "text",
+        "tooltip": "jsonb_nullable",
+        "picture": "text",
+        "shortcut": "text",
+        "on_main_server_unavalable_behavior": "text",
+        "properties_state": "text",
+        "unknown_property_names": "text_array_nullable",
+    })
+
+
 # Контракт разбора → писатель: выбор по словарю, а не по имени таблицы (приём
 # ROOT_MODULE_WRITERS: ошибка выбора превращается в запись не в ту таблицу).
 # Узел V49 (роли): писатели группы свои, реестр — общий механизм
@@ -1792,6 +2160,19 @@ CONFIGURATION_OBJECT_WRITERS = {
     # `properties_state` и `unknown_property_names`, а не теряется.
     "common_attributes": CommonAttributesRowWriter,
     "common_attribute_targets": CommonAttributeTargetsRowWriter,
+    # Узел V51 (план обмена, 31.10.2026, позиция 2.6 нормативного списка): три таблицы
+    # вида. Писатели ДЕТЕЙ вида (`ExchangePlanAttributesRowWriter`,
+    # `ExchangePlanTabularSectionsRowWriter`, `ExchangePlanFormsRowWriter`,
+    # `ExchangePlanTemplatesRowWriter`) в реестр НЕ вносятся намеренно и это названо, а не
+    # обойено молча: реестр выбирает писателя по таблице, а таблица у двух контуров одна —
+    # строка детей внешнего объекта и строка детей плана обмена различаются ногой области
+    # видимости и видом родителя, поэтому одна таблица не может иметь двух записей в
+    # реестре. Дети вида выбираются стадией по имени класса (приём
+    # `configuration_module_writer.ConfigurationObjectModuleRowWriter` узла V47, у которого
+    # та же причина).
+    EXCHANGE_PLAN_TABLE: ExchangePlanRowWriter,
+    EXCHANGE_PLAN_CONTENT_TABLE: ExchangePlanContentRowWriter,
+    EXCHANGE_PLAN_COMMANDS_TABLE: CommandsRowWriter,
 }
 
 # Таблицы, чей писатель зарегистрирован общим реестром, но своей ЦЕПИ РЕВИЗИЙ у таблицы

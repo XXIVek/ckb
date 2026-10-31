@@ -162,9 +162,29 @@ from configuration_common_attributes import (
     USE_STATES as CA_USE_STATES,
 )
 from configuration_exchange_plans import (
+    AUTO_RECORD_STATES as EXCHANGE_PLAN_AUTO_RECORD_STATES,
+    CHILD_STATES as EXCHANGE_PLAN_CHILD_STATES,
+    CIRCLE_DISCREPANCIES as EXCHANGE_PLAN_CIRCLE_DISCREPANCIES,
     COMMANDS_TABLE_NAME as EXCHANGE_PLAN_COMMANDS_TABLE,
     CONTENT_TABLE_NAME as EXCHANGE_PLAN_CONTENT_TABLE,
+    CONTENT_STATES as EXCHANGE_PLAN_CONTENT_STATES,
+    DIR_NAME as EXCHANGE_PLAN_DIR,
+    GROUP_ATTRIBUTES as EXCHANGE_PLAN_GROUP_ATTRIBUTES,
+    GROUP_COMMANDS as EXCHANGE_PLAN_GROUP_COMMANDS,
+    GROUP_CONTENT as EXCHANGE_PLAN_GROUP_CONTENT,
+    GROUP_EXCHANGE_PLANS as EXCHANGE_PLAN_GROUP_EXCHANGE_PLANS,
+    GROUP_FORMS as EXCHANGE_PLAN_GROUP_FORMS,
+    GROUP_SLOTS as EXCHANGE_PLAN_GROUP_SLOTS,
+    GROUP_TABULAR_SECTIONS as EXCHANGE_PLAN_GROUP_TABULAR_SECTIONS,
+    GROUP_TEMPLATES as EXCHANGE_PLAN_GROUP_TEMPLATES,
+    LOAD_GROUPS as EXCHANGE_PLAN_LOAD_GROUPS,
+    OBJECT_KIND_TAG as EXCHANGE_PLAN_META_TAG,
+    PROPERTIES_STATES as EXCHANGE_PLAN_PROPERTIES_STATES,
+    SLOT_STATES as EXCHANGE_PLAN_SLOT_STATES,
+    STANDARD_ATTRIBUTE_STATES as EXCHANGE_PLAN_STANDARD_ATTRIBUTE_STATES,
     TABLE_NAME as EXCHANGE_PLAN_TABLE,
+    TARGET_STATES as EXCHANGE_PLAN_TARGET_STATES,
+    group_tables as exchange_plan_group_tables,
 )
 from current_revision import CONFIGURATION_VERSIONED_TABLES
 
@@ -197,6 +217,21 @@ STAGE_ROLES = "s4d_roles"
 # строка реквизита и строки её применения как единое целое (Q1, вариант A), отдельный вход
 # дозагружает весь круг сразу (Q10, вариант A: порог раздельной дозыгрузки не замерен).
 STAGE_COMMON_ATTRIBUTES = "s4e_common_attributes"
+# Узел V51 (31.10.2026, позиция 2.6 нормативного списка): свойства планов обмена —
+# отдельная стадия по той же причине, что S4c (V48), S4d (V49) и S4e (V50): правило C3
+# требует своего ключа ответа `exchange_plans`, а разбивать чужой ключ значило бы
+# переименовывать контракт соседнего узла. Номер S4f, а не S5: S5 остаётся за планируемой
+# стадией анализа.
+# В `STAGES` ниже стадия внесена шагом П5 (31.10.2026): слой `load_exchange_plans`
+# (src/configuration_exchange_plans_loader.py) и точка входа `load_exchange_plans_tool`
+# существуют, поэтому конвейер обязан вызывать её в порядке нормативного списка
+# (docs/CONFIGURATION_EXCHANGE_PLANS_PLAN.md, раздел 7). Раздел `===TOOLS===` матрицы
+# `goal-and-stages` и `EXPECTED_TOOLS` проверки `tools/check_mcp_tool_wiring.py` обновляются
+# тем же шагом: реестр становится девятью инструментами. Круг
+# таблиц стадии при этом объявлен уже сейчас (`EXCHANGE_PLAN_TABLES`): версионная таблица
+# без объявленного круга загрузки означала бы, что чужая стадия её снимает (дефект,
+# названный узлами V49 и V50).
+STAGE_EXCHANGE_PLANS = "s4f_exchange_plans"
 # Узел V47 (28.10.2026): тексты модулей объектов конфигурации. Номер S4b, а не S5:
 # S5 остаётся за планируемой стадией анализа (дополнение оператора 23.10.2026), которой
 # в `STAGES` нет. Стадия идёт сразу за S4 и является второй транзакцией загрузки (Q6,
@@ -213,6 +248,11 @@ STAGES: Tuple[Tuple[str, str], ...] = (
     (STAGE_ROLES, "Свойства ролей конфигурации (Roles, позиция 2.4)"),
     (STAGE_COMMON_ATTRIBUTES,
      "Свойства общих реквизитов (CommonAttributes, позиция 2.5)"),
+    # Узел V51 (позиция 2.6 списка) — порядок нормативного списка соблюдён: 2.6 идёт сразу
+    # за 2.5, а S4b (модули объектов) остаётся последней стадией, потому что является второй
+    # транзакцией загрузки (Q6 узла V46), а не позицией списка.
+    (STAGE_EXCHANGE_PLANS,
+     "Свойства планов обмена (ExchangePlans, позиция 2.6)"),
     (STAGE_OBJECT_MODULES, "Модули объектов конфигурации (тексты Ext/, вторая транзакция)"),
 )
 
@@ -350,6 +390,9 @@ STAGE_FULL_RELOAD_ONLY: Dict[str, bool] = {
     STAGE_SESSION_PARAMETERS: False,
     STAGE_ROLES: False,
     STAGE_COMMON_ATTRIBUTES: False,
+    # Узел V51 (позиция 2.6): отдельный вход `load_exchange_plans_tool` есть (шаг П5),
+    # поэтому остановка на S4f продолжение имеет — полная перезагрузка не требуется.
+    STAGE_EXCHANGE_PLANS: False,
     STAGE_OBJECT_MODULES: True,
 }
 
@@ -369,6 +412,9 @@ STAGE_INCOMPLETE_GROUPS: Dict[str, str] = {
                  "группа F модели V38)",
     STAGE_COMMON_ATTRIBUTES: "свойства общих реквизитов (позиция 2.5 нормативного списка, "
                              "группа E модели V38)",
+    STAGE_EXCHANGE_PLANS: "свойства планов обмена (позиция 2.6 нормативного списка, "
+                          "виды ChildObjects/TabularSection/Forms/Templates/Commands и "
+                          "перечень <Content>)",
     STAGE_OBJECT_MODULES: "модули объектов конфигурации (группа C модели V38, Ext/)",
 }
 
@@ -773,13 +819,89 @@ COMMON_ATTRIBUTES_TABLES: Tuple[str, ...] = (
 # 9 638 строк перечня `<Content>`). Свою стадию `s4f_exchange_plans`, заголовок раздела и
 # ключ ответа даёт шаг П4 этого узла (Q8 плана), а круг стадии объявляется здесь:
 # версионируемая таблица без объявленного круга означала бы, что чужая стадия её снимает.
-# Группы запроса (`kinds`) у вида есть (Q5 закрыт: пустое значение = весь круг), но
-# `*_TABLES_BY_KIND` объявляется шагом П4 вместе с отдельным входом группы (шаг П5) — здесь
-# только круг стадии S4f.
+# Группы запроса (`kinds`) у вида есть (Q5 закрыт: пустое значение = весь круг); таблицы
+# каждой группы называет `GROUP_TABLES` разбора (`group_tables()`), а не второй словарь вида
+# вроде `*_TABLES_BY_KIND`: круг стадии и круг группы читаются из одного перечня, и второй
+# перечень разъехался бы с первым при первой же правке (так форматёр незапрошенных групп и
+# писатель круга говорят об одном составе). Здесь только круг стадии S4f целиком.
 EXCHANGE_PLAN_TABLES: Tuple[str, ...] = (
     EXCHANGE_PLAN_TABLE,
     EXCHANGE_PLAN_CONTENT_TABLE,
     EXCHANGE_PLAN_COMMANDS_TABLE,
+)
+
+# ── контракт стадии S4f (узел V51, шаг П4, позиция 2.6 списка) ───────────────────────
+# Заголовок раздела, подсказка о повторе, названия групп и граница круга объявлены рядом с
+# кругом таблиц стадии — по той же причине, что у V48, V49 и V50: текст незакрытой части
+# ссылается на раздел, где читается отказ стадии, а держать два написания одного заголовка
+# нельзя. Имена таблиц, каталог вида, словари состояний и группы запроса приходят импортом
+# из разбора (`src/configuration_exchange_plans.py`) — второго перечня таблиц, состояний или
+# групп в проекте нет.
+EXCHANGE_PLAN_SECTION_HEADER = "СВОЙСТВА ПЛАНОВ ОБМЕНА (узел V51, позиция 2.6)"
+
+# Что обязан сказать ответ о повторе стадии. Отдельная точка входа группы
+# `load_exchange_plans_tool` существует с шага П5 (31.10.2026) и вызвана в реестр MCP тем же
+# шагом, поэтому подсказка называет её, а не обещает: прецеденты V48/V49/V50 меняют строку
+# одним местом ровно тогда, когда меняется состав реестра
+# (`tools/check_mcp_tool_wiring.py`). Называть несуществующий инструмент реальным —
+# обещание, которого сервер не выполняет; называть существующий несуществующим — та же
+# неправда в обратную сторону.
+EXCHANGE_PLAN_REPEAT_HINT = (
+    "Повторить круг можно отдельным входом load_exchange_plans_tool(source_path=…, kinds=…) "
+    "без перезагрузки конфигурации: идемпотентность держится явным DELETE по "
+    "configuration_uuid и по родителям круга, внешнего ключа на configurations и каскада по "
+    "нему в схеме нет осознанно (прецедент V20.1). Тот же слой вызывает стадия S4f "
+    "конвейера load_1c_catalog_tool — двух кодов, которые могли бы разойтись, в проекте нет."
+)
+
+# Названия групп запроса (`kinds`) для ответа стадии. Пустое значение параметра означает
+# ВЕСЬ круг (Q5 закрыт, п. 1); незапрошенная группа не снимается и обязана быть названа
+# своими таблицами, потому что её нули не означают «детей у вида нет» (правило V49).
+EXCHANGE_PLAN_GROUP_TITLES: Dict[str, str] = {
+    EXCHANGE_PLAN_GROUP_EXCHANGE_PLANS: "Строки вида и их перечни детей",
+    EXCHANGE_PLAN_GROUP_ATTRIBUTES: "Реквизиты вида и колонки табличных частей",
+    EXCHANGE_PLAN_GROUP_TABULAR_SECTIONS: "Табличные части вида",
+    EXCHANGE_PLAN_GROUP_FORMS: "Формы вида (с их содержимым)",
+    EXCHANGE_PLAN_GROUP_TEMPLATES: "Макеты вида (с их содержимым)",
+    EXCHANGE_PLAN_GROUP_COMMANDS: "Команды вида",
+    EXCHANGE_PLAN_GROUP_CONTENT: "Перечень <Content> плана обмена",
+    EXCHANGE_PLAN_GROUP_SLOTS: "Слоты Help и AdditionalIndexes",
+}
+
+# Группы, которые образуют ОДНУ строку: строка вида и её слоты. Причина не в удобстве, а в
+# двух фактах: Q5, п. 3 (строка вида и её перечни пересчитываются при любом вызове, потому
+# что выводятся из индекса состава, а не из записанных детей) и CHECK
+# `exchange_plans_slot_content_matches_state` (состояние слота обязано быть названо на
+# каждой строке, а состояния «слоты не загружались» в замкнутом словаре нет — его нечем
+# было бы отличить от `absent`). Поэтому `slots` неотделима от строки вида так же, как
+# `forms` неотделима от `form_ext` (каскад `form_ext_form_id_fkey`).
+EXCHANGE_PLAN_ROW_GROUPS: Tuple[str, ...] = (
+    EXCHANGE_PLAN_GROUP_EXCHANGE_PLANS, EXCHANGE_PLAN_GROUP_SLOTS,
+)
+# Группы, неразрывные на уровне таблиц: `form_ext` висит на `forms(id) ON DELETE CASCADE`,
+# поэтому «формы без содержимого» схема не допускает (Q5, п. 2).
+EXCHANGE_PLAN_INSEPARABLE_GROUPS: Dict[str, Tuple[str, ...]] = {
+    EXCHANGE_PLAN_GROUP_FORMS: ("form_ext",),
+}
+
+# Что стадия S4f НЕ берёт из содержимого вида. Граница называется текстом ответа, а не
+# молчанием (прецедент `COMMON_ATTRIBUTES_BOUNDARY` узла V50): «строки записаны» не равно
+# «о плане обмена сохранено всё».
+EXCHANGE_PLAN_CIRCLE_BOUNDARY = (
+    "тела модулей вида узел НЕ читает: `Ext/ObjectModule.bsl`, `Ext/ManagerModule.bsl` и "
+    "`Commands/*/Ext/CommandModule.bsl` принадлежат узлу V47 (`bsl_modules`, "
+    "`parent_type='configuration_objects'`), здесь файлы названы дескрипторами — "
+    "повторного чтения одного файла два узла не делают (Q8); каталог ресурсов справки "
+    "`Ext/Help/` (`ru.html`, `_files/*.bmp`) не хранится: колонок под ресурсы справки в "
+    "схеме нет, наличие называется наблюдением `help_resources_dir`; стандартные "
+    "реквизиты (блок `Properties/StandardAttributes`, 371 вхождение трёх выгрузок при 9 "
+    "уникальных именах — замер 3.3) строками не пишутся: их нет в индексе состава, наличие "
+    "называется состоянием `present_not_indexed` (Q7); определённых типов (`DefinedTypes`) "
+    "в выгрузке вида нет (замер 2.4.4), узла для них нет; перечень заголовка "
+    "`configurations.exchange_plans` — третью ногу круга (узел V43) — стадия S4f не пишет и "
+    "не правит: её заполняет стадия S2 по индексу состава, а сходство файлов регистрации, "
+    "строк индекса и перечня заголовка проверяет `tools/check_v51_exchange_plans.py` "
+    "(шаг П6)"
 )
 
 # ── контракт стадии S4e (узел V50, шаг П4, позиция 2.5 списка) ──────────────────────
@@ -2129,5 +2251,315 @@ def format_common_attributes_lines(result: Dict[str, Any], indent: str = "") -> 
     for warning in result.get("warnings") or []:
         lines.append(f"{indent}⚠️ {warning}")
     lines.append(f"{indent}Граница: {COMMON_ATTRIBUTES_BOUNDARY}")
+    return lines
+
+
+# ── узел V51 (стадия S4f, позиция 2.6 нормативного списка), шаг П4 ────────────────────
+# Имена ключей сводки совпадают с ключами разбора `src/configuration_exchange_plans.py`
+# намеренно (прецедент `SUMMARY_KEYS` узлов V46/V48/V49/V50): неперечисленный ключ
+# контракта читается нулём, а не исчезает, а незнакомый ключ разбора не попадает в ответ,
+# которого карточка не обещала. Ключей `rows` / `attributes` / `content` нет: это строки
+# записи (на три выгрузки — 22 515 строк только перечня `<Content>`), а не сводка состояния.
+# Перечней дескрипторов (`object_module_files`, `command_module_files`,
+# `standard_attributes`) тоже нет: ответ стадии называет их числом (`*_total`), а не
+# содержимым — прецедент `sources` / `source_rows` узла V49.
+# Словарей состояний внутри группы нет: состояния считает сводка круга, потому что одна
+# строка вида участвует в двух группах (`exchange_plans` и `slots`), и два счётчика одного
+# состояния разошлись бы при первой же правке.
+def exchange_plan_group_defaults() -> Dict[str, Any]:
+    """Одна группа правочного вызова `kinds` с нулями (C1, C2, C3).
+
+    `requested` отделяет «группу не просили» от «таких объектов в выгрузке нет»: по одним
+    нулям эти два ответа неразличимы, а строки незапрошенных таблиц этим вызовом не
+    снимались (правило V49). Таблиц, которые группа снимает и заполняет, здесь нет: их
+    называет форматёр через `group_tables()` разбора — второй перечень таблиц в проекте
+    появился бы вместе с этим ключом (прецедент `role_group_defaults()` узла V49).
+    """
+    return {
+        "requested": False,
+        "written": 0,
+        "removed_previous": 0,
+    }
+
+
+def exchange_plans_defaults() -> Dict[str, Any]:
+    """Закрытый контракт стадии S4f с нулями (C1, C2, C3).
+
+    Словарь плоский — тот же, что возвращает слой `load_exchange_plans`; конвейер вкладывает
+    его в свой ключ `exchange_plans` без переименования (C3). Отдельно обязаны быть названы:
+    числа по таблицам (`removed_by_table`/`written_by_table`), замкнутые словари состояний
+    включая нули (`empty_content`, `absent`, `present_not_indexed` различимы состоянием, а не
+    нулём), расхождения двух ног круга — файлов регистрации с индексом состава
+    (`index_only`/`file_only`/`uuid_mismatch`), детей с индексом (`child_mismatches`,
+    `index_pseudo_entries`) и объявления вида с его каталогом (`declaration_mismatches`), а
+    также дескрипторы файлов модулей (Q8: тела пишет V47) и признак запрашивания групп.
+    Перечнем заголовка `configurations.exchange_plans` (третьей ногой круга, узел V43) ответ
+    стадии не оперирует: их сравнение с файлами и индексом — инвариант проверки
+    `tools/check_v51_exchange_plans.py` (шаг П6), а не число, которое стадия обязана обещать.
+    """
+    return {
+        "status": STATUS_NOT_RUN,
+        "success": False,
+        "error": None,
+        "reason": None,
+        "stage": STAGE_EXCHANGE_PLANS,
+        "configuration_id": None,
+        "configuration_uuid": None,
+        "configuration_name": None,
+        "tables": list(EXCHANGE_PLAN_TABLES),
+        "kinds_requested": [],
+        "kinds": {kind: exchange_plan_group_defaults() for kind in EXCHANGE_PLAN_LOAD_GROUPS},
+        "directory": EXCHANGE_PLAN_DIR,
+        "files_found": 0,
+        "files_read": 0,
+        "files_failed": [],
+        "observations": [],
+        "rows_written": 0,
+        "exchange_plans_written": 0,
+        "attributes_written": 0,
+        "tabular_sections_written": 0,
+        "forms_written": 0,
+        "form_ext_written": 0,
+        "templates_written": 0,
+        "commands_written": 0,
+        "content_written": 0,
+        "removed_previous": 0,
+        "removed_by_table": {table: 0 for table in EXCHANGE_PLAN_TABLES},
+        "written_by_table": {table: 0 for table in EXCHANGE_PLAN_TABLES},
+        "index_available": False,
+        "index_kind_records": 0,
+        "index_only": [],
+        "file_only": [],
+        "uuid_mismatch": [],
+        "child_mismatch_total": 0,
+        "child_mismatches": [],
+        "declaration_mismatch_total": 0,
+        "declaration_mismatches": [],
+        "index_pseudo_entries_total": 0,
+        "index_pseudo_entries": [],
+        "counts_by_properties_state": {state: 0 for state in EXCHANGE_PLAN_PROPERTIES_STATES},
+        "counts_by_children_state": {state: 0 for state in EXCHANGE_PLAN_CHILD_STATES},
+        "counts_by_standard_attributes_state": {
+            state: 0 for state in EXCHANGE_PLAN_STANDARD_ATTRIBUTE_STATES},
+        "counts_by_content_state": {state: 0 for state in EXCHANGE_PLAN_CONTENT_STATES},
+        "counts_by_slot_state": {state: 0 for state in EXCHANGE_PLAN_SLOT_STATES},
+        "counts_by_target_resolve_state": {state: 0 for state in EXCHANGE_PLAN_TARGET_STATES},
+        "counts_by_auto_record_state": {state: 0 for state in EXCHANGE_PLAN_AUTO_RECORD_STATES},
+        "counts_by_circle_discrepancy": {
+            state: 0 for state in EXCHANGE_PLAN_CIRCLE_DISCREPANCIES},
+        "counts_by_child_mismatch": {},
+        "counts_by_form_ext_format": {},
+        "counts_by_template_ext_format": {},
+        "attributes_own": 0,
+        "attributes_columns": 0,
+        "tabular_sections_total": 0,
+        "commands_total": 0,
+        "forms_total": 0,
+        "form_ext_total": 0,
+        "templates_total": 0,
+        "object_module_files_total": 0,
+        "command_module_files_total": 0,
+        "counts_by_object_module_kind": {},
+        "content_total": 0,
+        "content_unresolved_total": 0,
+        "standard_attributes_total": 0,
+        "standard_attributes_distinct": 0,
+        "standard_attribute_names": {},
+        "text_truncated_total": 0,
+        "ext_observations_total": 0,
+        "counts_by_ext_observation": {},
+        "ext_observations": [],
+        "unknown_properties": {},
+        "unknown_value_properties": {},
+        "unexpected_child_tags": {},
+        "statistics_refreshed": 0,
+        "warnings": [],
+    }
+
+
+def format_exchange_plans_lines(result: Dict[str, Any], indent: str = "") -> List[str]:
+    """Текст стадии S4f по закрытому контракту `exchange_plans_defaults()` (C1, C3).
+
+    Формат один для двух контуров: раздела карточки `load_1c_catalog_tool` и ответа
+    отдельного входа `load_exchange_plans_tool` (шаг П5) — прецеденты V45/V46/V48/V49/V50.
+    Отказ форматёр называет сам, вызывающий причину не повторяет. Граница круга печатается и
+    при успехе: «строки записаны» не равно «о плане обмена сохранено всё». Неперечисленные
+    ключи читаются нулями (C1). Имя — `format_exchange_plans_lines`: форматёры стадий слоя
+    называются по одному образцу.
+    """
+    lines: List[str] = []
+    if not result:
+        return lines
+
+    if not result.get("success"):
+        reason = result.get("error") or result.get("reason") or "загрузчик не назвал причину"
+        prefix = ("Стадия не выполнена" if result.get("status") in (None, STATUS_NOT_RUN)
+                  else "Стадия не удалась")
+        lines.append(f"{indent}{prefix}: {reason}")
+        lines.append(f"{indent}{EXCHANGE_PLAN_REPEAT_HINT}")
+        for warning in result.get("warnings") or []:
+            lines.append(f"{indent}⚠️ {warning}")
+        return lines
+
+    written_by_table = result.get("written_by_table") or {}
+    removed_by_table = result.get("removed_by_table") or {}
+    lines.append(
+        f"{indent}Записано строк по таблицам: "
+        + ", ".join(f"{table}={int(written_by_table.get(table) or 0)}"
+                    for table in sorted(written_by_table))
+        + f"; всего {int(result.get('rows_written') or 0)} (видов "
+          f"{int(result.get('files_read') or 0)}, целей перечня "
+          f"{int(result.get('content_total') or 0)})"
+    )
+    lines.append(
+        f"{indent}Файлов регистрации вида: {int(result.get('files_found') or 0)} "
+        f"(разобрано {int(result.get('files_read') or 0)}, каталог "
+        f"{result.get('directory') or EXCHANGE_PLAN_DIR}/)"
+    )
+
+    # Отдельный вход просит не весь круг (Q5). Незапрошенная группа обязана быть названа:
+    # её нули неотличимы от «планов обмена нет» (C2), а строки этих таблиц не снимались.
+    kinds = result.get("kinds") or {}
+    skipped = [kind for kind in EXCHANGE_PLAN_LOAD_GROUPS
+               if not (kinds.get(kind) or {}).get("requested")]
+    if skipped:
+        untouched = sorted({table for kind in skipped
+                            for table in exchange_plan_group_tables(kind)})
+        lines.append(
+            f"{indent}Группы круга не запрашивались: "
+            + ", ".join(f"{kind} — {EXCHANGE_PLAN_GROUP_TITLES[kind]}" for kind in skipped)
+            + f"; таблицы {', '.join(untouched)} этим вызовом не снимались и не "
+              "записывались, и их нули не означают, что в конфигурации нет планов обмена "
+              "или их детей"
+        )
+    if int(result.get("removed_previous") or 0):
+        lines.append(
+            f"{indent}Снято прежних строк этой конфигурации: "
+            + ", ".join(f"{table}={int(removed_by_table.get(table) or 0)}"
+                        for table in sorted(removed_by_table))
+        )
+    return _append_exchange_plan_detail(lines, result, indent)
+
+
+def _append_exchange_plan_detail(lines: List[str], result: Dict[str, Any],
+                                indent: str) -> List[str]:
+    """Второй блок текста стадии S4f: состояния, дети, перечень, слоты, ноги круга.
+
+    Разделение формата на две функции — только длина текста: форматёр обязан называть всё,
+    что есть в контракте, и одно место чтения ответа при этом сохраняется (вызывающий зовёт
+    `format_exchange_plans_lines`).
+    """
+    children_counts = result.get("counts_by_children_state") or {}
+    properties_counts = result.get("counts_by_properties_state") or {}
+    lines.append(
+        f"{indent}Состояния строк вида: свойства — "
+        + ", ".join(f"{state}={int(properties_counts.get(state) or 0)}"
+                    for state in EXCHANGE_PLAN_PROPERTIES_STATES)
+        + "; дети — "
+        + ", ".join(f"{state}={int(children_counts.get(state) or 0)}"
+                    for state in EXCHANGE_PLAN_CHILD_STATES)
+    )
+    lines.append(
+        f"{indent}Дети вида: реквизиты {int(result.get('attributes_own') or 0)} своих + "
+        f"{int(result.get('attributes_columns') or 0)} колонок табличных частей, табличных "
+        f"частей {int(result.get('tabular_sections_total') or 0)}, форм "
+        f"{int(result.get('forms_total') or 0)} (описаний "
+        f"{int(result.get('form_ext_total') or 0)}), макетов "
+        f"{int(result.get('templates_total') or 0)}, команд "
+        f"{int(result.get('commands_total') or 0)} — сумма по видам обязана совпасть с "
+        "записями индекса состава вида и его детей, иначе круг неполный; эталонные числа по "
+        "четырём выгрузкам держит проверка `tools/check_v51_exchange_plans.py` (шаг П6)"
+    )
+    formats = result.get("counts_by_form_ext_format") or {}
+    template_formats = result.get("counts_by_template_ext_format") or {}
+    lines.append(
+        f"{indent}Содержимое форм — "
+        + ", ".join(f"{state}={int(formats.get(state) or 0)}"
+                    for state in sorted(formats) or ["none"])
+        + "; макетов — "
+        + ", ".join(f"{state}={int(template_formats.get(state) or 0)}"
+                    for state in sorted(template_formats) or ["none"])
+        + f"; усечено по порогу слоя V13 {int(result.get('text_truncated_total') or 0)} — "
+          "бинарная форма, описание формы и усечённое содержимое являются тремя разными "
+          "состояниями, а не одним"
+    )
+
+    content_counts = result.get("counts_by_content_state") or {}
+    resolve_counts = result.get("counts_by_target_resolve_state") or {}
+    auto_counts = result.get("counts_by_auto_record_state") or {}
+    lines.append(
+        f"{indent}Перечень <Content>: состояний — "
+        + ", ".join(f"{state}={int(content_counts.get(state) or 0)}"
+                    for state in EXCHANGE_PLAN_CONTENT_STATES)
+        + f"; целей {int(result.get('content_total') or 0)}, из них не разрешено "
+          f"{int(result.get('content_unresolved_total') or 0)}; разрешение цели — "
+        + ", ".join(f"{state}={int(resolve_counts.get(state) or 0)}"
+                    for state in EXCHANGE_PLAN_TARGET_STATES)
+        + "; AutoRecord — "
+        + ", ".join(f"{state}={int(auto_counts.get(state) or 0)}"
+                    for state in EXCHANGE_PLAN_AUTO_RECORD_STATES)
+    )
+    slot_counts = result.get("counts_by_slot_state") or {}
+    lines.append(
+        f"{indent}Слоты Ext/Help.xml и Ext/AdditionalIndexes.xml — "
+        + ", ".join(f"{state}={int(slot_counts.get(state) or 0)}"
+                    for state in EXCHANGE_PLAN_SLOT_STATES)
+        + " — содержимое сохраняется исходным XML в jsonb (Q4, прецедент subsystems.Content)"
+    )
+    standard_counts = result.get("counts_by_standard_attributes_state") or {}
+    lines.append(
+        f"{indent}Стандартные реквизиты: состояний — "
+        + ", ".join(f"{state}={int(standard_counts.get(state) or 0)}"
+                    for state in EXCHANGE_PLAN_STANDARD_ATTRIBUTE_STATES)
+        + f"; вхождений {int(result.get('standard_attributes_total') or 0)}, уникальных имён "
+          f"{int(result.get('standard_attributes_distinct') or 0)} — строк по ним в схеме нет "
+          "(их нет в индексе состава), наличие называется состоянием "
+          "`present_not_indexed` (Q7), а не потерей"
+    )
+    lines.append(
+        f"{indent}Файлы модулей вида (дескрипторы, тела пишет V47): объекта/менеджера "
+        f"{int(result.get('object_module_files_total') or 0)}, команд "
+        f"{int(result.get('command_module_files_total') or 0)} (Q8)"
+    )
+
+    if not result.get("index_available"):
+        lines.append(
+            f"{indent}Индекс состава не читается — сверка файлов с перечнем и разрешение "
+            "целей перечня невозможны, и «объекта нет в перечне» от «перечень этой "
+            "конфигурации не загружен» этим не отличить"
+        )
+    mismatch_counts = result.get("counts_by_circle_discrepancy") or {}
+    lines.append(
+        f"{indent}Расхождения файлов и индекса состава: "
+        + ", ".join(f"{state}={int(mismatch_counts.get(state) or 0)}"
+                    for state in EXCHANGE_PLAN_CIRCLE_DISCREPANCIES)
+        + f"; расхождения детей с индексом "
+          f"{int(result.get('child_mismatch_total') or 0)} (псевдозаписей индекса "
+          f"{int(result.get('index_pseudo_entries_total') or 0)}), сверка объявления "
+          f"вида с его каталогом — {int(result.get('declaration_mismatch_total') or 0)} — "
+          "нули являются ответом, а не подразумеванием"
+    )
+    ext_counts = result.get("counts_by_ext_observation") or {}
+    if ext_counts or result.get("observations"):
+        lines.append(
+            f"{indent}Наблюдения круга и о прочем в Ext/: "
+            + ", ".join(f"{kind}={count}" for kind, count in sorted(ext_counts.items()))
+            + "; наблюдений круга "
+            + ", ".join(str(kind) for kind, _ in (result.get("observations") or []))
+        )
+    for failure in (result.get("files_failed") or [])[:10]:
+        lines.append(f"{indent}  ⚠️ файл не разобран: {failure.get('source_path')} — "
+                     f"{failure.get('reason')}")
+
+    refreshed = int(result.get("statistics_refreshed") or 0)
+    if refreshed:
+        lines.append(
+            f"{indent}Статистика таблиц {', '.join(EXCHANGE_PLAN_TABLES)} пересобрана "
+            f"(ANALYZE): {refreshed} — без неё читатели витрин текущего состояния платят "
+            "минутами (мера V46)"
+        )
+    for warning in result.get("warnings") or []:
+        lines.append(f"{indent}⚠️ {warning}")
+    lines.append(f"{indent}Граница: {EXCHANGE_PLAN_CIRCLE_BOUNDARY}")
     return lines
 

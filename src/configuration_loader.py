@@ -164,6 +164,40 @@
     совпадают в BGU2 и BP3 (замер 2.8), и без ключа конфигурации две выгрузки слились бы в
     одну строку.
 
+Узел V51 (31.10.2026, шаг П5) — свойства планов обмена, позиция 2.6 нормативного списка
+(`docs/CONFIGURATION_EXCHANGE_PLANS_PLAN.md`):
+
+    src/configuration_exchange_plans_loader.py :: load_exchange_plans(source_path,
+    configuration_uuid=None, kinds=None, changed_at=None)  →  таблицы вида `exchange_plans`,
+    `exchange_plan_content`, `commands` и таблицы её детей `attributes`, `tabular_sections`,
+    `forms`, `form_ext`, `templates`
+
+Порядок вызова повторяет S3/S4/S4c/S4d/S4e: стадия идёт ПОСЛЕ фиксации заголовка и индекса
+состава, потому что цели перечня `<Content>` разрешаются записями `configuration_objects`
+(Q4). Дальнейшее отличает её от соседних стадий:
+
+  * стадия `s4f_exchange_plans` стоит между `s4e_common_attributes` и `s4b_object_modules` —
+    порядок `STAGES` повторяет порядок нормативного списка (2.6 идёт сразу за 2.5);
+    перенумерации нет, S5 по-прежнему зарезервирован за анализом;
+  * ответ лежит в собственном ключе `exchange_plans` (правило C3);
+  * конвейер просит весь круг (групп `kinds` не передаёт) — Q5, п. 1: загрузка обязана
+    завершать цикл целиком, включая содержимое форм, макеты, перечень `<Content>` и слоты
+    `Help`/`AdditionalIndexes`. Отдельный вход `load_exchange_plans_tool` с `kinds` нужен
+    правочным вызовам (цена круга — 33.2 МБ текстов макетов по замеру 5.3);
+  * круг пишется ОДНОЙ транзакцией, порядок записи держится иерархией данных: строки вида →
+    дети → `form_ext` (ссылка на числовой `form_id`) → строки перечня `<Content>` (ссылка на
+    пару uuid+ревизия строки вида, а не на числовой id — внешнего ключа на
+    `exchange_plans(id)` в схеме нет);
+  * строки вида снимаются вместе с заголовком явным `DELETE` (`remove_exchange_plans` в
+    `_remove_rows`), начиная с `form_ext`: её собственный FK на строку формы объявлен с
+    `ON DELETE CASCADE`, и каскад снял бы описания без точного счётчика (M7). Детей вида
+    снимает предикат по родителям круга, а не по ноге `configuration_uuid`: таблицы
+    `attributes`, `tabular_sections`, `forms`, `templates` общие для внешнего контура и для
+    выгрузки конфигурации;
+  * ключ цепочки строки вида включает `configuration_uuid`: имена планов обмена совпадают в
+    BGU2 и BP3 при разных uuid, а 14 uuid детей совпадают между конфигурациями (замер 3.2),
+    и без ключа конфигурации две выгрузки слились бы в одну строку.
+
 
 
 Чтения идут через psycopg2 (`src/external_db.py`), а не psql-подпроцессом: `_run_psql` /
@@ -227,6 +261,22 @@ from configuration_common_attributes_loader import (
     load_common_attributes,
     remove_common_attributes,
 )
+# Узел V51 (стадия S4f, позиция 2.6 нормативного списка): свойства планов обмена — тот же
+# слой, что и отдельный инструмент `load_exchange_plans_tool` (шаг П5); контракт стадии и
+# форматёр — в configuration_load_contract. Строки круга снимаются вместе с заголовком
+# явным DELETE (внешнего ключа и каскада в схеме нет осознанно — прецедент V20.1), поэтому
+# `_remove_rows` обязан вызвать его явно: без этого force=True оставил бы в базе прежний
+# состав вида (для BGU2 это 18 строк вида, 9 638 строк перечня `<Content>`, 34 формы с их
+# описаниями и 35 макетов). Снятие начинается с `form_ext`: её FK на строку формы объявлен
+# с ON DELETE CASCADE, и каскад снял бы описания без точного счётчика (M7); детей вида
+# снимает ограниченный предикат по родителям круга, потому что таблицы `attributes`,
+# `tabular_sections`, `forms`, `templates` общие для двух контуров.
+from configuration_exchange_plans_loader import (
+    existing_plan_revisions,
+    existing_section_uuids,
+    load_exchange_plans,
+    remove_exchange_plans,
+)
 # Узел V47 (стадия S4b): модули объектов конфигурации — вторая транзакция после фиксации
 # содержимого (Q6, граница D7). Точка входа стадии одна и отдельного инструмента у неё нет
 # (Q4.1), поэтому здесь импортируется и ответ «стадия не выполнялась» (`mark_index_unavailable`):
@@ -242,6 +292,8 @@ from configuration_load_contract import (
     CHILD_SECTION_HEADER,
     COMMON_ATTRIBUTES_REPEAT_HINT,
     COMMON_ATTRIBUTES_SECTION_HEADER,
+    EXCHANGE_PLAN_REPEAT_HINT,
+    EXCHANGE_PLAN_SECTION_HEADER,
     NOT_RUN_STOPPED_REASON,
     OBJECT_MODULES_SECTION_HEADER,
     ROLES_REPEAT_HINT,
@@ -253,6 +305,7 @@ from configuration_load_contract import (
     SESSION_PARAMETER_TABLE,
     STAGE_CHILD_OBJECTS,
     STAGE_COMMON_ATTRIBUTES,
+    STAGE_EXCHANGE_PLANS,
     STAGE_INCOMPLETE_GROUPS,
     STAGE_OBJECT_MODULES,
     STAGE_ROLES,
@@ -263,6 +316,7 @@ from configuration_load_contract import (
     build_stopped_stage,
     child_objects_defaults,
     common_attributes_defaults,
+    exchange_plans_defaults,
     roles_defaults,
     root_modules_defaults,
     session_parameters_defaults,
@@ -558,6 +612,25 @@ def _remove_rows(cur, cfg_id, configuration_uuid=None):
     # снятое force=True (M7).
     if configuration_uuid:
         children.update(remove_common_attributes(cur, configuration_uuid))
+    # Узел V51 (стадия S4f): строки круга планов обмена тоже адресуются uuid заголовка, а
+    # внешнего ключа и каскада по нему в схеме нет осознанно (прецедент V20.1). Значит
+    # снятие обязан выполнить этот же явный DELETE: без него force=True оставил бы в базе
+    # строки, которые ни к какой конфигурации не относятся и не читаются ни одной карточкой.
+    # Снятие начинается с `form_ext` (порядок держит `REMOVE_ORDER` слоя): её собственный FK
+    # на строку формы объявлен с ON DELETE CASCADE, и каскад снял бы описания молча, без
+    # точного счётчика (M7). Для детей вида предикат ограничен родителями круга — те же
+    # таблицы пишут строки детей внешнего объекта и (следующими узлами) других объектов
+    # конфигурации, поэтому снятие только по ноге configuration_uuid сняло бы чужие строки.
+    if configuration_uuid:
+        # Родителей круга берёт та же транзакция снятия: перечень строится по строкам вида,
+        # которые ещё лежат в базе (их достаточно, чтобы снять детей удалённого из выгрузки
+        # вида), и отдельного соединения для чтения не нужно. К uuid видов добавляются uuid
+        # их табличных частей: колонки частей висят на строке части, а не на виде (замер 3.4),
+        # и снятие по одним видам оставило бы колонки сиротами (проба П5: `attributes`
+        # сняла 3 строки из 4).
+        plan_uuids = sorted(existing_plan_revisions(cur, configuration_uuid))
+        parents = plan_uuids + existing_section_uuids(cur, plan_uuids)
+        children.update(remove_exchange_plans(cur, configuration_uuid, parents))
     cur.execute("DELETE FROM configurations WHERE id = %s", [cfg_id])
     children["configurations"] = cur.rowcount
     return children
@@ -656,7 +729,7 @@ def _objects_table_available():
 
 def _written_before_stop_note(new_id, objects_written, header_arrays_filled,
                               root_modules, child_objects, session_parameters,
-                              roles=None, common_attributes=None):
+                              roles=None, common_attributes=None, exchange_plans=None):
     """Что реально лежит в базе на момент остановки конвейера (узел V48, шаг П8).
 
     Строка обязана быть: остановка стадии откатом не является (стадии S3+ идут после коммита
@@ -696,6 +769,19 @@ def _written_before_stop_note(new_id, objects_written, header_arrays_filled,
             + ", ".join(
                 f"{table}={int((common_attributes.get('written_by_table') or {}).get(table) or 0)}"
                 for table in ("common_attributes", "common_attribute_targets"))
+        )
+    # Узел V51 (стадия S4f): круг называется своими таблицами — «планы обмена записаны» без
+    # числа строк перечня <Content> и без числа описаний форм читалось бы как полный состав
+    # вида, хотя перечня в базе может и не быть (Q4: перечень и есть ответ о том, что
+    # реплицирует план).
+    if exchange_plans and exchange_plans.get("success"):
+        parts.append(
+            "свойства планов обмена: "
+            + ", ".join(
+                f"{table}={int((exchange_plans.get('written_by_table') or {}).get(table) or 0)}"
+                for table in ("exchange_plans", "exchange_plan_content", "commands",
+                              "attributes", "tabular_sections", "forms", "form_ext",
+                              "templates"))
         )
     return "; ".join(parts)
 
@@ -997,6 +1083,11 @@ def register_configuration(source_path, force=False, xml_path=None):
     # собственном ключе `common_attributes` (правило C3); групп запроса у стадии нет (Q10
     # вариант A: строка применения существует только через id строки реквизита, Q1).
     common_attributes = common_attributes_defaults()
+    # Узел V51 (стадия S4f, позиция 2.6 списка): свойства планов обмена — ответ в
+    # собственном ключе `exchange_plans` (правило C3). Группы `kinds` у стадии конвейера не
+    # запрашиваются: конвейер обязан записать весь круг (Q5, п. 1), раздельный вход — у
+    # отдельного инструмента `load_exchange_plans_tool`.
+    exchange_plans = exchange_plans_defaults()
     object_modules = object_modules_defaults()
     # Узел V48 (шаг П8, правило C2): пропущенная стадия называет причину пропуска. Без неё
     # форматёр стадии печатает «загрузчик не назвал причину», и читатель карточки видит
@@ -1006,7 +1097,7 @@ def register_configuration(source_path, force=False, xml_path=None):
     # (тот же приём, что `mark_index_unavailable` узла V47). Причина — в `reason`, а не в
     # `error`: «не выполнялась» и «отказала после начала работы» различаются именно так.
     for _empty_stage in (child_objects, session_parameters, roles, common_attributes,
-                         object_modules):
+                         exchange_plans, object_modules):
         _empty_stage["reason"] = NOT_RUN_STOPPED_REASON
     object_modules["status"] = STATUS_NOT_RUN
     stopped_stage = stopped_stage_defaults()
@@ -1025,7 +1116,7 @@ def register_configuration(source_path, force=False, xml_path=None):
             stage_id, stage_result,
             _written_before_stop_note(new_id, objects_written, header_arrays_filled,
                                       root_modules, child_objects, session_parameters,
-                                      roles, common_attributes),
+                                      roles, common_attributes, exchange_plans),
             warnings, incomplete_groups)
 
     if not stopped:
@@ -1225,6 +1316,56 @@ def register_configuration(source_path, force=False, xml_path=None):
             stopped = True
             load_incomplete = True
 
+    # ── узел V51 (стадия S4f, позиция 2.6 списка): свойства планов обмена ────────────
+    # Порядок вызова повторяет S3/S4/S4c/S4d/S4e: ПОСЛЕ коммита транзакции заголовка (своим
+    # соединением стадия не увидела бы ни незакоммиченного заголовка, ни строк индекса
+    # состава, по которым разрешаются цели перечня `<Content>` — Q4), ключ — uuid, каталог
+    # тот же `root_source`. Стадия отдельная, а не расширение S4e (прецедент Q5 узлов
+    # V48–V50): правило C3 требует своего ключа ответа `exchange_plans`; порядок `STAGES`
+    # повторяет порядок нормативного списка (2.6 идёт сразу за 2.5). Отказ стадии, как у
+    # S3/S4/S4c/S4d/S4e, записанный заголовок не отменяет (C5) — но останавливает конвейер
+    # (решение Q8 узла V48, вариант A): S4b после отказа S4f не выполняется и читается
+    # `not_run`.
+    #
+    # Конвейер просит ВЕСЬ круг (группы `kinds` не передаются): Q5, п. 1 — загрузка обязана
+    # завершать цикл целиком, включая содержимое форм, макеты, перечень `<Content>` и слоты;
+    # раздельный вход с группами — у отдельного инструмента `load_exchange_plans_tool`.
+    # Отсутствие каталога `ExchangePlans/` — не отказ, а ответ о выгрузке: `files_found = 0`
+    # с наблюдением `directory_missing` (так даёт KomMag).
+    #
+    # Штамп времени общий с остальными стадиями этой загрузки (M2) — `load_moment` задан
+    # выше, где начинается событие детей заголовка.
+    if not stopped:
+        try:
+            exchange_plans = load_exchange_plans(
+                root_source, configuration_uuid=row["uuid"], changed_at=load_moment)
+        except Exception as exc:  # noqa: BLE001 — отказ стадии называется, а не бросается
+            exchange_plans = exchange_plans_defaults()
+            exchange_plans["configuration_id"] = new_id
+            exchange_plans["configuration_uuid"] = row["uuid"]
+            exchange_plans["configuration_name"] = row["name"]
+            exchange_plans["status"] = STATUS_ERROR
+            exchange_plans["error"] = (
+                f"исключение слоя свойств планов обмена: {exc}")
+            exchange_plans["reason"] = exchange_plans["error"]
+        for plan_warning in exchange_plans.get("warnings") or []:
+            warnings.append(f"планы обмена: {plan_warning}")
+        if not exchange_plans.get("success"):
+            # Заголовок, индекс состава, модули корня, свойства подсистем с общими модулями,
+            # параметры сеанса, роли и общие реквизиты уже записаны, и отказ этой стадии их
+            # не отменяет (C5). Молчать нельзя по той же причине, что у V44/V46/V48–V50:
+            # после force=True прежние строки сняты, и «загружено» без этой строки читалось
+            # бы как полный состав конфигурации.
+            warnings.append(
+                "Свойства планов обмена не загружены — причина названа строкой "
+                "«Стадия не выполнена» в разделе «" + EXCHANGE_PLAN_SECTION_HEADER
+                + "» карточки. Чем продолжить: "
+                + f"{EXCHANGE_PLAN_REPEAT_HINT} (configuration_uuid={row['uuid']})."
+            )
+            stopped_stage = _stop_here(STAGE_EXCHANGE_PLANS, exchange_plans)
+            stopped = True
+            load_incomplete = True
+
     # ── узел V47 (стадия S4b): модули объектов конфигурации ────────────────────────────
     # Вторая транзакция ПОСЛЕ фиксации содержимого конфигурации (решение Q6, граница D7
     # узла V46): отказ стадии не откатывает заголовок, индекс состава, модули корня и
@@ -1339,6 +1480,11 @@ def register_configuration(source_path, force=False, xml_path=None):
         # (правило C3). Текст раздела даёт общий форматёр контракта — тот же, что отдаёт
         # отдельный инструмент `load_common_attributes_tool` (шаг П5).
         "common_attributes": common_attributes,
+        # узел V51: машинная часть стадии S4f (позиция 2.6 списка) — полная; ответ лежит в
+        # собственном ключе, а не внутри `child_objects`, `session_parameters`, `roles` или
+        # `common_attributes` (правило C3). Текст раздела даёт общий форматёр контракта —
+        # тот же, что отдаёт отдельный инструмент `load_exchange_plans_tool` (шаг П5).
+        "exchange_plans": exchange_plans,
         # узел V47: машинная часть стадии S4b — полная (тот же закрытый контракт, который
         # читают проба П4 и проверка П5); текст раздела даёт общий форматёр контракта.
         # `load_incomplete`/`incomplete_groups` — признак того, что состав в БД неполный

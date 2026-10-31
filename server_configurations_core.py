@@ -132,14 +132,27 @@ from configuration_roles_loader import load_roles
 # существует только через числовой id строки реквизита (Q1, вариант A), поэтому частичная
 # запись круга описывала бы состав, которого в выгрузке нет, — вход дозагружает весь круг.
 from configuration_common_attributes_loader import load_common_attributes
+# узел V51 (П5): свойства планов обмена — позиция 2.6 нормативного списка (стадия S4f).
+# Порядок тот же, что у V44/V46/V48/V49/V50: одна и та же функция слоя стоит за стадией
+# конвейера (src/configuration_loader.py) и за этим инструментом; закрытый контракт и словари
+# состояний живут в src (configuration_exchange_plans*, configuration_load_contract), а текст
+# раздела даёт общий форматёр — карточка загрузки и инструмент описывают слой одинаково
+# (прецедент V45). Отличие от входа V50 — группы `kinds` есть (Q5 узла V51, раздел 5.4
+# плана): круг вида несимметричен по цене (46 строк свойств против 22 515 строк перечня
+# `<Content>` и 33.2 МБ текстов макетов), а риск V50 здесь отсутствует физически — перечни
+# детей выводятся из атрибутов uuid выгрузки, а не из записанных строк детей. Пустое значение
+# `kinds` означает весь круг.
+from configuration_exchange_plans_loader import load_exchange_plans
 from configuration_load_contract import (
     CHILD_SECTION_HEADER,
     COMMON_ATTRIBUTES_SECTION_HEADER,
+    EXCHANGE_PLAN_SECTION_HEADER,
     ROLES_SECTION_HEADER,
     ROOT_MODULES_SECTION_HEADER,
     SESSION_PARAMETERS_SECTION_HEADER,
     format_child_object_lines,
     format_common_attributes_lines,
+    format_exchange_plans_lines,
     format_roles_lines,
     format_root_modules_lines,
     format_session_parameters_lines,
@@ -813,6 +826,120 @@ def load_common_attributes_tool(source_path: str, configuration_uuid: str = None
             load_common_attributes(source_path, configuration_uuid))
     except Exception as e:
         return ("❌ Не могу загрузить свойства общих реквизитов: внутренняя ошибка "
+                f"загрузчика: {str(e)}")
+
+
+def _format_exchange_plans_result(result: dict) -> str:
+    """Карточка стадии S4f (узел V51, позиция 2.6); текст даёт общий форматёр контракта.
+
+    Тот же приём, что у V44/V45/V46/V48/V49/V50: ключи ответа — закрытый словарь
+    `configuration_load_contract.exchange_plans_defaults()`, его возвращает слой
+    `load_exchange_plans`, его же печатает раздел карточки `load_1c_catalog_tool`. Свой
+    список ключей здесь не заводится, а строку причины печатает форматёр («Стадия не
+    выполнена: …» / «Стадия не удалась: …») — повторить её здесь значило бы дать два текста
+    об одном отказе.
+    """
+    if not result.get("success"):
+        lines = ["❌ Не могу загрузить свойства планов обмена."]
+        lines.extend(format_exchange_plans_lines(result))
+        if result.get("configuration_id") is not None:
+            lines.append(
+                "Строка заголовка конфигурации при этом существует: причину называет сам "
+                "слой загрузки — нет Configuration.xml, индекс состава не читается, файл "
+                "регистрации вида не разобран, файл круга не подтверждён записью индекса, "
+                "запрос kinds вне замкнутого словаря групп круга или разрезает строку вида "
+                "и её слоты."
+            )
+        lines.append(
+            "Подсказка: таблицы слоя создаёт шаг 2 установки "
+            "(create_1c_configurations_db.sql) либо migrate_v51_exchange_plans.sql."
+        )
+        return "\n".join(lines)
+    lines = ["✅ Свойства планов обмена загружены (узел V51, стадия S4f, позиция 2.6)."]
+    lines.append(f"{EXCHANGE_PLAN_SECTION_HEADER}:")
+    lines.extend(format_exchange_plans_lines(result, indent="   "))
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def load_exchange_plans_tool(source_path: str, configuration_uuid: str = None,
+                             kinds: str = None):
+    """Загрузить свойства планов обмена конфигурации (узел V51, стадия S4f).
+
+    Слой тот же, что стадия S4f конвейера `load_1c_catalog_tool`: отдельная точка входа
+    нужна для случая «изменились только файлы `ExchangePlans/`» — заголовок и индекс состава
+    при этом не меняются, и заново разбирать всю выгрузку не нужно (тот же порядок, что у
+    `load_configuration_root_modules_tool` (V44), `load_configuration_object_properties_tool`
+    (V46), `load_session_parameters_tool` (V48), `load_roles_tool` (V49) и
+    `load_common_attributes_tool` (V50); решение оператора Q5 узла V48 — свой вход на каждую
+    позицию нормативного списка).
+
+    Позиция нормативного списка — 2.6 «Планы обмена» файла «Структура конфигурации.txt» (её
+    номер называется и в заголовке раздела ответа). Круг — файл регистрации вида
+    `ExchangePlans/<Имя>.xml` с его подкаталогами `Forms/`, `Templates/`, `Commands/`, `Ext/`
+    и записями индекса состава того же вида (`ExchangePlan.<Имя>`); расхождения двух ног
+    называются `index_only`, `file_only`, `uuid_mismatch`, расхождения детей с индексом —
+    `child_mismatches`, объявления вида с его каталогом — `declaration_mismatches`.
+
+    Записываются таблицы вида `exchange_plans` (свойства, пять перечней детей, слоты
+    `Help`/`AdditionalIndexes` в jsonb), `exchange_plan_content` (строки перечня `<Content>`:
+    цель, режим автозаписи, порядок в файле, состояние разрешения цели) и `commands`, а также
+    таблицы детей вида `attributes` (реквизиты вида и колонки его табличных частей),
+    `tabular_sections`, `forms` с их содержимым `form_ext` (модуль формы остаётся в
+    `form_ext.ext` по правилу R9 слоя V14) и `templates` с содержимым.
+
+    Группы `kinds` — через запятую: `exchange_plans`, `attributes`, `tabular_sections`,
+    `forms` (с `form_ext` неразрывно: каскад `form_ext_form_id_fkey`), `templates` (с
+    содержимым), `commands`, `content`, `slots`. Пусто — весь круг, то есть ровно то, что
+    делает стадия конвейера (Q5, п. 1). Группы, образующие одну строку вида
+    (`exchange_plans` и `slots`), не разрезаются: CHECK
+    `exchange_plans_slot_content_matches_state` требует называть состояние слота на каждой
+    строке, а состояния «слоты не загружались» в замкнутом словаре нет. Незапрошенные группы
+    не снимаются и не записываются, и ответ обязан назвать их таблицы: их нули не означают,
+    что планов обмена или их детей в конфигурации нет (правило V49). Разбор при этом полный:
+    сводка описывает круг выгрузки, а не содержимое базы.
+
+    Состояния разбора различаются закрытыми словарями и называются, а не читаются нулями:
+    свойства (`all_known`/`unknown_value`/`unknown_tag`), дети (`with_children`/
+    `empty_children`), содержимое `<Content>` (`with_content`/`empty_content`), слоты
+    (`with_slot`/`absent`), разрешение цели (`exact`/`prefix_only`/`unresolved`), AutoRecord
+    (`allow`/`deny`/`unknown_form`), стандартные реквизиты (`present_not_indexed`: строк по
+    ним в схеме нет, их нет в индексе состава, Q7).
+
+    Отказ разбора ЛЮБОГО файла круга останавливает стадию ДО записи: половина круга читалась
+    бы как полный состав вида (приём V12/V46/V48/V49/V50), прежние строки при этом не
+    снимаются. Отсутствующий каталог `ExchangePlans/` — не отказ, а ответ о выгрузке:
+    `files_found = 0` с наблюдением `directory_missing` (так даёт KomMag).
+
+    Повтор снимает прежние строки этой конфигурации и пишет заново, снятое названо; история
+    состояний не заводится (её даёт узел правки объекта, которого в схеме ещё нет, D8).
+    Конфигурация должна быть уже загружена точкой входа `load_1c_catalog_tool`: внешнего
+    ключа в схеме нет осознанно (прецедент V20.1). Записав и зафиксировав строки, слой
+    пересобирает статистику затронутых таблиц (`ANALYZE`, мера V46); отказ этой операции —
+    предупреждение, а не отказ загрузки.
+
+    Чего инструмент НЕ делает: не загружает заголовок конфигурации и индекс состава (это
+    точка входа `load_1c_catalog_tool`), не читает тела модулей объекта, менеджера и команд —
+    их пишет узел V47 в `bsl_modules`, здесь файлы названы дескрипторами (Q8), не хранит
+    каталог ресурсов справки `Ext/Help/` (колонок под него в схеме нет, Q4) и не трогает
+    остальные группы A–H модели V38.
+
+    Args:
+        source_path: Каталог XML-выгрузки конфигурации. Обязателен: провенанс строк
+            конфигурации в БД не ведётся (решение D-C), по строке заголовка каталог не
+            восстанавливается.
+        configuration_uuid: Необязательный uuid заголовка из БД. Если задан — сверяется с
+            uuid из Configuration.xml, и расхождение называется отказом, а не разрешается
+            молча (иначе строки свойств ушли бы чужой конфигурации).
+        kinds: Необязательный список групп круга через запятую. Пусто — весь круг.
+            Незнакомая группа — отказ с перечнем допустимых: «группы нет» и «группу не
+            просили» — разные состояния.
+    """
+    try:
+        return _format_exchange_plans_result(
+            load_exchange_plans(source_path, configuration_uuid, kinds))
+    except Exception as e:
+        return ("❌ Не могу загрузить свойства планов обмена: внутренняя ошибка "
                 f"загрузчика: {str(e)}")
 
 

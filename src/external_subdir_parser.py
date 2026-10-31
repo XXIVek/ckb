@@ -618,6 +618,7 @@ def _read_template(xml_path, templates_dir, parent_uuid, parent_type, ref_names,
         return {"success": True, "template": row}
 
     template_xml = _find_file(ext_dir, "Template.xml")
+    template_txt = _find_file(ext_dir, "Template.txt")
     template_bin = _find_file(ext_dir, "Template.bin")
     if template_xml is not None:
         content, truncated, size = _read_text_file(template_xml)
@@ -630,6 +631,31 @@ def _read_template(xml_path, templates_dir, parent_uuid, parent_type, ref_names,
             row["ext_format"] = "xml"
             row["ext_path"] = _rel_path(template_xml, source_path)
             row["ext_root_tag"] = _root_tag_of(template_xml) or None
+            row["ext_size"] = size if size is not None else len(content.encode("utf-8"))
+            row["ext_truncated"] = truncated
+            if truncated:
+                warnings.append(f"Содержимое макета '{name}' длиннее порога {MAX_TEXT_CHARS} "
+                                "символов: сохранена часть, ext_truncated = true.")
+    elif template_txt is not None:
+        # Ветка добавлена узлом V51 (замер `_v51_p0_content_probe.py`, план
+        # docs/CONFIGURATION_EXCHANGE_PLANS_PLAN.md, таблица П6): макеты планов обмена
+        # выгружаются ТЕКСТОМ — `Template.txt` (MinCfg 1, BGU2 26, BP3 21 файла), а не XML.
+        # У внешних объектов (отчётов и обработок) макеты содержимого всегда XML или бинарь,
+        # поэтому ветки не было; для конфигурационных объектов её отсутствие означало бы
+        # «содержимого нет» там, где содержимое есть (4.2 МБ правил регистрации в MinCfg).
+        # Порог усечения общий (`MAX_TEXT_CHARS`), полный размер называется всегда:
+        # `ext_size` остаётся размером файла, а не сохранённой части.
+        content, truncated, size = _read_text_file(template_txt)
+        if content is None:
+            row["ext_truncated"] = False
+            warnings.append(f"Содержимое макета '{name}' ({template_txt.name}) не читается: "
+                            "колонка templates.ext остаётся пустой.")
+        else:
+            row["ext"] = content
+            row["ext_format"] = "txt"
+            row["ext_path"] = _rel_path(template_txt, source_path)
+            # ext_root_tag не заполняется: корня XML у текстового макета нет, придумывать
+            # его — значит выдать выдуманное значение за факт разбора.
             row["ext_size"] = size if size is not None else len(content.encode("utf-8"))
             row["ext_truncated"] = truncated
             if truncated:
@@ -656,13 +682,21 @@ def _read_template(xml_path, templates_dir, parent_uuid, parent_type, ref_names,
     else:
         row["ext_format"] = "none"
         row["ext_truncated"] = False
-        warnings.append(f"В каталоге Templates/{name}/Ext нет ни Template.xml, ни Template.bin: "
-                        "содержимое макета не сохранено.")
+        warnings.append(f"В каталоге Templates/{name}/Ext нет ни Template.xml, "
+                        "ни Template.txt, ни Template.bin: содержимое макета не сохранено.")
     return {"success": True, "template": row}
 
 
-def _read_bsl_modules(base_dir, source_path, parent_uuid, parent_type, object_name, warnings):
-    """Модули объекта/менеджера из Ext/*.bsl. Модули ФОРМ здесь не пишутся (form_ext.ext)."""
+def _read_bsl_modules(base_dir, source_path, parent_uuid, parent_type, object_name, warnings,
+                      with_text=True):
+    """Модули объекта/менеджера из Ext/*.bsl. Модули ФОРМ здесь не пишутся (form_ext.ext).
+
+    `with_text=False` (узел V51, решение Q8): узел НЕ читает тела модулей — они принадлежат
+    узлу V47 (`bsl_modules`, `parent_type='configuration_objects'`), и повторное чтение тех же
+    файлов вторым узлом означало бы двойную работу и два источника одного знания. Файлы при этом
+    называются дескрипторами (`module_name`, `file_path`, `code_size`, `descriptor_only`), иначе
+    «модулей нет» и «модули не трогали» читались бы одинаково.
+    """
     ext_dir = _find_dir(base_dir, EXT_DIR_NAME)
     if ext_dir is None:
         return []
@@ -679,6 +713,25 @@ def _read_bsl_modules(base_dir, source_path, parent_uuid, parent_type, object_na
             warnings.append(
                 f"Файл {bsl_file.name} в каталоге Ext/ не похож на известный модуль объекта "
                 f"(ObjectModule.bsl / ManagerModule.bsl): сохранён как module_type='{module_type}'.")
+        if not with_text:
+            try:
+                size = bsl_file.stat().st_size
+            except OSError:
+                size = None
+            rows.append({
+                "module_name": module_type,
+                "file_path": _rel_path(bsl_file, source_path),
+                "code": None,
+                "object_type": module_type,
+                "object_name": object_name or None,
+                "parent_uuid": parent_uuid,
+                "parent_type": parent_type,
+                "module_type": module_type,
+                "code_size": size,
+                "truncated": False,
+                "descriptor_only": True,
+            })
+            continue
         code, truncated, size = _read_text_file(bsl_file)
         if code is None:
             warnings.append(f"Модуль {bsl_file.name} не читается: он сохранён не будет.")
@@ -702,7 +755,8 @@ def _read_bsl_modules(base_dir, source_path, parent_uuid, parent_type, object_na
 
 
 def parse_external_subdirs(base_path, report_uuid, parent_type="external_report",
-                          object_name="", refs=None, source_path=None):
+                          object_name="", refs=None, source_path=None,
+                          with_object_modules=True):
     """Разбор каталогов Forms/, Templates/, Ext/ внутри каталога объекта выгрузки.
 
     Аргументы:
@@ -712,7 +766,11 @@ def parse_external_subdirs(base_path, report_uuid, parent_type="external_report"
       object_name - имя объекта выгрузки (для bsl_modules.object_name);
       refs        - child_refs корневого XML ({"forms": [...], "templates": [...]}) - только
                     сверка имён: расхождение даёт предупреждение, а не отказ;
-      source_path - корень выгрузки для относительных путей file_path / ext_path.
+      source_path - корень выгрузки для относительных путей file_path / ext_path;
+      with_object_modules - False (узел V51 Q8) даёт НЕ строки `bsl_modules`, а дескрипторы
+                    файлов модулей объекта/менеджера: тела читает узел V47, повторного
+                    чтения тот же файл два узла не делают. Файлы при этом названы, а не
+                    промолчаны.
 
     Возвращает dict с ключами forms / form_ext / templates / bsl_modules / warnings / counts
     либо ошибку вида {"success": False, "error": ..., "hint": ...} (нарушение R3, битый XML).
@@ -768,7 +826,8 @@ def parse_external_subdirs(base_path, report_uuid, parent_type="external_report"
         templates.append(parsed["template"])
 
     bsl_modules = _read_bsl_modules(base_dir, source_path, report_uuid, parent_type,
-                                    object_name, warnings)
+                                    object_name, warnings,
+                                    with_text=with_object_modules)
     result = {
         "success": True,
         "forms": forms,
