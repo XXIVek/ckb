@@ -60,14 +60,20 @@ from config_load_router import format_load_result, load_catalog  # noqa: E402
 from configuration_load_contract import (  # noqa: E402
     CHILD_SECTION_HEADER,
     CHILD_TABLES,
+    COMMON_ATTRIBUTES_SECTION_HEADER,
+    COMMON_ATTRIBUTES_TABLES,
     OBJECT_MODULES_RELOAD_HINT,
     OBJECT_MODULES_SECTION_HEADER,
+    ROLES_SECTION_HEADER,
+    ROLE_TABLES,
     ROOT_MODULES_SECTION_HEADER,
     SESSION_PARAMETERS_SECTION_HEADER,
     SESSION_PARAMETER_TABLE,
     STAGES,
     STAGE_CHILD_OBJECTS,
+    STAGE_COMMON_ATTRIBUTES,
     STAGE_OBJECT_MODULES,
+    STAGE_ROLES,
     STAGE_ROOT_MODULES,
     STAGE_SESSION_PARAMETERS,
     STATUS_ERROR,
@@ -77,8 +83,10 @@ from configuration_load_contract import (  # noqa: E402
     STOP_STAGE_SECTION_HEADER,
     build_stopped_stage,
     child_objects_defaults,
+    common_attributes_defaults,
     format_stopped_stage_lines,
     root_modules_defaults,
+    roles_defaults,
     session_parameters_defaults,
     stage_title,
     stages_after,
@@ -99,25 +107,37 @@ ROUTER = ROOT / "src" / "config_load_router.py"
 # Стадии детей конвейера в порядке `STAGES` — тот же порядок, что у нормативного списка
 # (раздел 2.9 плана V48). Перебор намеренно полный: решение Q8 принято «ко всем стадиям»,
 # и проверка одной стадии таким ответом не является.
+#
+# Состав повторяет текущий `STAGES`: S3, S4, S4c (узел V48), S4d (узел V49), S4e (узел
+# V50), S4b. Ожидания порядка выводятся из `STAGES`, а не переписываются списком: жёсткий
+# перечень стадий расходился с конвейером при каждой новой стадии — проба обязана видеть
+# расхождение числом, а не чиниться вручную под каждую новую стадию.
 CHILD_STAGES = (
-    STAGE_ROOT_MODULES, STAGE_CHILD_OBJECTS, STAGE_SESSION_PARAMETERS, STAGE_OBJECT_MODULES,
+    STAGE_ROOT_MODULES, STAGE_CHILD_OBJECTS, STAGE_SESSION_PARAMETERS, STAGE_ROLES,
+    STAGE_COMMON_ATTRIBUTES, STAGE_OBJECT_MODULES,
 )
 STAGE_KEYS = {
     STAGE_ROOT_MODULES: "root_modules",
     STAGE_CHILD_OBJECTS: "child_objects",
     STAGE_SESSION_PARAMETERS: "session_parameters",
+    STAGE_ROLES: "roles",
+    STAGE_COMMON_ATTRIBUTES: "common_attributes",
     STAGE_OBJECT_MODULES: "object_modules",
 }
 SECTION_HEADERS = {
     STAGE_ROOT_MODULES: ROOT_MODULES_SECTION_HEADER,
     STAGE_CHILD_OBJECTS: CHILD_SECTION_HEADER,
     STAGE_SESSION_PARAMETERS: SESSION_PARAMETERS_SECTION_HEADER,
+    STAGE_ROLES: ROLES_SECTION_HEADER,
+    STAGE_COMMON_ATTRIBUTES: COMMON_ATTRIBUTES_SECTION_HEADER,
     STAGE_OBJECT_MODULES: OBJECT_MODULES_SECTION_HEADER,
 }
 DEFAULTS = {
     STAGE_ROOT_MODULES: root_modules_defaults,
     STAGE_CHILD_OBJECTS: child_objects_defaults,
     STAGE_SESSION_PARAMETERS: session_parameters_defaults,
+    STAGE_ROLES: roles_defaults,
+    STAGE_COMMON_ATTRIBUTES: common_attributes_defaults,
     STAGE_OBJECT_MODULES: object_modules_defaults,
 }
 # Функция стадии — имя в модуле загрузчика: `register_configuration` обращается к имени
@@ -126,6 +146,8 @@ STAGE_FUNCTIONS = {
     STAGE_ROOT_MODULES: "load_root_modules",
     STAGE_CHILD_OBJECTS: "load_object_properties",
     STAGE_SESSION_PARAMETERS: "load_session_parameters",
+    STAGE_ROLES: "load_roles",
+    STAGE_COMMON_ATTRIBUTES: "load_common_attributes",
     STAGE_OBJECT_MODULES: "load_object_modules",
 }
 # Чем продолжение допустимо (подстрока подсказки): у стадии с отдельным входом — имя его
@@ -134,6 +156,8 @@ RESUME_MARKS = {
     STAGE_ROOT_MODULES: "load_configuration_root_modules_tool",
     STAGE_CHILD_OBJECTS: "load_configuration_object_properties_tool",
     STAGE_SESSION_PARAMETERS: "load_session_parameters_tool",
+    STAGE_ROLES: "load_roles_tool",
+    STAGE_COMMON_ATTRIBUTES: "load_common_attributes_tool",
     STAGE_OBJECT_MODULES: "load_1c_catalog_tool",
 }
 
@@ -242,10 +266,14 @@ check("1.2 нулевой словарь читается «конвейер н�
 check("1.3 форматёр на «не останавливался» раздела не печатает",
       format_stopped_stage_lines(defaults) == [] and format_stopped_stage_lines({}) == [])
 ORDER = [stage for stage, _ in STAGES]
+# Ожидание выводится из `STAGES`, а не переписывается списком стадий: жёсткий перечень
+# узла V48 разошёлся с конвейером при добавлении S4d (V49) и S4e (V50). Проверка от этого
+# не слабее — `CHILD_STAGES` обязан быть полным продолжением `STAGES` от S3 до конца,
+# поэтому лишняя или пропущенная стадия конвейера видна числом.
 check("1.4 `stages_after` даёт порядок `STAGES` и пустой список для последней стадии",
-      stages_after(STAGE_ROOT_MODULES) == [STAGE_CHILD_OBJECTS, STAGE_SESSION_PARAMETERS,
-                                           STAGE_OBJECT_MODULES]
-      and stages_after(STAGE_OBJECT_MODULES) == []
+      list(CHILD_STAGES) == ORDER[ORDER.index(CHILD_STAGES[0]):]
+      and stages_after(CHILD_STAGES[0]) == ORDER[ORDER.index(CHILD_STAGES[0]) + 1:]
+      and stages_after(CHILD_STAGES[-1]) == []
       and all(stages_after(stage) == ORDER[ORDER.index(stage) + 1:]
               for stage in CHILD_STAGES),
       [stages_after(stage) for stage in CHILD_STAGES])
@@ -313,6 +341,8 @@ check("1.18 ответ каждой стадии создаётся до её в
           [("root_modules", "root_modules_defaults"),
            ("child_objects", "child_objects_defaults"),
            ("session_parameters", "session_parameters_defaults"),
+           ("roles", "roles_defaults"),
+           ("common_attributes", "common_attributes_defaults"),
            ("object_modules", "object_modules_defaults")]))
 check("1.19 карточка печатает раздел остановки общим форматёром контракта",
       "STOP_STAGE_SECTION_HEADER" in router_src
@@ -328,10 +358,10 @@ check("1.21 строка о неполном составе одна на два
 
 
 def scope_counts(cur, cfg_uuid):
-    """Что лежит в базе по этой конфигурации: заголовок, индекс, таблицы четырёх стадий.
+    """Что лежит в базе по этой конфигурации: заголовок, индекс, таблицы шести стадий.
 
-    Перечень таблиц берётся из словарей слоёв (V44, V46, V48), а не переписывается: проба
-    обязана считать те же таблицы, которые пишет загрузчик.
+    Перечень таблиц берётся из словарей слоёв (V44, V46, V48, V49, V50), а не
+    переписывается: проба обязана считать те же таблицы, которые пишет загрузчик.
     """
     counts = {}
     counts["header"] = int(one(
@@ -353,6 +383,14 @@ def scope_counts(cur, cfg_uuid):
     counts["s4c:" + SESSION_PARAMETER_TABLE] = int(one(
         cur, f"SELECT count(*) FROM {SESSION_PARAMETER_TABLE} "
              "WHERE configuration_uuid = %s::uuid", [str(cfg_uuid)]) or 0)
+    for table in ROLE_TABLES:
+        counts["s4d:" + table] = int(one(
+            cur, f"SELECT count(*) FROM {table} WHERE configuration_uuid = %s::uuid",
+            [str(cfg_uuid)]) or 0)
+    for table in COMMON_ATTRIBUTES_TABLES:
+        counts["s4e:" + table] = int(one(
+            cur, f"SELECT count(*) FROM {table} WHERE configuration_uuid = %s::uuid",
+            [str(cfg_uuid)]) or 0)
     counts["s4b:bsl_modules"] = int(one(
         cur, "SELECT count(*) FROM bsl_modules WHERE configuration_uuid = %s::uuid "
              "AND parent_type = 'configuration_objects'", [str(cfg_uuid)]) or 0)
@@ -362,7 +400,8 @@ def scope_counts(cur, cfg_uuid):
 def stage_row_prefix(stage):
     """Префикс строк стадии в `scope_counts` — тот же порядок, что в словаре."""
     return {STAGE_ROOT_MODULES: "s3:", STAGE_CHILD_OBJECTS: "s4:",
-            STAGE_SESSION_PARAMETERS: "s4c:", STAGE_OBJECT_MODULES: "s4b:"}[stage]
+            STAGE_SESSION_PARAMETERS: "s4c:", STAGE_ROLES: "s4d:",
+            STAGE_COMMON_ATTRIBUTES: "s4e:", STAGE_OBJECT_MODULES: "s4b:"}[stage]
 
 
 def run_stage_failure(dump_dir, stage, baseline, cur, cfg_uuid):
@@ -507,7 +546,7 @@ def main() -> int:
               final["header"] == baseline["header"]
               and final["index"] == baseline["index"]
               and all(final[key] >= baseline[key] for key in final
-                      if key.startswith(("s3:", "s4:", "s4c:", "s4b:"))),
+                      if key.startswith(("s3:", "s4:", "s4c:", "s4d:", "s4e:", "s4b:"))),
               {key: (baseline[key], final[key]) for key in final
                if final[key] < baseline[key]})
         check("3.4 карточка успешной загрузки раздела остановки не содержит",

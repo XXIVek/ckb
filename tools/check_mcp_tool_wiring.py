@@ -100,9 +100,19 @@ DEFAULT_TARGETS = [
 # configuration_load_contract. Отличие от входов V44/V46/V48 — параметр `kinds` (три группы
 # круга): FK `role_rights_role_id_fkey` с `ON DELETE CASCADE` не даёт писать роли без их
 # прав, поэтому круг разрезан по границе внешних ключей, а не по удобству.
+# Узел V50 (П5, 31.10.2026) добавил load_common_attributes_tool: core 7 → 8. Причина та же
+# (решение оператора Q5 узла V48 — свой вход на каждую позицию нормативного списка): файлы
+# регистрации вида `CommonAttributes/` (позиция 2.5) меняются, а заголовок и индекс состава —
+# нет. Стадия S4e конвейера и инструмент вызывают одну и ту же функцию слоя
+# (src/configuration_common_attributes_loader.load_common_attributes); отдельного контракта у
+# инструмента нет — закрытый словарь common_attributes_defaults() и текст раздела даёт
+# configuration_load_contract. Отличие от входа V49 — групп `kinds` нет (решение Q10,
+# вариант A): строка применения существует только через числовой id строки реквизита (Q1,
+# вариант A), поэтому частичная запись круга описывала бы состав, которого в выгрузке нет.
 EXPECTED_TOOLS = {
     "server_configurations_core.py": [
         "delete_external_report_tool", "load_1c_catalog_tool",
+        "load_common_attributes_tool",
         "load_configuration_object_properties_tool",
         "load_configuration_root_modules_tool", "load_external_object_file_tool",
         "load_roles_tool", "load_session_parameters_tool",
