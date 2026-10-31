@@ -182,11 +182,34 @@ OBJECT_VERSIONED_TABLES = (
 # (тот же порядок, что ROLE_TABLES узла V49, и та же ловушка: проба `_v46_p4_writer_probe.py`
 # падает на KeyError, пока стадия не объявила свои таблицы). Писатель таблицы появляется
 # шагом П3, до него версионируемая таблица без писателя — это окно, а не состояние нормы.
+# Узел V51 (шаг П1) добавляет шестую группу — план обмена (`exchange_plans`,
+# `exchange_plan_content`, `commands`, миграция `migrate_v51_exchange_plans.sql`, позиция 2.6
+# нормативного списка «Структура конфигурации.txt»). Ключ цепочки строки вида —
+# (configuration_uuid, object_name), как у параметров сеанса V48: имя вида уникально в
+# конфигурации, а uuid вида повторяется между конфигурациями, выросшими из общей базы
+# (замер 3.2 плана docs/CONFIGURATION_EXCHANGE_PLANS_PLAN.md).
+#
+# Ключ детей — (configuration_uuid, parent_uuid, uuid), у форм и макетов —
+# (configuration_uuid, parent_uuid, name): таблицы детей общие со слоем внешнего объекта
+# (Q1, вариант A), а ногу области видимости в них внёс этот же шаг. Для строк внешнего
+# объекта нога равна parent_uuid (правило (б) оператора), и её выводит писатель
+# (`external_table_writer`, вид значения `copy:parent_uuid`), а не разбор выгрузки.
+#
+# Перечень `<Content>` (`exchange_plan_content`) версионируется ОБЩЕЙ с родителем цепью
+# (Q6, вариант A): своей истории у него нет, витрина разрешает его связкой по
+# (object_uuid, revision_no) строки вида — тот же порядок, что `subsystem_content` V46.
+# Новая таблица `commands` DEFAULT вида родителя не получает: у внешнего объекта команд
+# метаданных нет, поэтому писатель обязан назвать `parent_type` явно.
+#
+# Круг стадии S4 от регистрации не расширяется: таблицы вида вычтены своей константой
+# `EXCHANGE_PLAN_TABLES` (src/configuration_load_contract.py). Причина названа узлами V49/V50:
+# проба `_v46_p4_writer_probe.py` падала на KeyError, пока стадия не объявляла свой круг.
 CONFIGURATION_VERSIONED_TABLES = (
     "subsystems", "subsystem_content", "common_modules", "common_module_sources",
     "session_parameters",
     "roles", "role_restriction_templates", "role_sources",
     "common_attributes",
+    "exchange_plans", "exchange_plan_content", "commands",
 )
 
 VERSIONED_TABLES = OBJECT_VERSIONED_TABLES + CONFIGURATION_VERSIONED_TABLES

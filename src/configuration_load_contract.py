@@ -161,6 +161,11 @@ from configuration_common_attributes import (
     TYPE_CLASS_VALUES as CA_TYPE_CLASS_VALUES,
     USE_STATES as CA_USE_STATES,
 )
+from configuration_exchange_plans import (
+    COMMANDS_TABLE_NAME as EXCHANGE_PLAN_COMMANDS_TABLE,
+    CONTENT_TABLE_NAME as EXCHANGE_PLAN_CONTENT_TABLE,
+    TABLE_NAME as EXCHANGE_PLAN_TABLE,
+)
 from current_revision import CONFIGURATION_VERSIONED_TABLES
 
 # ── стадии конвейера: один перечень на контракт, карточку и проверку ───────────────
@@ -760,6 +765,23 @@ COMMON_ATTRIBUTES_TABLES: Tuple[str, ...] = (
     COMMON_ATTRIBUTE_TARGETS_TABLE,
 )
 
+# Узел V51 (план обмена, 31.10.2026, позиция 2.6 списка): тот же дефект — четвёртым узлом.
+# Регистрация трёх таблиц вида в круге версионности (шаг П1) молча добавила бы к кругу S4
+# `exchange_plans`, `exchange_plan_content` и `commands`: проба `_v46_p4_writer_probe.py`
+# падает на KeyError, потому что контракт `CHILD_TABLES` становится шире круга стадии, а
+# стадия S4 снимала и анализировала бы чужие строки (замеры П0: на BGU2 — 18 строк вида и
+# 9 638 строк перечня `<Content>`). Свою стадию `s4f_exchange_plans`, заголовок раздела и
+# ключ ответа даёт шаг П4 этого узла (Q8 плана), а круг стадии объявляется здесь:
+# версионируемая таблица без объявленного круга означала бы, что чужая стадия её снимает.
+# Группы запроса (`kinds`) у вида есть (Q5 закрыт: пустое значение = весь круг), но
+# `*_TABLES_BY_KIND` объявляется шагом П4 вместе с отдельным входом группы (шаг П5) — здесь
+# только круг стадии S4f.
+EXCHANGE_PLAN_TABLES: Tuple[str, ...] = (
+    EXCHANGE_PLAN_TABLE,
+    EXCHANGE_PLAN_CONTENT_TABLE,
+    EXCHANGE_PLAN_COMMANDS_TABLE,
+)
+
 # ── контракт стадии S4e (узел V50, шаг П4, позиция 2.5 списка) ──────────────────────
 # Заголовок раздела, подсказка о повторе и граница круга объявлены рядом с кругом таблиц
 # стадии — по той же причине, что у V48 и V49: текст незакрытой части ссылается на раздел,
@@ -836,6 +858,7 @@ CHILD_NOT_IMPLEMENTED = (
 # это, а не отдать нули как «в конфигурации ничего нет» (C2).
 FOREIGN_STAGE_TABLES: Tuple[str, ...] = (
     SESSION_PARAMETER_TABLES + ROLE_TABLES + COMMON_ATTRIBUTES_TABLES
+    + EXCHANGE_PLAN_TABLES
 )
 CHILD_TABLES: Tuple[str, ...] = tuple(
     table for table in CONFIGURATION_VERSIONED_TABLES

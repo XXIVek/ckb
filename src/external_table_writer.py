@@ -128,6 +128,15 @@ def _quote(identifier):
     return '"' + str(identifier).replace('"', '""') + '"'
 
 
+# Узел V51 (Q1, правило (б)): вид значения-копии. Колонка со спецификацией
+# `"copy:<другая колонка>"` берёт значение из другой колонки той же строки, а не из
+# разобранного файла. Так нога области видимости детей внешнего объекта
+# (`configuration_uuid = parent_uuid`) выводится писателем один раз: правило — контракт
+# слоя, а не свойство выгрузки, и повторять его в каждом разборе значило бы получить N
+# мест, где оно может разойтись.
+COLUMN_COPY_PREFIX = "copy:"
+
+
 class TableRowWriter:
     """Базовый писатель: спецификация колонок + приведение значений к параметрам SQL."""
 
@@ -274,9 +283,23 @@ class TableRowWriter:
         `insert_many_skip_duplicates` не могут вставить строку без ревизии.
         """
         row = cls.revision_row(row)
-        return tuple(cls._adapt(kind, cls.CONSTANTS[column] if column in cls.CONSTANTS
-                                else row.get(column))
+        return tuple(cls._value(column, kind, row)
                      for column, kind in cls.COLUMNS.items())
+
+    @classmethod
+    def _value(cls, column, kind, row):
+        """Значение одной колонки: CONSTANTS → копия другой колонки → строка разбора.
+
+        Узел V51: вид `"copy:<колонка>"` (см. `COLUMN_COPY_PREFIX`) приводит значение по
+        виду колонки-источника, а не по своей строке спецификации, — копия не может дать
+        значение другого типа, чем колонка, с которой её скопировали.
+        """
+        if column in cls.CONSTANTS:
+            return cls._adapt(kind, cls.CONSTANTS[column])
+        if kind.startswith(COLUMN_COPY_PREFIX):
+            source = kind[len(COLUMN_COPY_PREFIX):]
+            return cls._adapt(cls.COLUMNS.get(source, "uuid"), row.get(source))
+        return cls._adapt(kind, row.get(column))
 
 
     @classmethod
@@ -465,9 +488,15 @@ class AttributesRowWriter(TableRowWriter):
     """
 
     TABLE = "attributes"
+    # узел V51: нога области видимости выводится из parent_uuid правилом (б) Q1, а вид
+    # родителя заявляет сам писатель — этот класс пишет детей внешнего объекта (отчёта или
+    # обработки, узел V22); дети плана обмена пишутся писателем стадии со своим значением.
+    CONSTANTS = {"parent_type": "external_report"}
     COLUMNS = versioned_columns({
+        "configuration_uuid": "copy:parent_uuid",
         "uuid": "uuid",
         "parent_uuid": "uuid",
+        "parent_type": "text",
         "name": "text",
         "synonym": "jsonb_object",
         "comment": "text",
@@ -493,6 +522,12 @@ class AttributesRowWriter(TableRowWriter):
         "choice_form": "text",
         "link_by_type": "text",
         "choice_history_on_input": "text",
+        # узел V51 (замер 5.5 плана docs/CONFIGURATION_EXCHANGE_PLANS_PLAN.md): свойства
+        # реквизита вида, которых у слоя внешнего объекта не было (28 тегов против 25
+        # покрытых); колонки добавлены тем же шагом П1
+        "data_history": "text",
+        "full_text_search": "text",
+        "indexing": "text",
     })
 
 
@@ -505,9 +540,13 @@ class TabularSectionsRowWriter(TableRowWriter):
     """
 
     TABLE = "tabular_sections"
+    # узел V51: та же нога и тот же вид родителя, что у AttributesRowWriter
+    CONSTANTS = {"parent_type": "external_report"}
     COLUMNS = versioned_columns({
+        "configuration_uuid": "copy:parent_uuid",
         "uuid": "uuid",
         "parent_uuid": "uuid",
+        "parent_type": "text",
         "internalinfo_generatedtype": "jsonb_array",
         "name": "text",
         "synonym": "jsonb_object",
@@ -516,6 +555,8 @@ class TabularSectionsRowWriter(TableRowWriter):
         "fill_checking": "text",
         "standardattributes": "jsonb_array",
         "column_uuids": "jsonb_array",
+        # узел V51 (замер 5.5): седьмой тег табличной части
+        "line_number_length": "int",
     })
 
 
@@ -532,7 +573,10 @@ class FormsRowWriter(TableRowWriter):
     """
 
     TABLE = "forms"
+    # узел V51: нога области видимости выводится из parent_uuid (правило (б) Q1); ключ
+    # строки формы — имя в границах области видимости (уточнение (а))
     COLUMNS = versioned_columns({
+        "configuration_uuid": "copy:parent_uuid",
         "uuid": "uuid",
         "parent_uuid": "uuid",
         "parent_type": "text",
@@ -599,7 +643,9 @@ class TemplatesRowWriter(TableRowWriter):
     """
 
     TABLE = "templates"
+    # узел V51: нога области видимости (правило (б) Q1) и ключ по имени макета (уточнение (а))
     COLUMNS = versioned_columns({
+        "configuration_uuid": "copy:parent_uuid",
         "uuid": "uuid",
         "parent_uuid": "uuid",
         "parent_type": "text",

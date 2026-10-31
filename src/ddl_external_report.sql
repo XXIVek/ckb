@@ -200,10 +200,27 @@ CREATE INDEX IF NOT EXISTS idx_external_report_origin_sha256 ON external_report(
 --    приходится цепочка ревизий (M1). Внешний ключ parent_uuid снят — при двух ревизиях
 --    объекта uuid не уникален и на него нельзя сослаться как на ключ; состав детей текущего
 --    состояния разрешает манифест родителя (M3, M4), каскад делает загрузчик явным DELETE.
+--    нога области видимости строки (узел V51, Q1 вариант A + правило (б) оператора от
+--    31.10.2026): uuid ребёнка повторяется между конфигурациями, выросшими из общей базы
+--    (замер 3.2 плана docs/CONFIGURATION_EXCHANGE_PLANS_PLAN.md: 42 349 общих uuid, из них
+--    14 у детей планов обмена), поэтому одна строка на (uuid, revision_no) перестала быть
+--    достаточной — строки двух конфигураций различались бы только ревизией. У строк
+--    внешнего объекта нога равна parent_uuid и совпадает с uuid самого внешнего объекта
+--    (правило (б)), поэтому колонка объявлена NOT NULL сразу: периода «значение не
+--    заявлено» нет, а сиротей нет по замеру 5.1 (36 строк из 36 имеют parent_uuid).
+--    Значение для детей внешнего объекта выводит сам писатель
+--    (`external_table_writer`: `"configuration_uuid": "copy:parent_uuid"`), а не разбор
+--    выгрузки: правило (б) — контракт слоя, а не свойство файла.
 CREATE TABLE attributes (
     id SERIAL PRIMARY KEY,
+    configuration_uuid UUID NOT NULL,
     uuid UUID NOT NULL,
     parent_uuid UUID NOT NULL,
+    -- узел V51: вид родителя строки. В forms/templates колонка есть с узла V13, здесь её
+    -- не было, потому что детей конфигурации таблица до V51 не носила. Значение по
+    -- умолчанию — прежний единственный вид (внешний объект), чтобы уже записанные строки
+    -- не поменяли смысл; дети плана обмена получают 'ExchangePlan' от писателя стадии.
+    parent_type TEXT NOT NULL DEFAULT 'external_report',
     name TEXT NOT NULL,
     synonym JSONB,
     comment TEXT,
@@ -229,6 +246,18 @@ CREATE TABLE attributes (
     choice_form TEXT,
     link_by_type TEXT,
     choice_history_on_input TEXT DEFAULT 'Auto',
+    -- узел V51 (замер 5.5 плана docs/CONFIGURATION_EXCHANGE_PLANS_PLAN.md): свойства, которых
+    -- у слоя внешнего объекта не было. Реквизит вида несёт 28 тегов против 25 покрытых,
+    -- колонка табличной части — 26 (тегов `FillFromFillingValue`/`FillValue` у неё нет);
+    -- отсутствие тегов называется состоянием разбора `absent`, а не пустым значением.
+    -- CHECK по значениям этих колонок не кладётся осознанно: по прецеденту V50 (Q7,
+    -- вариант A) закрытость держит измеренный словарь `PROPERTY_VALUE_DICTIONARY`
+    -- (src/configuration_exchange_plans.py), а значение вне словаря остаётся значением с
+    -- состоянием `unknown_value` и названным виновником, а не отказом записи. Те же
+    -- соображения относятся и к прежним колонкам свойств — словарь замкнут в коде слоя.
+    data_history TEXT,
+    full_text_search TEXT,
+    indexing TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     -- узел V19 (M1): цепочка состояний одного uuid; строки, загруженные до V19, остаются с
     -- revision_no = 1 и changed_by IS NULL — «событие не записано».
@@ -242,7 +271,13 @@ CREATE TABLE attributes (
     -- FALSE остаётся маркером «значение не заявлено точкой доступа». Это не признак
     -- «текущей строки» — их круг разрешает манифест родителя (решение A1).
     is_committed BOOLEAN NOT NULL DEFAULT FALSE,
-    CONSTRAINT attributes_uuid_revision_no_key UNIQUE (uuid, revision_no),
+    -- узел V51 (M2): прежний ключ `UNIQUE (uuid, revision_no)` снимается — он не различает
+    -- одинаковые uuid детей в разных конфигурациях (замер 3.2), то есть вставка второй
+    -- конфигурации падала на ключ первой. Новый ключ начинается с ноги области видимости;
+    -- цепь ревизий ребёнка при этом не меняется: `revision_no` значит одно и то же для
+    -- строк внешнего объекта и объекта конфигурации (Q6 узла V51, вариант A).
+    CONSTRAINT attributes_configuration_parent_uuid_revision_key
+        UNIQUE (configuration_uuid, parent_uuid, uuid, revision_no),
     CONSTRAINT attributes_revision_no_positive CHECK (revision_no >= 1),
     CONSTRAINT attributes_changed_by_known
         CHECK (changed_by IS NULL OR changed_by IN ('load', 'edit', 'restore')),
@@ -253,12 +288,21 @@ CREATE INDEX idx_attributes_parent_uuid ON attributes(parent_uuid);
 CREATE INDEX idx_attributes_name ON attributes(name);
 -- разрешение текущей ревизии по uuid (M5) и обратный запрос «состояния этого uuid»
 CREATE INDEX idx_attributes_uuid_revision ON attributes(uuid, revision_no);
+-- узел V51: запрос «все строки детей этой конфигурации» (снятие круга стадии, счётчики
+-- проверки узла) идёт по ноге области видимости; текущность разрешается уникальным
+-- ключом таблицы, отдельного индекса под витрину не заводим
+CREATE INDEX idx_attributes_configuration_uuid ON attributes(configuration_uuid);
 
 -- 3. tabular_sections — табличные части (узел V19: состояния, как у attributes)
+--    Узел V51: та же нога области видимости, что у attributes (см. комментарий там же),
+--    и тот же вид родителя. Перечень колонок ТЧ (`column_uuids`) уже был её собственным
+--    манифестом с узла V19, поэтому вторую колонку порядка не заводят.
 CREATE TABLE tabular_sections (
     id SERIAL PRIMARY KEY,
+    configuration_uuid UUID NOT NULL,
     uuid UUID NOT NULL,
     parent_uuid UUID NOT NULL,
+    parent_type TEXT NOT NULL DEFAULT 'external_report',
     internalinfo_generatedtype JSONB,
     name TEXT NOT NULL,
     synonym JSONB,
@@ -267,6 +311,10 @@ CREATE TABLE tabular_sections (
     fill_checking TEXT DEFAULT 'DontCheck',
     standardattributes JSONB,
     column_uuids JSONB,
+    -- узел V51 (замер 5.5): седьмой тег табличной части `LineNumberLength` (скаляр, во всех
+    -- трёх выгрузках значение одно — 5). Колонка полная snake_case, потому что аналога в
+    -- схеме нет; отсутствие тега в файле — состояние разбора `absent`, а не ноль.
+    line_number_length INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     -- узел V19 (M1): цепочка состояний одного uuid (см. attributes).
     revision_no INTEGER NOT NULL DEFAULT 1,
@@ -279,7 +327,10 @@ CREATE TABLE tabular_sections (
     -- FALSE остаётся маркером «значение не заявлено точкой доступа». Это не признак
     -- «текущей строки» — их круг разрешает манифест родителя (решение A1).
     is_committed BOOLEAN NOT NULL DEFAULT FALSE,
-    CONSTRAINT tabular_sections_uuid_revision_no_key UNIQUE (uuid, revision_no),
+    -- узел V51 (M2): прежний ключ `UNIQUE (uuid, revision_no)` снимается по той же причине,
+    -- что у attributes; цепь ревизий не меняется (Q6, вариант A)
+    CONSTRAINT tabular_sections_configuration_parent_uuid_revision_key
+        UNIQUE (configuration_uuid, parent_uuid, uuid, revision_no),
     CONSTRAINT tabular_sections_revision_no_positive CHECK (revision_no >= 1),
     CONSTRAINT tabular_sections_changed_by_known
         CHECK (changed_by IS NULL OR changed_by IN ('load', 'edit', 'restore')),
@@ -289,14 +340,23 @@ CREATE TABLE tabular_sections (
 CREATE INDEX idx_tabular_sections_parent_uuid ON tabular_sections(parent_uuid);
 CREATE INDEX idx_tabular_sections_name ON tabular_sections(name);
 CREATE INDEX idx_tabular_sections_uuid_revision ON tabular_sections(uuid, revision_no);
+-- узел V51: нога области видимости (см. attributes)
+CREATE INDEX idx_tabular_sections_configuration_uuid ON tabular_sections(configuration_uuid);
 
 -- 4. формы внешнего объекта (V13: метка типа родителя; узел V19: состояния по uuid)
 --    ExternalDataProcessor -> external_processing.
 --    Узел V19: UNIQUE (parent_uuid, uuid) заменён на UNIQUE (uuid, revision_no): при двух
 --    ревизиях объекта одна и та же форма даёт две строки — свою ревизию на каждую;
 --    внешний ключ parent_uuid снят (см. attributes).
+--    Узел V51 (Q1, вариант A с уточнением (а) оператора): ключом формы служит ЕЁ ИМЯ, а не
+--    uuid: `Forms/<Имя>.xml` уникален внутри объекта выгрузки, а uuid в индексе состава есть
+--    только у строки-объекта формы (замер 5.5). Колонка `uuid` остаётся обычным столбцом и
+--    используется для сопоставления с индексом. Нога `configuration_uuid` — та же, что у
+--    attributes (см. комментарий там же); `parent_type` в этой таблице есть с узла V13 и
+--    переопределяется значением по умолчанию только для уже записанных строк внешнего объекта.
 CREATE TABLE forms (
     id SERIAL PRIMARY KEY,
+    configuration_uuid UUID NOT NULL,
     uuid UUID NOT NULL,
     parent_uuid UUID NOT NULL,
     name TEXT NOT NULL,
@@ -318,7 +378,13 @@ CREATE TABLE forms (
     -- FALSE остаётся маркером «значение не заявлено точкой доступа». Это не признак
     -- «текущей строки» — их круг разрешает манифест родителя (решение A1).
     is_committed BOOLEAN NOT NULL DEFAULT FALSE,
-    CONSTRAINT forms_uuid_revision_no_key UNIQUE (uuid, revision_no),
+    -- узел V51 (M2 + уточнение (а) оператора): прежний ключ `UNIQUE (uuid, revision_no)`
+    -- снимается, новым становится ключ по имени формы в границах области видимости —
+    -- `Forms/<Имя>.xml` уникален внутри объекта, а uuid формы повторяется между
+    -- конфигурациями (замер 3.2). Цепь ревизий формы при этом остаётся цепочкой той же
+    -- строки: `revision_no` значит одно и то же для строк внешнего объекта и вида
+    CONSTRAINT forms_configuration_parent_name_revision_key
+        UNIQUE (configuration_uuid, parent_uuid, name, revision_no),
     CONSTRAINT forms_revision_no_positive CHECK (revision_no >= 1),
     CONSTRAINT forms_changed_by_known
         CHECK (changed_by IS NULL OR changed_by IN ('load', 'edit', 'restore')),
@@ -330,11 +396,17 @@ CREATE INDEX idx_forms_name ON forms(name);
 CREATE INDEX idx_forms_uuid ON forms(uuid);
 CREATE INDEX idx_forms_parent_type ON forms(parent_type);
 CREATE INDEX idx_forms_uuid_revision ON forms(uuid, revision_no);
+-- узел V51: нога области видимости (см. attributes)
+CREATE INDEX idx_forms_configuration_uuid ON forms(configuration_uuid);
 
 -- 5. templates — макеты (V13: содержимое Templates/<Имя>/Ext/Template.xml|.bin;
 --    узел V19: состояния по uuid, снят и внешний ключ parent_uuid — см. attributes)
+--    Узел V51: нога области видимости и ключ по имени макета (`Templates/<Имя>.xml`) — те же
+--    уточнения Q1 (а), что у forms; новых колонок свойств макета не добавляется, покрытие
+--    существующее полное (замер 5.5: 4 тега против 4 колонок).
 CREATE TABLE templates (
     id SERIAL PRIMARY KEY,
+    configuration_uuid UUID NOT NULL,
     uuid UUID NOT NULL,
     parent_uuid UUID NOT NULL,
     name TEXT NOT NULL,
@@ -361,7 +433,10 @@ CREATE TABLE templates (
     -- FALSE остаётся маркером «значение не заявлено точкой доступа». Это не признак
     -- «текущей строки» — их круг разрешает манифест родителя (решение A1).
     is_committed BOOLEAN NOT NULL DEFAULT FALSE,
-    CONSTRAINT templates_uuid_revision_no_key UNIQUE (uuid, revision_no),
+    -- узел V51 (M2 + уточнение (а)): ключ макета — (конфигурация, родитель, имя, ревизия),
+    -- прежний `UNIQUE (uuid, revision_no)` снимается по той же причине, что у forms
+    CONSTRAINT templates_configuration_parent_name_revision_key
+        UNIQUE (configuration_uuid, parent_uuid, name, revision_no),
     CONSTRAINT templates_revision_no_positive CHECK (revision_no >= 1),
     CONSTRAINT templates_changed_by_known
         CHECK (changed_by IS NULL OR changed_by IN ('load', 'edit', 'restore')),
@@ -373,6 +448,8 @@ CREATE INDEX idx_templates_name ON templates(name);
 CREATE INDEX idx_templates_uuid ON templates(uuid);
 CREATE INDEX idx_templates_parent_type ON templates(parent_type);
 CREATE INDEX idx_templates_uuid_revision ON templates(uuid, revision_no);
+-- узел V51: нога области видимости (см. attributes)
+CREATE INDEX idx_templates_configuration_uuid ON templates(configuration_uuid);
 
 -- 6. form_ext — содержимое формы (V13): одна строка на форму.
 --    ext - текст модуля формы (Forms/<Имя>/Ext/Form/Module.bsl),
@@ -384,6 +461,13 @@ CREATE INDEX idx_templates_uuid_revision ON templates(uuid, revision_no);
 --    uq_form_ext_form_id заменён на uq_form_ext_form_id_revision. Внешний ключ на forms(id)
 --    сохранён — он ссылается на строку конкретной ревизии той же пары состояний, и каскад
 --    работает (снять описание формы можно только вместе со строкой формы).
+--    Узел V51: нога области видимости в эту таблицу НЕ добавляется осознанно. Область
+--    видимости описания формы задаётся строкой самой формы, на которую ведёт FK
+--    (`form_id` + совпадение `revision_no`), и добавление своей колонки
+--    `configuration_uuid` дало бы одну и ту же величину в двух таблицах с независимым
+--    заполнением — расхождение в ней читалось бы как «описание чужой конфигурации». Поэтому
+--    ногу несёт витрина: `v_current_form_ext` разрешает описание через строку формы по
+--    ключу области видимости формы (configuration_uuid, parent_uuid, name).
 CREATE TABLE form_ext (
     id SERIAL PRIMARY KEY,
     form_id INTEGER NOT NULL REFERENCES forms(id) ON DELETE CASCADE,
@@ -465,49 +549,72 @@ WHERE NOT EXISTS (SELECT 1
                   WHERE h.uuid = er.uuid
                     AND h.revision_no > er.revision_no);
 
+-- узел V51 (M3): предикат текущести строится по ключу области видимости
+-- (configuration_uuid, parent_uuid, uuid), а не по одному uuid: 42 349 общих uuid детей
+-- между конфигурациями, выросшими из общей базы (замер 3.2), дали бы одну «текущую» строку
+-- сразу на несколько конфигураций. Витрина отдаёт и колонку ноги: запрос «строки этой
+-- конфигурации» обязан идти через разрешение ревизий, а не через базовую таблицу.
+-- Имя витрины прежнее — `current_view()` (src/current_revision.py) её не переименовывал.
 CREATE OR REPLACE VIEW v_current_attributes AS
 SELECT a.id,
-       a.uuid, a.parent_uuid, a.name, a.synonym,
+       a.configuration_uuid, a.uuid, a.parent_uuid, a.parent_type, a.name, a.synonym,
        a.comment, a.type, a.format, a.editformat,
        a.tooltip, a.password_mode, a.mark_negatives, a.mask,
        a.multiline, a.extended_edit, a.min_value, a.max_value,
        a.fill_checking, a.fill_from_filling_value, a.fill_value, a.choice_folders_and_items,
        a.choice_parameter_links, a.choice_parameters, a.quick_choice, a.create_on_input,
-       a.choice_form, a.link_by_type, a.choice_history_on_input, a.created_at,
+       a.choice_form, a.link_by_type, a.choice_history_on_input,
+       a.data_history, a.full_text_search, a.indexing, a.created_at,
        a.revision_no, a.changed_at, a.changed_by, a.is_committed
 FROM attributes a
 WHERE NOT EXISTS (SELECT 1
                   FROM attributes h
-                  WHERE h.uuid = a.uuid
+                  WHERE h.configuration_uuid = a.configuration_uuid
+                    AND h.parent_uuid = a.parent_uuid
+                    AND h.uuid = a.uuid
                     AND h.revision_no > a.revision_no);
 
+-- узел V51 (M3): та же нога области видимости, что у v_current_attributes (см. комментарий
+-- там же), плюс новые колонки ноги и вида родителя и измеренное свойство ТЧ
 CREATE OR REPLACE VIEW v_current_tabular_sections AS
 SELECT ts.id,
-       ts.uuid, ts.parent_uuid, ts.internalinfo_generatedtype, ts.name,
+       ts.configuration_uuid, ts.uuid, ts.parent_uuid, ts.parent_type,
+       ts.internalinfo_generatedtype, ts.name,
        ts.synonym, ts.comment, ts.tooltip, ts.fill_checking,
-       ts.standardattributes, ts.column_uuids, ts.created_at, ts.revision_no,
-       ts.changed_at, ts.changed_by, ts.is_committed
+       ts.standardattributes, ts.column_uuids, ts.line_number_length, ts.created_at,
+       ts.revision_no, ts.changed_at, ts.changed_by, ts.is_committed
 FROM tabular_sections ts
 WHERE NOT EXISTS (SELECT 1
                   FROM tabular_sections h
-                  WHERE h.uuid = ts.uuid
+                  WHERE h.configuration_uuid = ts.configuration_uuid
+                    AND h.parent_uuid = ts.parent_uuid
+                    AND h.uuid = ts.uuid
                     AND h.revision_no > ts.revision_no);
 
+-- узел V51 (M3 + уточнение (а)): нога области видимости и ключ по имени формы — витрина
+-- разрешает текущую ревизию формы в границах (configuration_uuid, parent_uuid, name)
 CREATE OR REPLACE VIEW v_current_forms AS
 SELECT f.id,
-       f.uuid, f.parent_uuid, f.name, f.synonym,
+       f.configuration_uuid, f.uuid, f.parent_uuid, f.name, f.synonym,
        f.comment, f.form_type, f.include_help_in_contents, f.use_purposes,
        f.created_at, f.parent_type, f.revision_no, f.changed_at,
        f.changed_by, f.is_committed
 FROM forms f
 WHERE NOT EXISTS (SELECT 1
                   FROM forms h
-                  WHERE h.uuid = f.uuid
+                  WHERE h.configuration_uuid = f.configuration_uuid
+                    AND h.parent_uuid = f.parent_uuid
+                    AND h.name = f.name
                     AND h.revision_no > f.revision_no);
 
+-- узел V51: ногу области видимости описание формы получает от строки формы, а не из своей
+-- колонки (см. комментарий к таблице form_ext): предикат сравнивает ключ формы
+-- (configuration_uuid, parent_uuid, name), а не один uuid. В выдачу добавляется
+-- `configuration_uuid` строки формы — иначе запрос «описания форм этой конфигурации» шёл бы
+-- в обход витрины, то есть мимо разрешения ревизий.
 CREATE OR REPLACE VIEW v_current_form_ext AS
 SELECT fe.id,
-       fe.form_id, fe.form_uuid, fe.parent_uuid, fe.parent_type,
+       fe.form_id, f.configuration_uuid, fe.form_uuid, fe.parent_uuid, fe.parent_type,
        fe.name, fe.command_bar_location, fe.report_result, fe.details_data,
        fe.report_form_type, fe.auto_show_state, fe.custom_settings_folder, fe.report_result_view_mode,
        fe.view_mode_application_on_set_report_result, fe.auto_command_bar, fe.events, fe.attributes,
@@ -519,12 +626,16 @@ JOIN forms f ON f.id = fe.form_id
             AND f.revision_no = fe.revision_no
 WHERE NOT EXISTS (SELECT 1
                   FROM forms h
-                  WHERE h.uuid = f.uuid
+                  WHERE h.configuration_uuid = f.configuration_uuid
+                    AND h.parent_uuid = f.parent_uuid
+                    AND h.name = f.name
                     AND h.revision_no > f.revision_no);
 
+-- узел V51 (M3 + уточнение (а)): макет версионируется в границах
+-- (configuration_uuid, parent_uuid, name) — той же формы ключа, что у формы
 CREATE OR REPLACE VIEW v_current_templates AS
 SELECT t.id,
-       t.uuid, t.parent_uuid, t.name, t.synonym,
+       t.configuration_uuid, t.uuid, t.parent_uuid, t.name, t.synonym,
        t.comment, t.template_type, t.created_at, t.parent_type,
        t.ext, t.ext_bin, t.ext_format, t.ext_size,
        t.ext_path, t.ext_root_tag, t.ext_truncated, t.revision_no,
@@ -532,7 +643,9 @@ SELECT t.id,
 FROM templates t
 WHERE NOT EXISTS (SELECT 1
                   FROM templates h
-                  WHERE h.uuid = t.uuid
+                  WHERE h.configuration_uuid = t.configuration_uuid
+                    AND h.parent_uuid = t.parent_uuid
+                    AND h.name = t.name
                     AND h.revision_no > t.revision_no);
 
 -- 7.1. Манифест состава детей текущего состояния (M3, M4). Единственный способ ответить,

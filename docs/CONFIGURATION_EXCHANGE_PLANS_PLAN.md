@@ -537,8 +537,8 @@ uuid конфигурации, для внешнего объекта — uuid �
 
 ## 7. План реализации (П1…П8)
 
-**П1. Схемная пара и версионность.** Шаг в `create_1c_configurations_db.sql` + миграция
-`migrate_v51_*.sql` + `src/ddl_configuration_tables.sql`:
+**П1. Схемная пара и версионность. — ВЫПОЛНЕН 31.10.2026, прогон и его числа — раздел 11.**
+Шаг в `create_1c_configurations_db.sql` + миграция `migrate_v51_*.sql` + `src/ddl_configuration_tables.sql`:
 
 - таблица `exchange_plans`: свойства вида, закрытые словари состояний,
   `revision_no`/`changed_at`/`changed_by`/`is_committed`,
@@ -776,6 +776,19 @@ Q5 оператора узла V48): `source_path`, `configuration_uuid` (све
 - `_v51_p0_content_probe.py` — цена вторичного содержимого (формы, бинарные формы, модули форм,
   макеты, слоты `Content`/`Help`/`AdditionalIndexes`) — эталоны для П6 и обоснование Q3/Q4;
   подсчёт целей `Content.xml` по файлам (максимум 2587 у `ОбновлениеИнформационнойБазы`, BGU2);
+- `_v51_p1_content_probe.py` — разбор `ExchangePlans/<Имя>/Ext/Content.xml`: корень
+  `ExchangePlanContent`, 46 файлов и 22 515 записей `Item` на три выгрузки, ровно два поля у
+  записи (`Metadata`, `AutoRecord`), закрытый домен `Allow`/`Deny` (22 174 / 341, пустых — 0);
+- `_v51_p1_migration_check.py` — сверка пары «миграция против чистой установки»: создаёт две
+  временные БД (шаги HEAD + миграция, текущие шаги) и сравнивает колонки, индексы, ограничения и
+  витрины через `information_schema`/`pg_indexes`; временные БД удаляет;
+- `_v51_paren_scan.py` — скан глубины скобок по SQL-файлу с пропусками комментариев, строковых
+  литералов и `$$…$$`; режимы `--boundaries` (оператор, начавшийся под открытой скобкой) и
+  `--range` (переходы глубины) — им найдена склейка операторов, которую psql показывает ошибкой
+  на строке СЛЕДУЮЩЕЙ таблицы;
+- `_v51_p1_dict_probe.sql` — офлайн-зонд состояния П1 по живой БД: витрины детей против прежних
+  чисел, витрины узла, нога области видимости, ключ детей с ногой и закрытость словарей; каждая
+  негативная проверка обособлена `SAVEPOINT`-ом, в конце `ROLLBACK` (живая база не меняется);
 - замеры живой схемы и индекса — SQL-запросы раздела 3.2 и раздела 4 (psql, база
   `ckb_1c_configurations`);
 - прецеденты модели: `docs/CONFIGURATION_COMMON_ATTRIBUTES_PLAN.md` (V50),
@@ -783,6 +796,83 @@ Q5 оператора узла V48): `source_path`, `configuration_uuid` (све
   (V48), `docs/CONFIGURATION_OBJECT_MODULES_PLAN.md` (V47),
   `docs/CONFIGURATION_OBJECT_PROPERTIES_PLAN.md` (V46), `docs/config-scenarios/01_configuration.md`
   (раскладка объекта конфигурации, 48 колонок-перечней V43).
+
+
+## 11. Прогон П1 (31.10.2026): схемная пара, миграция по живой БД и регресс контуров
+
+**Что записано.** Шаг узла в `create_1c_configurations_db.sql` (три таблицы вида, его перечня
+`<Content>` и команд, витрины текущего состояния, индексы), миграция
+`migrate_v51_exchange_plans.sql` (тот же текст + нога области видимости детей, предзаполнение
+`configuration_uuid = parent_uuid`, смена ключей детей, `DROP VIEW … CASCADE` с восстановлением
+`v_form_elements`/`v_form_events`), правка генератора `src/generate_ddl.py` и его вывода
+`src/ddl_external_report.sql` (колонки детей по замеру 5.5: `attributes` +3, `tabular_sections` +1),
+регистрация трёх групп в `src/current_revision.py` (`CONFIGURATION_VERSIONED_TABLES`) и круга
+`EXCHANGE_PLAN_TABLES` в `src/configuration_load_contract.py`; в `src/external_table_writer.py`
+добавлен вид значения-копии `"copy:<колонка>"` (`COLUMN_COPY_PREFIX`) — нога области видимости
+строк внешнего объекта выводится писателем по правилу (б), а не из разбора файла.
+
+**Отличие от текста плана названо прямо.** Третьего файла `src/ddl_configuration_tables.sql`,
+названного в П1, в репозитории нет: таблицы конфигурации существуют только шагом 2
+(`create_1c_configurations_db.sql`), поэтому схемная пара — это шаг 2 и миграция, а не три файла.
+Генератор `src/generate_ddl.py` порождает шаг 1 (`src/ddl_external_report.sql`) и шаг 1b
+(`src/ddl_enrichment.sql`) — в них и правились общие таблицы детей.
+
+**Применение к живой БД.** Перед миграцией снят резерв `pg_dump -Fc`
+(`_scratch/_backup_ckb_1c_configurations_2026-10-31.dump`, база 1193 МБ → 510.4 МБ). Миграция
+выполнена одной транзакцией (`psql -v ON_ERROR_STOP=1 -1 -f`), rc=0; единственный NOTICE —
+`drop cascades to 2 other objects` на строке снятия витрин детей: зависят и сразу восстанавливаются
+тем же файлом `v_form_elements` и `v_form_events` (случай назван заголовком миграции).
+
+**Сверка пары — в обе стороны.** `_v51_p1_migration_check.py`: база «шаги HEAD + миграция» против
+базы «текущие шаги» — колонки 1334/1334, индексы 141/141, ограничения 210/210, витрины 26/26,
+расхождений нет. `_cmp_ddl.py`: живая `ckb_1c_configurations` против схемы, собранной из скриптов,
+— те же четыре числа, rc=0. Тем же прогоном подтверждено, что повторный запуск
+`python src/generate_ddl.py` не меняет ни `src/ddl_external_report.sql`, ни
+`src/ddl_enrichment.sql` — вывод генератора синхронен с файлами.
+
+**Дефекты, которые нашёл прогон (четыре, все названы).** (1) Вставки нового блока перед
+разделителем секций «съели» хвост таблицы `exchange_plans` — ключ
+`UNIQUE (configuration_uuid, object_name, revision_no)` и закрывающую `);`; psql при этом показывал
+`syntax error at or near "CREATE"` на строке СЛЕДУЮЩЕЙ таблицы, то есть виновник был в предыдущем
+операторе. Для поиска границы оператора написан `_v51_paren_scan.py`. (2) Перезапись витрин через
+`CREATE OR REPLACE VIEW` невозможна: «cannot change name of view column "uuid" to
+"configuration_uuid"» — витрины снимаются `DROP … CASCADE` и создаются заново, порядок колонок
+меняется намеренно (нога области видимости стоит первой). (3) `information_schema.columns` без
+фильтра `table_schema = 'public'` подмешивает колонки системного view
+`information_schema.attributes` (`udt_catalog`, `udt_schema`, …) — дефект самого зонда, а не схемы.
+(4) Пара `changed_at`/`changed_by` не имеет DEFAULT: первая версия зонда назвала `changed_by` без
+`changed_at` и упала на `exchange_plans_changed_pair_check` — это подтверждение контракта
+«писатель обязан называть пару целиком», а не дефект схемы.
+
+**Зонд `_v51_p1_dict_probe.sql` (живая БД, одна транзакция, `ROLLBACK` в конце).** Витрины детей
+отдают прежние числа: `v_current_attributes` 36, `v_current_tabular_sections` 3,
+`v_current_forms` 2, `v_current_form_ext` 2, `v_current_templates` 2; `v_form_elements` 16 и
+`v_form_events` 2 совпадают с прямым jsonb-подсчётом по тем же строкам `form_ext` (16 и 2) —
+перестройка витрин faithful. Витрины узла читаются и пусты (круг не писался: это П4). Расхождений
+ноги с родителем в четырёх таблицах детей — ноль, `v_current_attributes` отдаёт колонку ноги.
+Копия строки `attributes` с ДРУГОЙ ногой вставлена, повтор той же ноги отклонён
+`attributes_configuration_parent_uuid_revision_key` — ключ держит область видимости, то есть защита
+от слияния 42 349 общих uuid (замер 3.2) работает на живой схеме. Словари замкнуты: отклонены
+`exchange_plans_properties_state_known`, `exchange_plans_content_count_matches_state`
+(пара «состояние перечня ↔ число строк»), `exchange_plan_content_auto_record_state_known`
+(значение вне `Allow`/`Deny`), `exchange_plan_content_resolve_matches_reference` (`exact` без
+`target_object_id`/`target_object_uuid`), `commands_properties_state_known`; строка команды с
+неназванным видом родителя отклонена отсутствием `parent_type` (DEFAULT нет намеренно). После
+`ROLLBACK` живая база не изменилась: новые таблицы 0/0/0, `attributes` 36.
+
+**Регресс контуров прежних узлов.** `check_v19_revisions.py` — 95 проверок / 0 провалов (реестр
+читает 19 версионных таблиц, новые названы: `exchange_plans 0/0`, `exchange_plan_content 0/0`,
+`commands 0/0`; витрины проверены — 22), `check_v20_config_link.py` — 34/0,
+`check_v31_provenance`, `check_v32_zero_configuration`, `check_v42_configuration_header` — rc=0,
+`check_v47_configuration_object_modules.py` — 119/0, `check_v48_session_parameters.py` — 152/0,
+`check_v49_roles.py` — 373/0, `check_v50_common_attributes.py` — 212/0 (2 пропуска — прежние
+состояния «нет выгрузки»). `python validate_project.py` → rc=0.
+
+**Чем П1 НЕ проверялся.** Круг вида (18 / 26 / 2 / 0 с `directory_missing` у KomMag) и эталонные
+числа детей — это П4 и П6; `tools/check_v51_exchange_plans.py` — П6; точка входа
+`load_exchange_plans_tool` и включение стадии `s4f_exchange_plans` в последовательность вызовов —
+П5 (круг группы в контракте уже объявлен, но стадия в конвейер не включена намеренно: версионная
+таблица без круга загрузки означала бы, что будущая стадия её снимает).
 
 
 

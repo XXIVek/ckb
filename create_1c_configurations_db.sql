@@ -1370,6 +1370,282 @@ CREATE TABLE IF NOT EXISTS common_attribute_targets (
 );
 
 
+-- Узел V51 (31.10.2026, позиция 2.6 нормативного списка «Структура конфигурации.txt»):
+-- план обмена и полный цикл его детей (реквизиты, табличные части, формы с содержимым,
+-- макеты с содержимым, команды, перечень реплицируемых объектов, слоты Help/AdditionalIndexes).
+-- Норматив — docs/CONFIGURATION_EXCHANGE_PLANS_PLAN.md (раздел 2 и 5.5 — замеры П0/П2,
+-- раздел 5 — решения Q1…Q8, раздел 7 — план П1…П8). Для живой БД, где таблицы уже созданы,
+-- — migrate_v51_exchange_plans.sql (тот же текст).
+--
+-- Граница «таблица ≠ колонка заголовка»: таблица `exchange_plans` — СОДЕРЖИМОЕ вида, а
+-- колонка configurations.exchange_plans (TEXT[], узел V43) — ПЕРЕЧЕНЬ ИМЁН вида; внешнего
+-- ключа нет осознанно (прецедент V20.1), равенство множеств сторожит
+-- tools/check_v51_exchange_plans.py (П6), а не схема.
+--
+-- `object_uuid` NOT NULL: uuid плана обмена держит атрибут `<ExchangePlan uuid>` файла вида
+-- (замер 5.5: uuid есть в файле вида у Attribute/TabularSection/Command, у Form/Template —
+-- в файле описания), строка индекса состава `ExchangePlan.<Имя>` его подтверждает.
+-- Расхождения круга (index_only / file_only / uuid_mismatch) называются ответом стадии, а не
+-- разрешаются молча (приём V12/V48/V49/V50).
+--
+-- Свойств — ровно 40 тегов, порядок — порядок тегов файла. Словарь держит
+-- `EXCHANGE_PLAN_PROPERTIES` (src/configuration_exchange_plans.py), порядок тегов и числа
+-- словарей проверяет _v51_p2_dict_check.py. CHECK по ЗНАЧЕНИЯМ свойств не кладётся по
+-- прецеденту V50 (Q7, вариант A): закрытость держит измеренный `PROPERTY_VALUE_DICTIONARY`,
+-- значение вне него остаётся значением с состоянием `unknown_value` и названным виновником, а
+-- не отказом записи. Состояния РАЗБОРА (properties_state, children_state, ...) замкнуты
+-- CHECK'ом: это вывод слоя, а не значение выгрузки (тот же порядок, что V48/V49/V50).
+--
+-- Ссылки на формы (`DefaultObjectForm` и четыре `Auxiliary…`) хранятся текстом: цель такой
+-- ссылки — собственный ребёнок вида, он же лежит в `form_names` этой же строки, поэтому
+-- разрешение выводится связкой, а не дублируется колонками разрешения (в отличие от V50, где
+-- ссылка вела на произвольный объект конфигурации и могла не разрешаться).
+CREATE TABLE IF NOT EXISTS exchange_plans (
+    id BIGSERIAL PRIMARY KEY,
+    configuration_uuid UUID NOT NULL,
+    object_uuid UUID NOT NULL,
+    object_name TEXT NOT NULL,
+    full_name TEXT NOT NULL,
+    -- 40 свойств вида в порядке тегов файла (словарь — EXCHANGE_PLAN_PROPERTIES).
+    -- Два тега принадлежат только плану обмена (`DistributedInfoBase`,
+    -- `IncludeConfigurationExtensions`), 16 тегов иерархии/папок/кодовых серий справочника
+    -- у вида нет (замер сравнения раздела 2: совпадают 38 тегов из 40/54)
+    synonym JSONB,
+    comment TEXT,
+    use_standard_commands BOOLEAN,
+    code_length INTEGER,
+    code_allowed_length TEXT,
+    description_length INTEGER,
+    default_presentation TEXT,
+    edit_type TEXT,
+    quick_choice BOOLEAN,
+    choice_mode TEXT,
+    input_by_string JSONB,
+    search_string_mode_on_input_by_string TEXT,
+    full_text_search_on_input_by_string TEXT,
+    choice_data_get_mode_on_input_by_string TEXT,
+    default_object_form TEXT,
+    default_list_form TEXT,
+    default_choice_form TEXT,
+    auxiliary_object_form TEXT,
+    auxiliary_list_form TEXT,
+    auxiliary_choice_form TEXT,
+    standard_attributes JSONB,
+    characteristics JSONB,
+    based_on JSONB,
+    distributed_info_base BOOLEAN,
+    include_configuration_extensions BOOLEAN,
+    create_on_input TEXT,
+    choice_history_on_input TEXT,
+    include_help_in_contents BOOLEAN,
+    data_lock_fields JSONB,
+    data_lock_control_mode TEXT,
+    full_text_search TEXT,
+    object_presentation JSONB,
+    extended_object_presentation JSONB,
+    list_presentation JSONB,
+    extended_list_presentation JSONB,
+    explanation JSONB,
+    data_history TEXT,
+    update_data_history_immediately_after_write BOOLEAN,
+    execute_after_write_data_history_version_processing BOOLEAN,
+    -- перечни детей строки вида (Q2 закрыт постановкой оператора от 31.10.2026):
+    -- реквизиты, табличные части и команды адресуются uuid (их даёт файл вида, индекс
+    -- состава подтверждает), формы и макеты — ИМЕНЕМ: uuid формы повторяется между
+    -- конфигурациями (замер 3.2: 42 349 общих uuid, из них 14 у детей планов обмена), а имя
+    -- уникально в пределах вида (`Forms/<Имя>.xml`). Пустой перечень — NULL, а не '{}'
+    -- (границы K1–K6 узла V43 и контракт ===EMPTY); порядок элементов побайтовый (COLLATE "C")
+    attribute_uuids UUID[],
+    tabular_section_uuids UUID[],
+    command_uuids UUID[],
+    form_names TEXT[],
+    template_names TEXT[],
+    -- слоты `Ext/Help.xml` и `Ext/AdditionalIndexes.xml` (Q4): исходный XML в jsonb по
+    -- прецеденту `subsystems.Content` (V46). Замер П0: Help.xml — в 2/8/2 файлов выгрузок,
+    -- AdditionalIndexes.xml — в 1/0/0; отсутствие файла — состояние выгрузки, а не ошибка
+    help_state TEXT NOT NULL,
+    help_content JSONB,
+    additional_indexes_state TEXT NOT NULL,
+    additional_indexes_content JSONB,
+    -- состояния разбора строки (словари — константы src/configuration_exchange_plans.py:
+    -- PROPERTIES_STATES, CHILD_STATES, STANDARD_ATTRIBUTE_STATES, SLOT_STATES). Разные
+    -- виновники дают разные состояния, потому что устраняются разными правками: дополнить
+    -- словарь замером, пересмотреть круг вида или признать состояние выгрузки
+    properties_state TEXT NOT NULL,
+    unknown_property_names TEXT[],
+    children_state TEXT NOT NULL,
+    -- стандартные реквизиты (Q7): 371 вхождение на три выгрузки при 8 уникальных именах, в
+    -- индекс состава они не входят — строк по ним не пишется, но наличие называется
+    -- состоянием `present_not_indexed`, иначе их читали бы потерянными
+    standard_attributes_state TEXT NOT NULL,
+    -- `<Content>` разбирается таблицей exchange_plan_content; счётчик — вывод разбора круга
+    content_state TEXT NOT NULL,
+    content_count INTEGER NOT NULL,
+    source_path TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW(),
+    revision_no INTEGER NOT NULL DEFAULT 1,
+    changed_at TIMESTAMP,
+    changed_by TEXT,
+    is_committed BOOLEAN NOT NULL DEFAULT FALSE,
+    CONSTRAINT exchange_plans_names_not_blank
+        CHECK (object_name <> '' AND full_name <> '' AND source_path <> ''),
+    CONSTRAINT exchange_plans_properties_state_known
+        CHECK (properties_state IN ('all_known', 'unknown_value', 'unknown_tag', 'absent')),
+    CONSTRAINT exchange_plans_children_state_known
+        CHECK (children_state IN ('with_children', 'empty_content',
+                                  'indexed_no_file', 'file_not_in_index')),
+    CONSTRAINT exchange_plans_standard_attributes_state_known
+        CHECK (standard_attributes_state IN ('present_not_indexed', 'absent')),
+    CONSTRAINT exchange_plans_content_state_known
+        CHECK (content_state IN ('with_content', 'empty_content')),
+    CONSTRAINT exchange_plans_slot_states_known
+        CHECK (help_state IN ('with_content', 'absent', 'unknown_form')
+               AND additional_indexes_state IN ('with_content', 'absent', 'unknown_form')),
+    -- слот с содержимым держит тело, отсутствующий не держит; `unknown_form` — граница
+    -- формы, которой корпус не давал (Help и AdditionalIndexes проверяются одинаково)
+    CONSTRAINT exchange_plans_slot_content_matches_state
+        CHECK ((help_state = 'with_content') = (help_content IS NOT NULL)
+               AND (additional_indexes_state = 'with_content')
+                   = (additional_indexes_content IS NOT NULL)),
+    -- пустый перечень не даёт строк, непустой даёт (число строк сверяет проверка узла П6,
+    -- здесь замкнута согласованность состояния и счётчика)
+    CONSTRAINT exchange_plans_content_count_matches_state
+        CHECK ((content_state = 'empty_content' AND content_count = 0)
+               OR (content_state = 'with_content' AND content_count > 0)),
+    -- «детей нет» и «круг снят» различаются состоянием children_state, а не нулями перечней:
+    -- перечни при `indexed_no_file`/`file_not_in_index` обязаны быть названы стадией
+    CONSTRAINT exchange_plans_revision_no_positive CHECK (revision_no >= 1),
+    CONSTRAINT exchange_plans_changed_by_known
+        CHECK (changed_by IS NULL OR changed_by IN ('load', 'edit', 'restore')),
+    CONSTRAINT exchange_plans_changed_pair_check
+        CHECK ((changed_at IS NULL) = (changed_by IS NULL)),
+    -- ключ по образцу session_parameters (V48): имя вида уникально в конфигурации, а uuid
+    -- вида повторяется между конфигурациями, выросшими из общей базы (замер 3.2)
+    CONSTRAINT exchange_plans_configuration_object_revision_key
+        UNIQUE (configuration_uuid, object_name, revision_no)
+);
+
+-- Строки перечня `<Content>` плана обмена (Q4) — вторая нога вопроса «что делает план
+-- обмена»: без неё ответ «что реплицирует план» читался бы разбором xml каждый раз.
+-- Замер _v51_p1_content_probe.py (31.10.2026): 46 файлов `Ext/Content.xml`, корень
+-- `ExchangePlanContent`, 22 515 записей `Item`; каждая запись держит РОВНО два поля —
+-- `Metadata` (точечное имя цели) и `AutoRecord` (`Deny` 22 174 / `Allow` 341, пустых и
+-- отсутствующих полей — 0). В файле вида перечня нет (0 вхождений) — перечень живёт только
+-- слотом, и это названо, потому что модель V50 (`common_attributes`) перечень держала в
+-- файле регистрации.
+-- Модель таблицы — `subsystem_content` (V46): цепь ревизий строки общая с родителем (строка
+-- относится к `revision_no` строки вида), отдельной таблицы условий разрешения не заводим.
+-- `auto_record_state` хранит значение выгрузки как есть (замером замкнут домен Allow/Deny)
+-- плюс границу `unknown_form`: словарь замкнут четырьмя выгрузками, а не платформой.
+CREATE TABLE IF NOT EXISTS exchange_plan_content (
+    id BIGSERIAL PRIMARY KEY,
+    configuration_uuid UUID NOT NULL,
+    exchange_plan_object_uuid UUID NOT NULL,
+    exchange_plan_full_name TEXT NOT NULL,
+    -- позиция записи в файле; порядок писатель не меняет (прецедент target_ordinal V49)
+    ordinal INTEGER NOT NULL,
+    -- тег цели внутри записи (замер: во всех 22 515 записях — `Metadata`); колонка есть,
+    -- потому что форма перечня — свойство выгрузки, а не обещание разбора
+    target_tag TEXT NOT NULL,
+    target_full_name TEXT NOT NULL,
+    -- тип цели — часть точечного имени до первой точки (замер даёт InformationRegister,
+    -- Document, Constant, Catalog, Sequence, ChartOfCalculationTypes и другие)
+    target_object_type TEXT NOT NULL,
+    target_object_id TEXT,
+    target_object_uuid UUID,
+    target_resolve_state TEXT NOT NULL,
+    target_unresolved_path TEXT,
+    auto_record_state TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW(),
+    revision_no INTEGER NOT NULL DEFAULT 1,
+    changed_at TIMESTAMP,
+    changed_by TEXT,
+    is_committed BOOLEAN NOT NULL DEFAULT FALSE,
+    CONSTRAINT exchange_plan_content_names_not_blank
+        CHECK (exchange_plan_full_name <> '' AND target_full_name <> ''
+               AND target_tag <> '' AND target_object_type <> ''),
+    CONSTRAINT exchange_plan_content_resolve_state_known
+        CHECK (target_resolve_state IN ('exact', 'prefix_only', 'unresolved')),
+    -- состояние разрешения согласовано со ссылкой и остатком пути (тот же контракт, что
+    -- role_rights V49 и common_attribute_targets V50): «цель найдена» и «цель не найдена»
+    -- различимы структурой строки, а не молчанием колонок
+    CONSTRAINT exchange_plan_content_resolve_matches_reference
+        CHECK ((target_resolve_state = 'exact' AND target_object_id IS NOT NULL
+                AND target_object_uuid IS NOT NULL AND target_unresolved_path IS NULL)
+               OR (target_resolve_state = 'prefix_only' AND target_object_id IS NOT NULL
+                AND target_unresolved_path IS NOT NULL)
+               OR (target_resolve_state = 'unresolved' AND target_object_id IS NULL
+                AND target_object_uuid IS NULL AND target_unresolved_path IS NOT NULL)),
+    CONSTRAINT exchange_plan_content_auto_record_state_known
+        CHECK (auto_record_state IN ('Allow', 'Deny', 'unknown_form')),
+    CONSTRAINT exchange_plan_content_ordinal_non_negative CHECK (ordinal >= 0),
+    CONSTRAINT exchange_plan_content_revision_no_positive CHECK (revision_no >= 1),
+    CONSTRAINT exchange_plan_content_changed_by_known
+        CHECK (changed_by IS NULL OR changed_by IN ('load', 'edit', 'restore')),
+    CONSTRAINT exchange_plan_content_changed_pair_check
+        CHECK ((changed_at IS NULL) = (changed_by IS NULL)),
+    -- размерность родителя в ключе держится по той же причине, что у subsystem_content
+    -- (узел V47): uuid плана обмена общий для конфигураций, выросших из общей базы, поэтому
+    -- без configuration_uuid строка второй конфигурации падала бы на ключ первой
+    CONSTRAINT exchange_plan_content_plan_revision_ordinal_key
+        UNIQUE (configuration_uuid, exchange_plan_object_uuid, revision_no, ordinal)
+);
+
+-- Строки команд вида (замер 5.5: `ChildObjects/Command`, 12 тегов, атрибут `uuid` есть у
+-- 1 из 1 записей корпуса). Таблица строится по образцу `attributes` — та же форма ключа
+-- детей и та же цепь ревизий (Q6, вариант A: `revision_no` обязан значить одно и то же для
+-- строк внешнего объекта и объекта конфигурации), но относится она к выгрузке конфигурации,
+-- поэтому лежит здесь, а не в шаге 1 (src/generate_ddl.py): у внешнего объекта команд
+-- метаданных нет, его команды интерфейса живут jsonb-колонкой `form_ext.commands`.
+-- Колонка тега `Group` названа `command_group`: `group` — ключевое слово SQL, и колонка с
+-- таким именем требовала бы кавычек в каждом запросе писателя и проверки. Несовпадение имени
+-- XML и колонки хранится одним местом — словарём `COMMAND_PROPERTIES`.
+-- `parent_type` NOT NULL БЕЗ значения по умолчанию осознанно: вид родителя обязана назвать
+-- точка записи, а DEFAULT `'external_report'` означал бы здесь «дети внешнего объекта»,
+-- которых у этой таблицы нет (в attributes DEFAULT унаследован от узла V13 намеренно).
+CREATE TABLE IF NOT EXISTS commands (
+    id BIGSERIAL PRIMARY KEY,
+    configuration_uuid UUID NOT NULL,
+    parent_uuid UUID NOT NULL,
+    parent_type TEXT NOT NULL,
+    uuid UUID NOT NULL,
+    name TEXT NOT NULL,
+    synonym JSONB,
+    comment TEXT,
+    command_group TEXT,
+    command_parameter_type TEXT,
+    parameter_use_mode TEXT,
+    modifies_data BOOLEAN,
+    representation TEXT,
+    tooltip JSONB,
+    picture TEXT,
+    shortcut TEXT,
+    on_main_server_unavalable_behavior TEXT,
+    properties_state TEXT NOT NULL,
+    unknown_property_names TEXT[],
+    created_at TIMESTAMP DEFAULT NOW(),
+    revision_no INTEGER NOT NULL DEFAULT 1,
+    changed_at TIMESTAMP,
+    changed_by TEXT,
+    is_committed BOOLEAN NOT NULL DEFAULT FALSE,
+    CONSTRAINT commands_name_not_blank CHECK (name <> ''),
+    CONSTRAINT commands_properties_state_known
+        CHECK (properties_state IN ('all_known', 'unknown_value', 'unknown_tag', 'absent')),
+    -- значения свойств (замер: `Group` = NavigationPanelImportant, `Representation` = Auto,
+    -- `ParameterUseMode` = Single, `OnMainServerUnavalableBehavior` = Auto) CHECK'ом не
+    -- замыкаются по той же причине, что свойства вида и общие реквизиты V50: закрытость
+    -- держит словарь `COMMAND_VALUE_DICTIONARY`, значение вне него остаётся значением с
+    -- состоянием `unknown_value` и названным виновником
+    CONSTRAINT commands_revision_no_positive CHECK (revision_no >= 1),
+    CONSTRAINT commands_changed_by_known
+        CHECK (changed_by IS NULL OR changed_by IN ('load', 'edit', 'restore')),
+    CONSTRAINT commands_changed_pair_check
+        CHECK ((changed_at IS NULL) = (changed_by IS NULL)),
+    -- форма ключа та же, что у attributes/tabular_sections: uuid ребёнка даёт индекс состава
+    CONSTRAINT commands_configuration_parent_uuid_revision_key
+        UNIQUE (configuration_uuid, parent_uuid, uuid, revision_no)
+);
+
 -- ИНДЕКСЫ (только для таблиц этого файла; индексы внешнего отчёта — в src/ddl_external_report.sql)
 -- --------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_configurations_name ON configurations(name);
@@ -1630,6 +1906,77 @@ SELECT t.id,
 FROM common_attribute_targets t
 JOIN v_current_common_attributes cc ON cc.id = t.common_attribute_id;
 
+-- Витрины текущего состояния узла V51. Предикат — тот же, что у витрин V46/V48/V50: строка
+-- относится к максимальной ревизии в пределах ключа своей цепочки; признак коммита на круг
+-- не влияет (решение A1). Имена витрин задаёт не этот файл: их отдаёт current_view() по
+-- реестру CONFIGURATION_VERSIONED_TABLES (src/current_revision.py), а расхождение имени ловит
+-- tools/check_v19_revisions.py — по той же причине таблицы узла внесены и в этот реестр.
+CREATE OR REPLACE VIEW v_current_exchange_plans AS
+SELECT ep.id,
+       ep.configuration_uuid, ep.object_uuid, ep.object_name, ep.full_name,
+       ep.synonym, ep.comment, ep.use_standard_commands, ep.code_length,
+       ep.code_allowed_length, ep.description_length, ep.default_presentation,
+       ep.edit_type, ep.quick_choice, ep.choice_mode, ep.input_by_string,
+       ep.search_string_mode_on_input_by_string, ep.full_text_search_on_input_by_string,
+       ep.choice_data_get_mode_on_input_by_string, ep.default_object_form,
+       ep.default_list_form, ep.default_choice_form, ep.auxiliary_object_form,
+       ep.auxiliary_list_form, ep.auxiliary_choice_form, ep.standard_attributes,
+       ep.characteristics, ep.based_on, ep.distributed_info_base,
+       ep.include_configuration_extensions, ep.create_on_input, ep.choice_history_on_input,
+       ep.include_help_in_contents, ep.data_lock_fields, ep.data_lock_control_mode,
+       ep.full_text_search, ep.object_presentation, ep.extended_object_presentation,
+       ep.list_presentation, ep.extended_list_presentation, ep.explanation,
+       ep.data_history, ep.update_data_history_immediately_after_write,
+       ep.execute_after_write_data_history_version_processing,
+       ep.attribute_uuids, ep.tabular_section_uuids, ep.command_uuids,
+       ep.form_names, ep.template_names,
+       ep.help_state, ep.help_content, ep.additional_indexes_state,
+       ep.additional_indexes_content,
+       ep.properties_state, ep.unknown_property_names, ep.children_state,
+       ep.standard_attributes_state, ep.content_state, ep.content_count, ep.source_path,
+       ep.created_at, ep.revision_no, ep.changed_at, ep.changed_by, ep.is_committed
+FROM exchange_plans ep
+WHERE NOT EXISTS (SELECT 1 FROM exchange_plans h
+                  WHERE h.configuration_uuid = ep.configuration_uuid
+                    AND h.object_name = ep.object_name
+                    AND h.revision_no > ep.revision_no);
+
+-- Витрина перечня реплицируемых объектов — по образцу v_current_subsystem_content (V46):
+-- строка относится к той ревизии родителя, которая признана текущей. Отдельного предиката
+-- по «своей» максимальной ревизии не заводим: своей цепи у перечня нет, она общая с
+-- родителем (Q6 узла V51), и два независимых максимума разошлись бы между строкой вида и
+-- её перечнем.
+CREATE OR REPLACE VIEW v_current_exchange_plan_content AS
+SELECT ec.id,
+       ec.configuration_uuid, ec.exchange_plan_object_uuid, ec.exchange_plan_full_name,
+       ec.ordinal, ec.target_tag, ec.target_full_name, ec.target_object_type,
+       ec.target_object_id, ec.target_object_uuid, ec.target_resolve_state,
+       ec.target_unresolved_path, ec.auto_record_state, ec.created_at,
+       ec.revision_no, ec.changed_at, ec.changed_by, ec.is_committed
+FROM exchange_plan_content ec
+WHERE EXISTS (SELECT 1 FROM v_current_exchange_plans ce
+              WHERE ce.configuration_uuid = ec.configuration_uuid
+                AND ce.object_uuid = ec.exchange_plan_object_uuid
+                AND ce.revision_no = ec.revision_no);
+
+-- Витрина команд текущего состояния. Предикат повторяет форму ключа детей —
+-- (configuration_uuid, parent_uuid, uuid), как v_current_attributes узла V51: uuid ребёнка
+-- повторяется между конфигурациями, поэтому нога области видимости обязательна и здесь.
+CREATE OR REPLACE VIEW v_current_commands AS
+SELECT c.id,
+       c.configuration_uuid, c.parent_uuid, c.parent_type, c.uuid, c.name,
+       c.synonym, c.comment, c.command_group, c.command_parameter_type,
+       c.parameter_use_mode, c.modifies_data, c.representation, c.tooltip,
+       c.picture, c.shortcut, c.on_main_server_unavalable_behavior,
+       c.properties_state, c.unknown_property_names, c.created_at,
+       c.revision_no, c.changed_at, c.changed_by, c.is_committed
+FROM commands c
+WHERE NOT EXISTS (SELECT 1 FROM commands h
+                  WHERE h.configuration_uuid = c.configuration_uuid
+                    AND h.parent_uuid = c.parent_uuid
+                    AND h.uuid = c.uuid
+                    AND h.revision_no > c.revision_no);
+
 
 -- Индексы configuration_objects (узел V33). Перечень объекта читают по конфигурации и по
 -- виду, дочерние элементы — по parent_name, поиск по идентификатору — по object_id/uuid.
@@ -1767,6 +2114,29 @@ CREATE INDEX IF NOT EXISTS idx_common_attribute_targets_target_full_name
     ON common_attribute_targets(target_full_name);
 CREATE INDEX IF NOT EXISTS idx_common_attribute_targets_target_object_uuid
     ON common_attribute_targets(target_object_uuid) WHERE target_object_uuid IS NOT NULL;
+
+-- Индексы узла V51. Отдельного индекса по configuration_uuid у exchange_plans,
+-- exchange_plan_content и commands не заводим: его обслуживает уникальный индекс цепочки той
+-- же таблицы с ведущей колонкой configuration_uuid — им же пользуются предикат витрины и
+-- чистка стадии по конфигурации (тот же порядок, что V44/V46/V48/V49/V50). Индекс по
+-- object_uuid заводится, потому что им связан перечень реплицируемых объектов со строкой
+-- вида: предикат v_current_exchange_plan_content идёт по (object_uuid, revision_no), а в
+-- уникальном индексе цепочки строки вида этой пары нет.
+CREATE INDEX IF NOT EXISTS idx_exchange_plans_object_uuid_revision
+    ON exchange_plans(object_uuid, revision_no);
+-- Индексы перечня отвечают на карточку запроса «в каких планах обмена реплицируется этот
+-- объект» (target_full_name — точечное имя из <Metadata>) и, для разрешённых ссылок, по
+-- uuid цели. Отдельного индекса по ordinal нет: он ведомая колонка уникального индекса.
+CREATE INDEX IF NOT EXISTS idx_exchange_plan_content_target_full_name
+    ON exchange_plan_content(target_full_name);
+CREATE INDEX IF NOT EXISTS idx_exchange_plan_content_target_object_uuid
+    ON exchange_plan_content(target_object_uuid) WHERE target_object_uuid IS NOT NULL;
+-- Команды: индекс по родителю заводится отдельно, потому что ведущая колонка уникального
+-- индекса — configuration_uuid, а снятие круга стадии и карточка объекта идут по
+-- (parent_uuid, revision_no); тот же порядок, что idx_attributes_parent_uuid узла V19.
+CREATE INDEX IF NOT EXISTS idx_commands_parent_uuid ON commands(parent_uuid);
+CREATE INDEX IF NOT EXISTS idx_commands_name ON commands(name);
+CREATE INDEX IF NOT EXISTS idx_commands_uuid_revision ON commands(uuid, revision_no);
 
 -- УЗЕЛ V20 (14.10.2026): привязка внешнего объекта к конфигурации, заявленная оператором.
 -- external_report.configuration_id — id строки заголовка конфигурации (configurations.id).
