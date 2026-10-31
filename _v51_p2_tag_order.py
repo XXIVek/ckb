@@ -107,7 +107,7 @@ def main():
     dump_child("BGU2", "АвтономнаяРабота", "Attribute")
     dump_child("BGU2", "АвтономнаяРабота", "TabularSection")
     dump_child("BGU2", "АвтономнаяРабота", "Attribute", inside_ts=True)
-    dump_child("MinCfg", "ПланОбмена1", "Command")
+    dump_child("MinCfg", "АвтономнаяРабота", "Command")
     dump_form_tpl("BGU2", "Forms", "Form")
     dump_form_tpl("BGU2", "Templates", "Template")
 
