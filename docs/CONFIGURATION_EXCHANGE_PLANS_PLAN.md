@@ -55,47 +55,112 @@ ExchangePlans/<Имя>/Templates/<Макет>/Ext/Template.xml|.txt|.bin       �
 спускаться на два уровня, а не читать детей корневого узла (первая версия зонда спускалась на
 один и давала пустые перечни — наблюдение П0, а не опечатка выгрузки).
 
-## 2. Словарь свойств узла вида (замер по BGU2 и MinCfg)
+## 2. Словарь свойств узла вида (замер `_v51_p2_property_probe.py`, 31.10.2026)
 
-45–46 имён тегов в `Properties`. План обмена наследует набор свойств справочника:
-`Name`, `Synonym`, `Comment`, `CodeLength`, `CodeAllowedLength`, `DescriptionLength`,
-`DefaultPresentation`, `EditType`, `QuickChoice`, `ChoiceMode`, `InputByString`,
-`DefaultObjectForm` / `DefaultListForm` / `DefaultChoiceForm`, `Auxiliary*Form`,
-`StandardAttributes`, `Characteristics`, `BasedOn`, `DistributedInfoBase`,
-`IncludeConfigurationExtensions`, `DataLockFields`, `DataLockControlMode`, `FullTextSearch`,
-`ObjectPresentation`, `ExtendedObjectPresentation`, `ListPresentation`,
-`ExtendedListPresentation`, `Explanation`, `DataHistory`, `UseStandardCommands` и другие.
+**Словарь замкнут: ровно 40 тегов `Properties`.** Прежняя оценка «45–46 имени» была ошибкой
+первой пробы П0 (она считала и вложенные теги); исправление названо здесь прямо, потому что
+число тегов — это число колонок таблицы вида, и ошибка в нём означала бы ошибку в DDL.
 
-Состояния различаются уже на этом уровне: `Comment` пуст в 16 файлах из 18, `DefaultListForm`
-пуст в 16, `DefaultObjectForm` пуст в 3, `Auxiliary*Form` пусты во всех 18. Пустой слот —
-состояние, а не отсутствие свойства (тот же контракт `===EMPTY`, что у V50): словарь состояний
-свойств задаётся до кода, а не выводится из `NULL`.
+Подтверждение закрытости по всем трём выгрузкам с кругом:
+
+| выгрузка | файлов | различных наборов `Properties` | тегов |
+|---|---|---|---|
+| MinCfg | 2 | **2** (40 и 39) | 40 |
+| KomMag | круга нет | — | — |
+| BGU2 | 18 | 1 (один и тот же набор во всех 18) | 40 |
+| BP3 | 26 | 1 (один и тот же набор во всех 26) | 40 |
+
+Порядок тегов во всех файлах одинаков, поэтому порядок словаря `EXCHANGE_PLANS_PROPERTIES`
+задаётся порядком тегов в файле (тот же приём, что `COMMON_ATTRIBUTE_PROPERTIES` V50: пропуск
+позиции означал бы молчаливую потерю свойства).
+
+**Набор свойств вида — не копия набора справочника.** Сравнение с `Catalogs` той же выгрузки
+(одинаково во всех трёх): тегов у справочника 54, совпадает 38, **только у плана обмена 2** —
+`DistributedInfoBase`, `IncludeConfigurationExtensions`; только у справочника 16 —
+`Autonumbering`, `AuxiliaryFolderChoiceForm`, `AuxiliaryFolderForm`, `CheckUnique`, `CodeSeries`,
+`CodeType`, `DefaultFolderChoiceForm`, `DefaultFolderForm`, `FoldersOnTop`, `Hierarchical`,
+`HierarchyType`, `LevelCount`, `LimitLevelCount`, `Owners`, `PredefinedDataUpdate`,
+`SubordinationUse`. Переиспользовать словарь свойств объекта целиком нельзя: различия обязаны
+быть названы.
+
+**Форма содержимого задаёт вид разбора, а не имя тега.** Замер даёт закрытый словарь форм —
+`empty` (тег есть, содержимого нет), `xsi_nil` (`xsi:nil="true"`, значение отсутствует
+осознанно), `scalar`, `bool`, `multilang` (`item`/`lang`/`content` → jsonb), `nested` (блок с
+внутренними тегами). Классы по 40 тегам (BGU2/BP3):
+
+* `bool` — `UseStandardCommands`, `QuickChoice`, `DistributedInfoBase`,
+  `IncludeConfigurationExtensions`, `IncludeHelpInContents`,
+  `UpdateDataHistoryImmediatelyAfterWrite`, `ExecuteAfterWriteDataHistoryVersionProcessing`;
+* `multilang` — `Synonym`, `ObjectPresentation`, `ExtendedObjectPresentation`,
+  `ListPresentation`, `ExtendedListPresentation`, `Explanation` (у последних пяти — чередуется
+  с `empty`: в BGU2 `ObjectPresentation` пуст в 9 файлах из 18);
+* `nested` — `InputByString`, `StandardAttributes`, `BasedOn` (в BGU2/BP3 пуст),
+  `DataLockFields` (пуст в 16/24, блок в 2);
+* `scalar` со значением по умолчанию у всех файлов — `DefaultPresentation` (`AsDescription`),
+  `ChoiceMode` (`BothWays`), `SearchStringModeOnInputByString` (`Begin`),
+  `FullTextSearchOnInputByString` (`DontUse`), `ChoiceDataGetModeOnInputByString` (`Directly`),
+  `CreateOnInput` (`DontUse`), `FullTextSearch` (`Use`), `DataHistory` (`DontUse`),
+  `DataLockControlMode` (`Automatic`/`Managed`), `EditType` (`BothWays`/`InDialog`),
+  `CodeAllowedLength` (`Fixed`/`Variable`), `ChoiceHistoryOnInput` (`Auto`, в BP3 и `DontUse`);
+* пустой слот как состояние выгрузки — `AuxiliaryObjectForm`, `AuxiliaryListForm`,
+  `AuxiliaryChoiceForm` пусты во всех 44 файлах; `Comment` пуст в 41 из 46; `DefaultListForm`
+  пуст в 39; `DefaultChoiceForm` пуст в 42; `DefaultObjectForm` пуст в 18;
+* числовые скаляры — `CodeLength` (1,3,9,36,40), `DescriptionLength` (25,36,50,60,100,150,250).
+
+**Отсутствие тега — отдельное состояние, а не пустое значение.** В MinCfg файл
+`ПланОбмена1.xml` не содержит тега `StandardAttributes` (39 тегов против 40): это `absent`, и
+он обязан называться, иначе «свойств нет» и «свойство пустое» станут одним и тем же.
+
 
 ## 3. Индекс состава против файлов: расхождение названо, а не проигнорировано
 
-Сравнение по точечным именам (`_v51_p0_circle_cmp.py`, BGU2, конфигурация 665):
+Сравнение по точечным именам (`_v51_p0_circle_cmp.py`, `_v51_p2_children_probe.py`,
+`_scratch/_v51_p2_tag_count.py`; BGU2, конфигурация 665). Числы разложены по уровням —
+без этого разложения обход верхнего `ChildObjects` даёт 106 вместо 127 и круг не сходится:
 
-| тип | элементов в XML | строк индекса | строк индекса с uuid (по всем конфигурациям) |
-|---|---|---|---|
-| `Attribute` | 127 | 127 ✅ | 317 из 317 |
-| `TabularSection` | 18 | 18 ✅ | 40 из 40 |
-| `Form` | 34 | 68 | 68 из 136 — ровно половина |
-| `Template` | 35 | 70 | 66 из 132 — ровно половина |
-| `StandardAttribute` | 153 | **0** — в индексе их нет | — |
-| `Content` / `Help` / `AdditionalIndexes` / модули | лежат файлами | есть | **uuid нет ни у одной строки** |
+| тип | тегов в XML BGU2 | разложение по уровням | строк индекса BGU2 | строк с uuid (все конфигурации) |
+|---|---|---|---|---|
+| `Attribute` | **127** | 106 реквизитов вида + **21 колонка ТЧ** | 127 ✅ | 317 из 317 |
+| `TabularSection` | 18 | — | 18 ✅ | 40 из 40 |
+| `Form` | 34 | — | 68 | 68 из 136 — ровно половина |
+| `Template` | 35 | — | 70 | 66 из 132 — ровно половина |
+| `Command` | 1 (MinCfg) | — | 1 ✅ | 1 из 1 |
+| `StandardAttribute` | **153** | 135 в блоке `Properties/StandardAttributes` вида + 18 в блоках ТЧ | **0** — в индексе их нет | — |
+| `Content`/`Help`/`AdditionalIndexes`/модули | лежат файлами | — | есть | **uuid нет ни у одной строки** |
 
-Три следствия, каждое из которых становится правилом проверки узла, а не «шумом»:
+Арифметика круга по трём выгрузкам сходится с индексом состава точно:
+`Attribute` 127 (BGU2) + 186 (BP3) + 4 (MinCfg) = **317** = строк `Attribute` в
+`configuration_objects`; `TabularSection` 18+21+1 = **40**; `Form` (34+31+3)·2 = **136**;
+`Template` (35+30+1)·2 = **132**; `Command` = **1**. Это и есть инвариант П6.
 
+Четыре следствия, каждое становится правилом проверки узла, а не «шумом»:
+
+- **У табличной части есть свой вложенный `ChildObjects`.** Колонки ТЧ (`Attribute`) и её блок
+  `StandardAttributes` лежат внутри `TabularSection`, а не на верхнем уровне; в индексе состава
+  родителем колонки выступает **табличная часть**: `parent_name =
+  ExchangePlan.АвтономнаяРабота.TabularSection.Организации`, `name =
+  …TabularSection.Организации.Attribute.Организация`. Значит в модели связи `parent_uuid`
+  колонки = uuid табличной части (uuid строк `TabularSection` есть — 40 из 40), а не uuid вида.
 - **Форма и макет дают в индексе по две строки**: одна с uuid (сам объект), вторая без uuid
   (её содержимое `Ext/`). Инвариант круга обязан различать эти строки, иначе «лишние» строки
   индекса будут читаться как расхождение.
 - **Стандартные реквизиты в индекс не попадают**: они не адресуемые объекты метаданных. В XML
-  они есть (153 в BGU2, адресуются точечно — `…StandardAttribute.Code`), поэтому их надо
-  называть отдельным состоянием, а не терять молча или смешивать с `Attribute`.
-- **uuid детей в XML нет.** В файле вида есть атрибут `uuid` у самого вида, у детей —
-  `xr:TypeId`, `xr:ValueId` и точечные `<xr:Field>`. Идентификаторы детей даёт индекс состава.
-  Значит перечни uuid строятся из индекса, а не из XML — тот же приём, что у V43
-  (48 колонок-перечней собираются из `ConfigDumpInfo.xml`).
+  они есть (153 в BGU2, 209 в BP3, 9 в MinCfg; уникальных имён 8), свойств не имеют, и
+  адресуются только точечно (`…StandardAttribute.Code`). Их надо называть состоянием
+  `present_not_indexed`, а не терять молча или смешивать с `Attribute`.
+- **Источник идентификатора ребёнка различается по типам, и это задаёт правило П3**
+  (`_v51_p2_shape_probe.py`, все три выгрузки). Атрибут `uuid` в XML есть:
+  у `Attribute` вида (BGU2 106/106, BP3 162/162, MinCfg 3/3), у `Attribute` внутри табличной
+  части (21/21, 24/24, 1/1), у `TabularSection` (18/18, 21/21, 1/1), у `Command` (1/1 в MinCfg)
+  и у самого вида (18/18, 26/26, 2/2). У `Form` и `Template` в файле вида его **нет**
+  (0/34, 0/31, 0/3 и 0/35, 0/30, 0/1) — он лежит в файле описания (`Forms/<Имя>.xml`,
+  корень `<MetaDataObject><Form uuid>…</Form></MetaDataObject>` — 34/34 и 35/35 в BGU2).
+  Значит uuid берётся из выгрузки, а **индекс состава служит подтверждением**: расхождение
+  называется состоянием `uuid_mismatch`, как в V48/V49/V50, а не разрешается молча. Ошибочное
+  утверждение прежнего плана («uuid детей даёт только индекс») здесь исправлено прямо: оно
+  привело бы к тому, что разбор взял бы идентификаторы не из того источника.
+
+
 
 ### 3.1 Цена содержимого (для решения о границах)
 
@@ -285,8 +350,10 @@ uuid конфигурации, для внешнего объекта — uuid �
   33.2 МБ текстов макетов. Без `kinds` любой правочный вызов обязан перечитывать максимум.
 - **Риск V50 здесь отсутствует физически.** Там строка применения существовала только через
   числовой id строки реквизита, и частичная запись описала бы состав, которого в выгрузке нет.
-  Перечни детей этого вида строятся **из индекса состава** (замер раздела 3: uuid детей в XML
-  нет), значит они не зависят от того, записаны ли строки детей: инвариант «перечень ⟷ индекс»
+  Перечни детей этого вида строятся **из атрибутов `uuid` выгрузки** (у реквизитов, табличных
+  частей и команд — из файла вида, у форм и макетов — из файла их описания; замер
+  `_v51_p2_shape_probe.py`, раздел 3), а индекс состава подтверждает их наличие и порядок.
+  Значит перечни не зависят от того, записаны ли строки детей: инвариант «перечень ⟷ индекс»
   выполняется при любом способе вызова.
 - **Полноту нельзя спрятать способом вызова.** `form_ext` висит на `forms(id) ON DELETE CASCADE`
   (`src/ddl_external_report.sql`, строки 387–389), поэтому «формы без содержимого» схема не
@@ -303,6 +370,82 @@ uuid конфигурации, для внешнего объекта — uuid �
    названы в ответе: их нули не означают «детей у вида нет» (правило V49);
 3. строка вида и её перечни пересчитываются при любом вызове, потому что выводятся из индекса
    состава, а не из записанных детей.
+
+### 5.5 Шаг П2 выполнен: словарь свойств детей и точный объём миграции П1 (замер 31.10.2026)
+
+Пробы `_v51_p2_children_probe.py` и `_v51_p2_form_tpl_probe.py` дают вторую половину П2 —
+словари свойств детей. Главное: **наборы свойств детей одинаковы во всех трёх выгрузках**, то
+есть замкнуты так же, как словарь вида.
+
+| тип ребёнка | где лежат свойства | тегов | покрытие колонками существующей таблицы |
+|---|---|---|---|
+| `Attribute` | `ChildObjects/Attribute/Properties` (в т.ч. внутри ТЧ) | **28** у реквизита вида, **26** у колонки ТЧ | `attributes` покрывает 25; **не хватает 3**: `data_history`, `full_text_search`, `indexing` |
+| `TabularSection` | `ChildObjects/TabularSection/Properties` | **7** | `tabular_sections` покрывает 6; **не хватает 1**: `line_number_length` |
+| `Form` | `Forms/<Имя>.xml` → `<Form uuid><Properties>` | **6** | `forms` покрывает **все 6** (`name`, `synonym`, `comment`, `form_type`, `include_help_in_contents`, `use_purposes`) — новых колонок не нужно |
+| `Template` | `Templates/<Имя>.xml` → `<Template uuid><Properties>` | **4** | `templates` покрывает **все 4** (`name`, `synonym`, `comment`, `template_type`) — новых колонок не нужно |
+| `Command` | `ChildObjects/Command/Properties` | **12** | таблицы нет — `commands` строится по этим 12 свойствам |
+| `StandardAttribute` | `Properties/StandardAttributes/StandardAttribute` | **0** | строки не пишутся (Q7 закрыт), состояние `present_not_indexed` |
+
+Свойства реквизита (28 тегов, форма содержимого и домены по замеру): `Name`, `Synonym`
+(multilang), `Comment`, `ToolTip`, `Format`, `EditFormat`, `Mask` (пустые слоты), `Type`
+(**блок** — единственный не-скаляр), `PasswordMode`, `MarkNegatives`, `MultiLine`,
+`ExtendedEdit`, `FillFromFillingValue` (bool), `FillValue`, `MinValue`, `MaxValue`
+(`xsi:nil` — осознанное отсутствие значения), `FillChecking` (`DontCheck`),
+`ChoiceFoldersAndItems` (`Items`), `ChoiceParameterLinks`, `ChoiceParameters`, `ChoiceForm`,
+`LinkByType` (пустые), `QuickChoice` (`Auto`), `CreateOnInput` (`Auto`),
+`ChoiceHistoryOnInput` (`Auto`), `DataHistory` (`Use`), `FullTextSearch` (`Use`),
+`Indexing` (`DontIndex`, `Index`).
+
+Свойства табличной части (7): `Name`, `Synonym` (multilang), `Comment`, `ToolTip` (multilang
+или пустое), `FillChecking` (`DontCheck`), `StandardAttributes` (блок),
+`LineNumberLength` (скаляр, везде `5`).
+
+**Словарь реквизита — надмножество, и различие уровней называется замером.** Наборов тегов
+`Attribute` ровно два, и они одинаковы во всех трёх выгрузках: у реквизита самого вида —
+28 тегов (BGU2 106 файла-вхождений, BP3 162, MinCfg 3), у колонки табличной части — 26
+(соответственно 21, 24, 1). Разницу дают ровно два тега, которых у колонок нет:
+`FillFromFillingValue`, `FillValue`. Поэтому `ATTRIBUTE_PROPERTIES` задаётся один — по 28 тегам
+реквизита, — а отсутствие двух тегов у строк колонок является состоянием `absent` строки, а не
+«свойство пустое» и не признаком ошибки разбора. Различать эти состояния приходится именно
+потому, что иначе 46 колонок трёх выгрузок читались бы как неполностью разобранные.
+
+Форма файлов описания детей тоже названа, потому что разбор обязан знать, какой элемент читать:
+`Forms/<Имя>.xml` и `Templates/<Имя>.xml` — это `<MetaDataObject><Form uuid>…<Properties>` и
+`<MetaDataObject><Template uuid>…<Properties>` (34/34 и 35/35 в BGU2, 3/3 и 1/1 в MinCfg);
+команда описывается внутри файла вида (`ExchangePlan/ChildObjects/Command`, 12 тегов, атрибут
+`uuid` есть), а тег `Command` внутри `Ext/Form.xml` — это команда **интерфейса формы**, у неё
+`Properties` нет, и к строкам `commands` вида она отношения не имеет (замер `_v51_p2_shape_probe.py`
+показывает такие вхождения в BGU2 и BP3 — их разбор обязан отличать от команды метаданных).
+
+
+Свойства команды (12): `Name`, `Synonym` (multilang), `Comment`, `ToolTip`, `Picture`,
+`Shortcut` (пустые слоты), `Group` (`NavigationPanelImportant`), `Representation` (`Auto`),
+`ParameterUseMode` (`Single`), `ModifiesData` (bool), `OnMainServerUnavalableBehavior` (`Auto`),
+`CommandParameterType` (пустое).
+
+Что из этого следует для П1 — объём миграции назван числами, а не оценкой:
+
+1. `attributes`: **+3 колонки** (`data_history`, `full_text_search`, `indexing`) — они есть у
+   каждого реквизита вида, но их нет в таблице, построенной под внешний объект;
+2. `attributes.type`: блок `<Type>` — единственный не-скаляр среди свойств реквизита. В таблице
+   уже есть SQL-разложенное представление типа (`data_type`, `character_maximum_length`,
+   `numeric_precision`, …), которое для внешнего объекта строилось по `information_schema`. Для
+   объекта конфигурации источником является блок `<Type>` — его разбор обязан дать **те же
+   колонки**, иначе одна колонка `data_type` будет означать разное для двух видов строк;
+3. `tabular_sections`: **+1 колонка** (`line_number_length`); `column_uuids` уже есть, и uuid
+   колонок даёт индекс состава (у всех 317 строк `Attribute` uuid есть);
+4. `forms` / `templates`: **колонок не добавляется** — покрытие полное, свойства читаются из
+   файлов `Forms/`, `Templates/` (там же лежит и `uuid` описания);
+5. `commands`: новая таблица по 12 свойствам, ключ `(configuration_uuid, parent_uuid, uuid,
+   revision_no)` (uuid команды даёт индекс — 1 из 1);
+6. порядок детей (`ordinal_position` в `attributes`) берётся из порядка тегов в файле и
+   подтверждается индексом состава;
+7. `PROPERTY_VALUE_DICTIONARY` строится по замеру, как в V50 (Q7, вариант A): значение вне
+   словаря остаётся значением с состоянием `unknown_value` и именем виновника. Уже измеренные
+   домены перечислены выше; известных расширений два — `Indexing` даёт два значения
+   (`DontIndex`, `Index`), тогда как у общих реквизитов (V50) был только
+   `DontIndex/IndexWithAdditionalOrder`, а `ChoiceHistoryOnInput` в BP3 даёт `DontUse`.
+
 
 
 
@@ -370,8 +513,19 @@ uuid конфигурации, для внешнего объекта — uuid �
   перечни детей по разделу 5.2;
 - таблица `exchange_plan_content` (Q4: цель, `AutoRecord`, порядок в файле, состояние разрешения
   цели — по образцу `subsystem_content` V46; эталоны: 9638 целей BGU2, 12 868 BP3, 9 MinCfg),
-  таблица `commands` по образцу `attributes`; слоты `Help`/`AdditionalIndexes` — исходный XML
-  в `jsonb` по прецеденту `subsystems.Content` (V46);
+  таблица `commands` по 12 свойствам раздела 5.5 и по образцу `attributes`, ключ
+  `UNIQUE (configuration_uuid, parent_uuid, uuid, revision_no)` (uuid команды даёт индекс —
+  1 из 1); слоты `Help`/`AdditionalIndexes` — исходный XML в `jsonb` по прецеденту
+  `subsystems.Content` (V46);
+- **новые колонки свойств детей по замеру 5.5, а не «по вкусу»**: `attributes` +3
+  (`data_history`, `full_text_search`, `indexing`), `tabular_sections` +1
+  (`line_number_length`), `forms` и `templates` — **без новых колонок** (покрытие полное);
+  блок `<Type>` реквизита разбирается в **уже существующие** колонки типа (`data_type`,
+  `character_maximum_length`, `numeric_precision`, …), иначе одна колонка начнёт означать разное
+  для строк внешнего объекта и объекта конфигурации;
+- таблица `exchange_plans` строится по 40 тегам раздела 2 в порядке тегов файла; словарь
+  `EXCHANGE_PLANS_PROPERTIES` — тот же формат тройки, что `COMMON_ATTRIBUTE_PROPERTIES` V50;
+
 - расширение четырёх таблиц детей (раздел 5.1): `configuration_uuid UUID NOT NULL`
   (+ `parent_type` в `attributes`/`tabular_sections`), предзаполнение
   `UPDATE … SET configuration_uuid = parent_uuid` (сирот нет — замер 5.1), снятие
@@ -393,12 +547,18 @@ uuid конфигурации, для внешнего объекта — uuid �
 Словарь колонок — один источник (Python-модуль), как в V43/V46/V50.
 
 
-**П2. Словарь свойств вида и словари состояний.** `EXCHANGE_PLAN_PROPERTIES` (замер раздела 2:
-45–46 имён), `PROPERTY_VALUE_DICTIONARY`, словари состояний: свойства —
-`all_known`/`unknown_value`/`unknown_tag`; дети — `with_children`/`empty_content`/
+**П2. Словарь свойств вида и словари состояний — ВЫПОЛНЕН 31.10.2026.** Замеры разделов 2 и 5.5
+дают все словари до кода: свойства вида — **40 тегов** (не 45–46: та оценка считала вложенные
+теги), свойства реквизита — 28, табличной части — 7, формы — 6, макета — 4, команды — 12,
+стандартного реквизита — 0. Наборы одинаковы во всех трёх выгрузках, значит словари замкнуты.
+`EXCHANGE_PLAN_PROPERTIES` — те же тройки, что `COMMON_ATTRIBUTE_PROPERTIES` V50; отдельно
+`PROPERTY_VALUE_DICTIONARY` по измеренным доменам (раздел 5.5); словари состояний: свойства —
+`all_known`/`unknown_value`/`unknown_tag` и `absent` (отсутствующий тег — `StandardAttributes`
+в `ПланОбмена1.xml` MinCfg); дети — `with_children`/`empty_content`/
 `indexed_no_file`/`file_not_in_index`; цель содержимого — `exact`/`prefix_only`/`unresolved`;
 стандартные реквизиты — `present_not_indexed`/`absent`. Незнакомое значение свойства остаётся
 значением с состоянием `unknown_value` и именем виновника (Q7 узла V50, вариант A), а не отказом.
+
 
 **П3. Слой разбора `src/configuration_exchange_plans.py`.** Круг — файлы регистрации вида,
 подтверждённые строками `configuration_objects` (с правилом пар форм/макетов из раздела 3), плюс
@@ -444,6 +604,35 @@ Q5 оператора узла V48): `source_path`, `configuration_uuid` (све
 `directory_missing`, BGU2 18, BP3 — 26 объектов вида); счётчики детей с ожидаемыми словарями
 состояний; отдельный тест-инвариант на замер 3.2: 14 общих uuid детей обязаны давать разные
 строки в разных конфигурациях (это и есть защита от слияния).
+
+Эталон арифметики детей (замеры раздела 3 и 5.5; правая колонка — строки индекса состава по всем
+конфигурациям, и она обязана сходиться с суммой выгрузок, иначе круг неполный):
+
+| тип ребёнка | MinCfg | BGU2 | BP3 | сумма | строк индекса |
+|---|---|---|---|---|---|
+| `Attribute` | 4 | 127 | 186 | **317** | 317 ✅ |
+| `TabularSection` | 1 | 18 | 21 | **40** | 40 ✅ |
+| `Form` | 3 | 34 | 31 | 68 | 136 (= 68 описаний + 68 содержимого) |
+| `Template` | 1 | 35 | 30 | 66 | 132 |
+| `Command` | 1 | 0 | 0 | **1** | 1 ✅ |
+| `StandardAttribute` | 9 | 153 | 209 | 371 | **0** → `present_not_indexed` |
+
+Проверяемые соотношения, каждое из которых проверка обязана отличать от расхождения:
+
+* `Attribute` вида = реквизиты самого вида + колонки его табличных частей (BGU2: 106 + 21 = 127);
+  обход только верхнего `ChildObjects` даёт 106 — проверка обязана спускаться в `ChildObjects`
+  табличной части;
+* `StandardAttribute` = блок `Properties/StandardAttributes` вида + такие же блоки табличных
+  частей (BGU2: 135 + 18 = 153; уникальных имён при этом 8);
+* `parent_uuid` колонки табличной части = uuid табличной части, а не uuid вида (в индексе
+  `parent_name` — точечное имя табличной части);
+* uuid ребёнка из выгрузки обязан совпасть с uuid строки индекса состава: у реквизитов,
+  табличных частей и команд он берётся из атрибута `uuid` файла вида (BGU2 106/106 и 21/21,
+  BP3 162/162 и 24/24, MinCfg 3/3, 1/1, 1/1), у форм и макетов — из атрибута `uuid` файла их
+  описания (BGU2 34/34 и 35/35). Расхождение называется `uuid_mismatch` (прецедент
+  V48/V49/V50), а не разрешается молча в пользу какого-либо из источников.
+
+
 
 Эталонные числа вторичного содержимого (замер `_v51_p0_content_probe.py`, они же — границы
 полноты загрузки):
