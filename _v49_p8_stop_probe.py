@@ -69,6 +69,8 @@ from configuration_load_contract import (  # noqa: E402
     CHILD_TABLES,
     COMMON_ATTRIBUTES_SECTION_HEADER,
     COMMON_ATTRIBUTES_TABLES,
+    EXCHANGE_PLAN_SECTION_HEADER,
+    EXCHANGE_PLAN_TABLES,
     OBJECT_MODULES_RELOAD_HINT,
     OBJECT_MODULES_SECTION_HEADER,
     ROLES_REPEAT_HINT,
@@ -81,6 +83,7 @@ from configuration_load_contract import (  # noqa: E402
     STAGES,
     STAGE_CHILD_OBJECTS,
     STAGE_COMMON_ATTRIBUTES,
+    STAGE_EXCHANGE_PLANS,
     STAGE_FULL_RELOAD_ONLY,
     STAGE_OBJECT_MODULES,
     STAGE_ROLES,
@@ -94,6 +97,7 @@ from configuration_load_contract import (  # noqa: E402
     build_stopped_stage,
     child_objects_defaults,
     common_attributes_defaults,
+    exchange_plans_defaults,
     format_roles_lines,
     format_stopped_stage_lines,
     root_modules_defaults,
@@ -121,12 +125,13 @@ ROUTER = ROOT / "src" / "config_load_router.py"
 #
 # Узел V50 (шаг П8): в перечень добавлена S4e — она стоит между S4d и S4b, поэтому ответ
 # конвейера, остановленного на любой из прежних стадий, обязан читать её `not_run`, а
-# таблицы — незаполненными. Собственных проверок S4e эта проба не заводит (они в
-# `_v50_p8_stop_probe.py`), но пропустить чужую стадию в справочниках значит получить
-# KeyError вместо проверки или пустой фильтр вместо числа.
+# таблицы — незаполненными. Узел V51 (шаг П8) добавляет S4f — она стоит между S4e и S4b
+# (позиция 2.6 нормативного списка), и отношение пробы к ней то же: собственных проверок S4f
+# эта проба не заводит (они в `_v51_p8_stop_probe.py`), но пропустить чужую стадию в
+# справочниках значит получить KeyError вместо проверки или пустой фильтр вместо числа.
 CHILD_STAGES = (
     STAGE_ROOT_MODULES, STAGE_CHILD_OBJECTS, STAGE_SESSION_PARAMETERS, STAGE_ROLES,
-    STAGE_COMMON_ATTRIBUTES, STAGE_OBJECT_MODULES,
+    STAGE_COMMON_ATTRIBUTES, STAGE_EXCHANGE_PLANS, STAGE_OBJECT_MODULES,
 )
 STAGE_KEYS = {
     STAGE_ROOT_MODULES: "root_modules",
@@ -134,6 +139,7 @@ STAGE_KEYS = {
     STAGE_SESSION_PARAMETERS: "session_parameters",
     STAGE_ROLES: "roles",
     STAGE_COMMON_ATTRIBUTES: "common_attributes",
+    STAGE_EXCHANGE_PLANS: "exchange_plans",
     STAGE_OBJECT_MODULES: "object_modules",
 }
 SECTION_HEADERS = {
@@ -142,6 +148,7 @@ SECTION_HEADERS = {
     STAGE_SESSION_PARAMETERS: SESSION_PARAMETERS_SECTION_HEADER,
     STAGE_ROLES: ROLES_SECTION_HEADER,
     STAGE_COMMON_ATTRIBUTES: COMMON_ATTRIBUTES_SECTION_HEADER,
+    STAGE_EXCHANGE_PLANS: EXCHANGE_PLAN_SECTION_HEADER,
     STAGE_OBJECT_MODULES: OBJECT_MODULES_SECTION_HEADER,
 }
 DEFAULTS = {
@@ -150,6 +157,7 @@ DEFAULTS = {
     STAGE_SESSION_PARAMETERS: session_parameters_defaults,
     STAGE_ROLES: roles_defaults,
     STAGE_COMMON_ATTRIBUTES: common_attributes_defaults,
+    STAGE_EXCHANGE_PLANS: exchange_plans_defaults,
     STAGE_OBJECT_MODULES: object_modules_defaults,
 }
 # Функция стадии — имя в модуле загрузчика: `register_configuration` обращается к имени
@@ -160,6 +168,7 @@ STAGE_FUNCTIONS = {
     STAGE_SESSION_PARAMETERS: "load_session_parameters",
     STAGE_ROLES: "load_roles",
     STAGE_COMMON_ATTRIBUTES: "load_common_attributes",
+    STAGE_EXCHANGE_PLANS: "load_exchange_plans",
     STAGE_OBJECT_MODULES: "load_object_modules",
 }
 # Чем продолжение допустимо (подстрока подсказки): у стадии с отдельным входом — имя его
@@ -170,6 +179,7 @@ RESUME_MARKS = {
     STAGE_SESSION_PARAMETERS: "load_session_parameters_tool",
     STAGE_ROLES: "load_roles_tool",
     STAGE_COMMON_ATTRIBUTES: "load_common_attributes_tool",
+    STAGE_EXCHANGE_PLANS: "load_exchange_plans_tool",
     STAGE_OBJECT_MODULES: "load_1c_catalog_tool",
 }
 # Слова, которыми форматёр называет состояние стадии (правило C2): «не удалась» — круг
@@ -398,6 +408,7 @@ check("1.18 ответ каждой стадии создаётся до её в
            ("session_parameters", "session_parameters_defaults"),
            ("roles", "roles_defaults"),
            ("common_attributes", "common_attributes_defaults"),
+           ("exchange_plans", "exchange_plans_defaults"),
            ("object_modules", "object_modules_defaults")]))
 check("1.19 карточка печатает раздел остановки общим форматёром контракта",
       "STOP_STAGE_SECTION_HEADER" in router_src
@@ -449,10 +460,10 @@ check("1.27 круг S4d не входит в круг стадии S4 (прец
 
 
 def scope_counts(cur, cfg_uuid):
-    """Что лежит в базе по этой конфигурации: заголовок, индекс, таблицы пяти стадий.
+    """Что лежит в базе по этой конфигурации: заголовок, индекс, таблицы семи стадий.
 
-    Перечень таблиц берётся из словарей слоёв (V44, V46, V48, V49), а не переписывается:
-    проба обязана считать те же таблицы, которые пишет загрузчик.
+    Перечень таблиц берётся из словарей слоёв (V44, V46, V48, V49, V50, V51), а не
+    переписывается: проба обязана считать те же таблицы, которые пишет загрузчик.
     """
     counts = {}
     counts["header"] = int(one(
@@ -485,6 +496,11 @@ def scope_counts(cur, cfg_uuid):
         counts["s4e:" + table] = int(one(
             cur, f"SELECT count(*) FROM {table} WHERE configuration_uuid = %s::uuid",
             [str(cfg_uuid)]) or 0)
+    # Узел V51 (шаг П8): строки S4f входят в «что осталось в базе» по тому же правилу.
+    for table in EXCHANGE_PLAN_TABLES:
+        counts["s4f:" + table] = int(one(
+            cur, f"SELECT count(*) FROM {table} WHERE configuration_uuid = %s::uuid",
+            [str(cfg_uuid)]) or 0)
     counts["s4b:bsl_modules"] = int(one(
         cur, "SELECT count(*) FROM bsl_modules WHERE configuration_uuid = %s::uuid "
              "AND parent_type = 'configuration_objects'", [str(cfg_uuid)]) or 0)
@@ -496,6 +512,7 @@ def stage_row_prefix(stage):
     return {STAGE_ROOT_MODULES: "s3:", STAGE_CHILD_OBJECTS: "s4:",
             STAGE_SESSION_PARAMETERS: "s4c:", STAGE_ROLES: "s4d:",
             STAGE_COMMON_ATTRIBUTES: "s4e:",
+            STAGE_EXCHANGE_PLANS: "s4f:",
             STAGE_OBJECT_MODULES: "s4b:"}[stage]
 
 
@@ -670,7 +687,8 @@ def main() -> int:
               final["header"] == baseline["header"]
               and final["index"] == baseline["index"]
               and all(final[key] >= baseline[key] for key in final
-                      if key.startswith(("s3:", "s4:", "s4c:", "s4d:", "s4e:", "s4b:"))),
+                      if key.startswith(("s3:", "s4:", "s4c:", "s4d:", "s4e:", "s4f:",
+                                         "s4b:"))),
               {key: (baseline[key], final[key]) for key in final
                if final[key] < baseline[key]})
         check("3.4 карточка успешной загрузки раздела остановки не содержит",

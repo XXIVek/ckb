@@ -30,13 +30,14 @@
 
 Разделы пробы:
 
-  1 — контракт офлайн (без БД): порядок `STAGES` и `stages_after` с учётом S4e, закрытость
-      `stopped_stage_defaults()` по `STOPPED_STAGE_KEYS`, подсказки продолжения по стадиям
-      (для S4e — отдельный вход), незакрытая группа S4e, форматёр раздела остановки и
-      форматёр стадии S4e, отсутствие дублей `FunctionDef` в модуле контракта, круг S4e не
-      пересекается с кругами соседних стадий;
-  2 — живой конвейер (одна выгрузка, `force=True`): искусственный отказ каждой из шести
-      стадий детей даёт остановку ровно на ней, `not_run` у последующих, вызовы последующих
+  1 — контракт офлайн (без БД): порядок `STAGES` и `stages_after` с учётом S4e и S4f
+      (узел V51), закрытость `stopped_stage_defaults()` по `STOPPED_STAGE_KEYS`, подсказки
+      продолжения по стадиям (для S4e — отдельный вход), незакрытая группа S4e, форматёр
+      раздела остановки и форматёр стадии S4e, отсутствие дублей `FunctionDef` в модуле
+      контракта, круг S4e не пересекается с кругами соседних стадий;
+  2 — живой конвейер (одна выгрузка, `force=True`): искусственный отказ каждой из семи
+      стадий детей (с узла V51 — включая S4f) даёт остановку ровно на ней, `not_run` у
+      последующих, вызовы последующих
       отсутствуют (счётчик вызовов, а не совпадение со статусом), заголовок и индекс состава
       остаются, строки таблиц отказавшей и пропущенных стадий не заполнены;
   3 — восстановление: та же выгрузка без подмены загружается целиком, `stopped_stage` пуст,
@@ -83,6 +84,8 @@ from configuration_load_contract import (  # noqa: E402
     COMMON_ATTRIBUTES_REPEAT_HINT,
     COMMON_ATTRIBUTES_SECTION_HEADER,
     COMMON_ATTRIBUTES_TABLES,
+    EXCHANGE_PLAN_SECTION_HEADER,
+    EXCHANGE_PLAN_TABLES,
     OBJECT_MODULES_RELOAD_HINT,
     OBJECT_MODULES_SECTION_HEADER,
     ROLES_REPEAT_HINT,
@@ -94,6 +97,7 @@ from configuration_load_contract import (  # noqa: E402
     STAGES,
     STAGE_CHILD_OBJECTS,
     STAGE_COMMON_ATTRIBUTES,
+    STAGE_EXCHANGE_PLANS,
     STAGE_FULL_RELOAD_ONLY,
     STAGE_INCOMPLETE_GROUPS,
     STAGE_OBJECT_MODULES,
@@ -108,6 +112,7 @@ from configuration_load_contract import (  # noqa: E402
     build_stopped_stage,
     child_objects_defaults,
     common_attributes_defaults,
+    exchange_plans_defaults,
     format_common_attributes_lines,
     format_roles_lines,
     format_stopped_stage_lines,
@@ -136,13 +141,14 @@ LOADER = ROOT / "src" / "configuration_loader.py"
 ROUTER = ROOT / "src" / "config_load_router.py"
 
 # Стадии детей конвейера в порядке `STAGES` — тот же порядок, что у нормативного списка
-# (2.1–2.2, 2.3, 2.4, 2.5, модули Ext/). Перебор намеренно полный: решение Q8 узла V48
+# (2.1–2.2, 2.3, 2.4, 2.5, 2.6, модули Ext/). Перебор намеренно полный: решение Q8 узла V48
 # принято «ко всем стадиям», и проверка одной стадии таким ответом не является. Узел V50
-# добавляет в этот перечень шестую стадию — S4e; её отсутствие в перечне и было бы
-# пропущенным входом вида в останов конвейера.
+# добавлял в этот перечень шестую стадию — S4e; узел V51 добавляет седьмую — S4f (позиция
+# 2.6). Отсутствие любой из них в перечне и было бы пропущенным входом вида в останов
+# конвейера; собственных проверок S4f эта проба не заводит — они в `_v51_p8_stop_probe.py`.
 CHILD_STAGES = (
     STAGE_ROOT_MODULES, STAGE_CHILD_OBJECTS, STAGE_SESSION_PARAMETERS, STAGE_ROLES,
-    STAGE_COMMON_ATTRIBUTES, STAGE_OBJECT_MODULES,
+    STAGE_COMMON_ATTRIBUTES, STAGE_EXCHANGE_PLANS, STAGE_OBJECT_MODULES,
 )
 STAGE_KEYS = {
     STAGE_ROOT_MODULES: "root_modules",
@@ -150,6 +156,7 @@ STAGE_KEYS = {
     STAGE_SESSION_PARAMETERS: "session_parameters",
     STAGE_ROLES: "roles",
     STAGE_COMMON_ATTRIBUTES: "common_attributes",
+    STAGE_EXCHANGE_PLANS: "exchange_plans",
     STAGE_OBJECT_MODULES: "object_modules",
 }
 SECTION_HEADERS = {
@@ -158,6 +165,7 @@ SECTION_HEADERS = {
     STAGE_SESSION_PARAMETERS: SESSION_PARAMETERS_SECTION_HEADER,
     STAGE_ROLES: ROLES_SECTION_HEADER,
     STAGE_COMMON_ATTRIBUTES: COMMON_ATTRIBUTES_SECTION_HEADER,
+    STAGE_EXCHANGE_PLANS: EXCHANGE_PLAN_SECTION_HEADER,
     STAGE_OBJECT_MODULES: OBJECT_MODULES_SECTION_HEADER,
 }
 DEFAULTS = {
@@ -166,6 +174,7 @@ DEFAULTS = {
     STAGE_SESSION_PARAMETERS: session_parameters_defaults,
     STAGE_ROLES: roles_defaults,
     STAGE_COMMON_ATTRIBUTES: common_attributes_defaults,
+    STAGE_EXCHANGE_PLANS: exchange_plans_defaults,
     STAGE_OBJECT_MODULES: object_modules_defaults,
 }
 # Функция стадии — имя в модуле загрузчика: `register_configuration` обращается к имени
@@ -176,6 +185,7 @@ STAGE_FUNCTIONS = {
     STAGE_SESSION_PARAMETERS: "load_session_parameters",
     STAGE_ROLES: "load_roles",
     STAGE_COMMON_ATTRIBUTES: "load_common_attributes",
+    STAGE_EXCHANGE_PLANS: "load_exchange_plans",
     STAGE_OBJECT_MODULES: "load_object_modules",
 }
 # Чем продолжение допустимо (подстрока подсказки): у стадии с отдельным входом — имя его
@@ -186,6 +196,7 @@ RESUME_MARKS = {
     STAGE_SESSION_PARAMETERS: "load_session_parameters_tool",
     STAGE_ROLES: "load_roles_tool",
     STAGE_COMMON_ATTRIBUTES: "load_common_attributes_tool",
+    STAGE_EXCHANGE_PLANS: "load_exchange_plans_tool",
     STAGE_OBJECT_MODULES: "load_1c_catalog_tool",
 }
 # Слова, которыми форматёр называет состояние стадии (правило C2): «не удалась» — круг
@@ -300,21 +311,27 @@ check("1.3 форматёр на «не останавливался» разд�
 
 ORDER = [stage for stage, _ in STAGES]
 # Критерий П8: перечень пропущенных считается из `STAGES`, поэтому вход вида в останов
-# виден именно здесь — у S4d пропущенными оказываются S4e и S4b, у S4e — S4b.
-check("1.4 `stages_after` даёт порядок `STAGES`: S4d → S4e → S4b (критерий П8)",
+# виден именно здесь — у S4d пропущенными оказываются S4e, S4f и S4b, у S4e — S4f и S4b,
+# у S4f (узел V51) — S4b. Строки ниже перечисляют порядок явно: вывод из `STAGES` проверяет
+# следующий пункт, а явный перечень называет, какой именно порядок ожидается.
+check("1.4 `stages_after` даёт порядок `STAGES`: S4d → S4e → S4f → S4b (критерий П8)",
       stages_after(STAGE_SESSION_PARAMETERS) == [STAGE_ROLES, STAGE_COMMON_ATTRIBUTES,
-                                               STAGE_OBJECT_MODULES]
-      and stages_after(STAGE_ROLES) == [STAGE_COMMON_ATTRIBUTES, STAGE_OBJECT_MODULES]
-      and stages_after(STAGE_COMMON_ATTRIBUTES) == [STAGE_OBJECT_MODULES]
+                                                STAGE_EXCHANGE_PLANS, STAGE_OBJECT_MODULES]
+      and stages_after(STAGE_ROLES) == [STAGE_COMMON_ATTRIBUTES, STAGE_EXCHANGE_PLANS,
+                                        STAGE_OBJECT_MODULES]
+      and stages_after(STAGE_COMMON_ATTRIBUTES) == [STAGE_EXCHANGE_PLANS,
+                                                    STAGE_OBJECT_MODULES]
+      and stages_after(STAGE_EXCHANGE_PLANS) == [STAGE_OBJECT_MODULES]
       and stages_after(STAGE_OBJECT_MODULES) == []
       and all(stages_after(stage) == ORDER[ORDER.index(stage) + 1:]
               for stage in CHILD_STAGES),
       [stages_after(stage) for stage in CHILD_STAGES])
-check("1.4а порядок `STAGES` повторяет нормативный список: 2.3 → 2.4 → 2.5 → модули Ext/ "
-      "(критерий П8)",
+check("1.4а порядок `STAGES` повторяет нормативный список: 2.3 → 2.4 → 2.5 → 2.6 → "
+      "модули Ext/ (критерий П8, узел V51)",
       ORDER.index(STAGE_SESSION_PARAMETERS) + 1 == ORDER.index(STAGE_ROLES)
       and ORDER.index(STAGE_ROLES) + 1 == ORDER.index(STAGE_COMMON_ATTRIBUTES)
-      and ORDER.index(STAGE_COMMON_ATTRIBUTES) + 1 == ORDER.index(STAGE_OBJECT_MODULES),
+      and ORDER.index(STAGE_COMMON_ATTRIBUTES) + 1 == ORDER.index(STAGE_EXCHANGE_PLANS)
+      and ORDER.index(STAGE_EXCHANGE_PLANS) + 1 == ORDER.index(STAGE_OBJECT_MODULES),
       " → ".join(ORDER))
 check("1.4б стадия S4e названа позицией 2.5 и каталогом вида, а не «дополнением S4d»",
       "2.5" in stage_title(STAGE_COMMON_ATTRIBUTES)
@@ -372,8 +389,10 @@ for stage in CHILD_STAGES:
               "2.4" in str(stopped["incomplete_group"])
               and "группа F" in str(stopped["incomplete_group"]),
               stopped["incomplete_group"])
-        check("1.12в `s4d_roles`: пропущенными после отказа названы S4e и S4b (критерий П8)",
-              got_after == [STAGE_COMMON_ATTRIBUTES, STAGE_OBJECT_MODULES], got_after)
+        check("1.12в `s4d_roles`: пропущенными после отказа названы S4e, S4f и S4b "
+              "(критерий П8, узел V51)",
+              got_after == [STAGE_COMMON_ATTRIBUTES, STAGE_EXCHANGE_PLANS,
+                            STAGE_OBJECT_MODULES], got_after)
     if stage == STAGE_COMMON_ATTRIBUTES:
         # Критерий П8 для самой стадии: подсказка называет отдельный вход группы V50, а не
         # только полную перезагрузку; словарь признаков обязан содержать её ключ — без него
@@ -393,8 +412,9 @@ for stage in CHILD_STAGES:
               "2.5" in str(stopped["incomplete_group"])
               and "группа E" in str(stopped["incomplete_group"]),
               stopped["incomplete_group"])
-        check("1.12е `s4e_common_attributes`: пропущенной после отказа названа только S4b",
-              got_after == [STAGE_OBJECT_MODULES], got_after)
+        check("1.12е `s4e_common_attributes`: пропущенными после отказа названы S4f и S4b "
+              "(вход S4f в останов предыдущей стадии — узел V51)",
+              got_after == [STAGE_EXCHANGE_PLANS, STAGE_OBJECT_MODULES], got_after)
         check("1.12ж `s4e_common_attributes`: словарь незакрытых групп содержит её ключ",
               STAGE_COMMON_ATTRIBUTES in STAGE_INCOMPLETE_GROUPS,
               sorted(STAGE_INCOMPLETE_GROUPS))
@@ -436,6 +456,7 @@ check("1.18 ответ каждой стадии создаётся до её в
            ("session_parameters", "session_parameters_defaults"),
            ("roles", "roles_defaults"),
            ("common_attributes", "common_attributes_defaults"),
+           ("exchange_plans", "exchange_plans_defaults"),
            ("object_modules", "object_modules_defaults")]))
 check("1.19 карточка печатает раздел остановки общим форматёром контракта",
       "STOP_STAGE_SECTION_HEADER" in router_src
@@ -494,9 +515,9 @@ check("1.28 круг S4e не пересекается с кругами S4c и 
 
 
 def scope_counts(cur, cfg_uuid):
-    """Что лежит в базе по этой конфигурации: заголовок, индекс, таблицы шести стадий.
+    """Что лежит в базе по этой конфигурации: заголовок, индекс, таблицы семи стадий.
 
-    Перечень таблиц берётся из словарей слоёв (V44, V46, V48, V49, V50), а не
+    Перечень таблиц берётся из словарей слоёв (V44, V46, V48, V49, V50, V51), а не
     переписывается: проба обязана считать те же таблицы, которые пишет загрузчик.
     """
     counts = {}
@@ -527,6 +548,12 @@ def scope_counts(cur, cfg_uuid):
         counts["s4e:" + table] = int(one(
             cur, f"SELECT count(*) FROM {table} WHERE configuration_uuid = %s::uuid",
             [str(cfg_uuid)]) or 0)
+    # Узел V51 (шаг П8): строки S4f тоже входят в «что осталось в базе» — пропущенная
+    # стадия не обязана заполнять свои таблицы, и проба обязана видеть это числом.
+    for table in EXCHANGE_PLAN_TABLES:
+        counts["s4f:" + table] = int(one(
+            cur, f"SELECT count(*) FROM {table} WHERE configuration_uuid = %s::uuid",
+            [str(cfg_uuid)]) or 0)
     counts["s4b:bsl_modules"] = int(one(
         cur, "SELECT count(*) FROM bsl_modules WHERE configuration_uuid = %s::uuid "
              "AND parent_type = 'configuration_objects'", [str(cfg_uuid)]) or 0)
@@ -537,7 +564,8 @@ def stage_row_prefix(stage):
     """Префикс строк стадии в `scope_counts` — тот же порядок, что в словаре."""
     return {STAGE_ROOT_MODULES: "s3:", STAGE_CHILD_OBJECTS: "s4:",
             STAGE_SESSION_PARAMETERS: "s4c:", STAGE_ROLES: "s4d:",
-            STAGE_COMMON_ATTRIBUTES: "s4e:", STAGE_OBJECT_MODULES: "s4b:"}[stage]
+            STAGE_COMMON_ATTRIBUTES: "s4e:", STAGE_EXCHANGE_PLANS: "s4f:",
+            STAGE_OBJECT_MODULES: "s4b:"}[stage]
 
 
 def run_stage_failure(dump_dir, stage, baseline, cur, cfg_uuid):
@@ -771,7 +799,8 @@ def main() -> int:
               final["header"] == baseline["header"]
               and final["index"] == baseline["index"]
               and all(final[key] >= baseline[key] for key in final
-                      if key.startswith(("s3:", "s4:", "s4c:", "s4d:", "s4e:", "s4b:"))),
+                      if key.startswith(("s3:", "s4:", "s4c:", "s4d:", "s4e:", "s4f:",
+                                         "s4b:"))),
               {key: (baseline[key], final[key]) for key in final
                if final[key] < baseline[key]})
         check("3.4 карточка успешной загрузки раздела остановки не содержит",
