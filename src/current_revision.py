@@ -204,12 +204,30 @@ OBJECT_VERSIONED_TABLES = (
 # Круг стадии S4 от регистрации не расширяется: таблицы вида вычтены своей константой
 # `EXCHANGE_PLAN_TABLES` (src/configuration_load_contract.py). Причина названа узлами V49/V50:
 # проба `_v46_p4_writer_probe.py` падала на KeyError, пока стадия не объявляла свой круг.
+#
+# Узел V52 (01.11.2026, позиция 2.7 нормативного списка — критерии отбора,
+# `filter_criteria`, миграция `migrate_v52_filter_criteria.sql`) добавляет в круг ОДНУ
+# таблицу. Ключ цепочки — (configuration_uuid, object_name), как у V48/V50/V51: имя вида
+# уникально в конфигурации, а uuid вида повторяется между конфигурациями — замер раздела 1.3
+# плана docs/CONFIGURATION_FILTER_CRITERIA_PLAN.md даёт 14 различных uuid на 15 верхних
+# строк вида и семь совпадающих имён (в отличие от V48/V50/V51, где коллизия uuid была
+# множественной, здесь — одна пара; вывод тот же).
+# `filter_criterion_content` в круг НЕ вносится осознанно и это названо, а не обойено:
+# своей цепи ревизий у строк условия нет (Q2, вариант A по прецеденту
+# `common_attribute_targets` V50) — их ключ начинается с `filter_criterion_id`, то есть со
+# ссылки на конкретную ревизию строки вида; запись в этом словаре означала бы цепь, которой
+# у таблицы нет. Безцепочечная таблица названа исключением
+# `CONFIGURATION_UNVERSIONED_TABLES` (src/external_table_writer.py), а её витрина
+# `v_current_filter_criterion_content` строится связкой по этому id. Таблицы детей вида
+# (формы, команды) в круг не добавляются повторно: они уже в круге V51 (`forms`,
+# `form_ext`, `commands`), и V52 пишет в них теми же писателями, не меняя ключей (Q3).
 CONFIGURATION_VERSIONED_TABLES = (
     "subsystems", "subsystem_content", "common_modules", "common_module_sources",
     "session_parameters",
     "roles", "role_restriction_templates", "role_sources",
     "common_attributes",
     "exchange_plans", "exchange_plan_content", "commands",
+    "filter_criteria",
 )
 
 VERSIONED_TABLES = OBJECT_VERSIONED_TABLES + CONFIGURATION_VERSIONED_TABLES

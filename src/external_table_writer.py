@@ -2189,7 +2189,15 @@ CONFIGURATION_OBJECT_WRITERS = {
 # повторять свойства реквизита в двух местах и давать две разные «текущие» строки об одном
 # и том же применении; каскад `ON DELETE CASCADE` при этом и остаётся средством снятия
 # строк применения вместе с ревизией (проверка П3/П6 узла).
-CONFIGURATION_UNVERSIONED_TABLES = ("role_rights", "common_attribute_targets")
+# Узел V52 добавляет в список `filter_criterion_content` по тому же основанию (Q2,
+# вариант A): ключ строки условия начинается с `filter_criterion_id` — ссылки на конкретную
+# ревизию строки критерия отбора. Держать свою цепочку ревизий здесь значило бы давать две
+# разные «текущие» строки об одном и том же условии (замер 1.4 плана
+# docs/CONFIGURATION_FILTER_CRITERIA_PLAN.md: 1 219 целей на круг — цена, при которой
+# дублирование состояния читалось бы расхождением); каскад `ON DELETE CASCADE` остаётся
+# средством снятия строк условия вместе с ревизией вида.
+CONFIGURATION_UNVERSIONED_TABLES = ("role_rights", "common_attribute_targets",
+                                    "filter_criterion_content")
 
 
 class ConfigCrossReferenceRowWriter(TableRowWriter):
