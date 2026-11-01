@@ -119,6 +119,16 @@ DEFAULT_TARGETS = [
 # V51, раздел 5.4 плана): круг вида несимметричен по цене (46 строк свойств против 22 515
 # строк перечня `<Content>` и 33.2 МБ текстов макетов), а риск V50 отсутствует физически —
 # перечни детей выводятся из атрибутов uuid выгрузки, а не из записанных строк детей.
+# Узел V52 (П5, 01.11.2026) добавил load_filter_criteria_tool: core 9 → 10. Причина та же
+# (решение оператора Q5 узла V48 — свой вход на каждую позицию нормативного списка): файлы
+# регистрации вида `FilterCriteria/` (позиция 2.7) меняются, а заголовок и индекс состава —
+# нет. Стадия S4g конвейера и инструмент вызывают одну и ту же функцию слоя
+# (src/configuration_filter_criteria_loader.load_filter_criteria); отдельного контракта у
+# инструмента нет — закрытый словарь filter_criteria_defaults() и текст раздела даёт
+# configuration_load_contract. Отличие от входа V51 — групп `kinds` НЕТ (решение Q5 узла V52,
+# вариант A): строка условия существует только через числовой id строки вида (Q1, вариант A),
+# поэтому частичная запись круга описывала бы состав, которого в выгрузке нет, а порога цены,
+# при котором круг стоило бы резать, замер 1.4 не дал (1 219 целей на весь круг).
 EXPECTED_TOOLS = {
     "server_configurations_core.py": [
         "delete_external_report_tool", "load_1c_catalog_tool",
@@ -126,6 +136,7 @@ EXPECTED_TOOLS = {
         "load_configuration_object_properties_tool",
         "load_configuration_root_modules_tool", "load_external_object_file_tool",
         "load_exchange_plans_tool",
+        "load_filter_criteria_tool",
         "load_roles_tool", "load_session_parameters_tool",
     ],
     "server_configurations_enrichment.py": [

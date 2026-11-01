@@ -71,6 +71,8 @@ from configuration_load_contract import (  # noqa: E402
     COMMON_ATTRIBUTES_TABLES,
     EXCHANGE_PLAN_SECTION_HEADER,
     EXCHANGE_PLAN_TABLES,
+    FILTER_CRITERIA_SECTION_HEADER,
+    FILTER_CRITERIA_TABLES,
     OBJECT_MODULES_RELOAD_HINT,
     OBJECT_MODULES_SECTION_HEADER,
     ROLES_REPEAT_HINT,
@@ -84,6 +86,7 @@ from configuration_load_contract import (  # noqa: E402
     STAGE_CHILD_OBJECTS,
     STAGE_COMMON_ATTRIBUTES,
     STAGE_EXCHANGE_PLANS,
+    STAGE_FILTER_CRITERIA,
     STAGE_FULL_RELOAD_ONLY,
     STAGE_OBJECT_MODULES,
     STAGE_ROLES,
@@ -98,6 +101,7 @@ from configuration_load_contract import (  # noqa: E402
     child_objects_defaults,
     common_attributes_defaults,
     exchange_plans_defaults,
+    filter_criteria_defaults,
     format_roles_lines,
     format_stopped_stage_lines,
     root_modules_defaults,
@@ -107,6 +111,17 @@ from configuration_load_contract import (  # noqa: E402
     stage_title,
     stages_after,
     stopped_stage_defaults,
+)
+# Узел V52 (наблюдение П8 пробы `_v51_p8_stop_probe.py`): общий круг детей вида «план
+# обмена» читается той же функцией, что и снятие, — копия предиката в пробе разошлась бы с
+# загрузчиком незаметно (критерии отбора V52 пишут те же таблицы детей).
+from configuration_exchange_plans_loader import count_circle_child_rows  # noqa: E402
+# Узел V52 (стадия S4g): тот же приём для круга критериев отбора — общий круг детей вида
+# считается предикатом слоя, а не копией в пробе (те же таблицы пишут внешний контур,
+# вид V51 и вид V52).
+from configuration_filter_criteria_loader import (  # noqa: E402
+    SHARED_CHILD_TABLES as FILTER_CRITERIA_CHILD_TABLES,
+    count_criterion_child_rows,
 )
 from configuration_object_modules_loader import object_modules_defaults  # noqa: E402
 # Таблицы стадий — для проверки «осталось в базе»: перечень держит словарь слоя
@@ -129,9 +144,13 @@ ROUTER = ROOT / "src" / "config_load_router.py"
 # (позиция 2.6 нормативного списка), и отношение пробы к ней то же: собственных проверок S4f
 # эта проба не заводит (они в `_v51_p8_stop_probe.py`), но пропустить чужую стадию в
 # справочниках значит получить KeyError вместо проверки или пустой фильтр вместо числа.
+# Узел V52 (шаг П5) добавляет S4g — она стоит между S4f и S4b (позиция 2.7 нормативного
+# списка); отношение пробы к ней то же: собственных проверок S4g эта проба не заводит (они
+# в `_v52_*` пробах узла), но справочники обязаны перечислять все стадии конвейера.
 CHILD_STAGES = (
     STAGE_ROOT_MODULES, STAGE_CHILD_OBJECTS, STAGE_SESSION_PARAMETERS, STAGE_ROLES,
-    STAGE_COMMON_ATTRIBUTES, STAGE_EXCHANGE_PLANS, STAGE_OBJECT_MODULES,
+    STAGE_COMMON_ATTRIBUTES, STAGE_EXCHANGE_PLANS, STAGE_FILTER_CRITERIA,
+    STAGE_OBJECT_MODULES,
 )
 STAGE_KEYS = {
     STAGE_ROOT_MODULES: "root_modules",
@@ -140,6 +159,7 @@ STAGE_KEYS = {
     STAGE_ROLES: "roles",
     STAGE_COMMON_ATTRIBUTES: "common_attributes",
     STAGE_EXCHANGE_PLANS: "exchange_plans",
+    STAGE_FILTER_CRITERIA: "filter_criteria",
     STAGE_OBJECT_MODULES: "object_modules",
 }
 SECTION_HEADERS = {
@@ -149,6 +169,7 @@ SECTION_HEADERS = {
     STAGE_ROLES: ROLES_SECTION_HEADER,
     STAGE_COMMON_ATTRIBUTES: COMMON_ATTRIBUTES_SECTION_HEADER,
     STAGE_EXCHANGE_PLANS: EXCHANGE_PLAN_SECTION_HEADER,
+    STAGE_FILTER_CRITERIA: FILTER_CRITERIA_SECTION_HEADER,
     STAGE_OBJECT_MODULES: OBJECT_MODULES_SECTION_HEADER,
 }
 DEFAULTS = {
@@ -158,6 +179,7 @@ DEFAULTS = {
     STAGE_ROLES: roles_defaults,
     STAGE_COMMON_ATTRIBUTES: common_attributes_defaults,
     STAGE_EXCHANGE_PLANS: exchange_plans_defaults,
+    STAGE_FILTER_CRITERIA: filter_criteria_defaults,
     STAGE_OBJECT_MODULES: object_modules_defaults,
 }
 # Функция стадии — имя в модуле загрузчика: `register_configuration` обращается к имени
@@ -169,6 +191,7 @@ STAGE_FUNCTIONS = {
     STAGE_ROLES: "load_roles",
     STAGE_COMMON_ATTRIBUTES: "load_common_attributes",
     STAGE_EXCHANGE_PLANS: "load_exchange_plans",
+    STAGE_FILTER_CRITERIA: "load_filter_criteria",
     STAGE_OBJECT_MODULES: "load_object_modules",
 }
 # Чем продолжение допустимо (подстрока подсказки): у стадии с отдельным входом — имя его
@@ -180,6 +203,7 @@ RESUME_MARKS = {
     STAGE_ROLES: "load_roles_tool",
     STAGE_COMMON_ATTRIBUTES: "load_common_attributes_tool",
     STAGE_EXCHANGE_PLANS: "load_exchange_plans_tool",
+    STAGE_FILTER_CRITERIA: "load_filter_criteria_tool",
     STAGE_OBJECT_MODULES: "load_1c_catalog_tool",
 }
 # Слова, которыми форматёр называет состояние стадии (правило C2): «не удалась» — круг
@@ -497,10 +521,16 @@ def scope_counts(cur, cfg_uuid):
             cur, f"SELECT count(*) FROM {table} WHERE configuration_uuid = %s::uuid",
             [str(cfg_uuid)]) or 0)
     # Узел V51 (шаг П8): строки S4f входят в «что осталось в базе» по тому же правилу.
+    # Общий круг детей вида считается загрузчиком (V52, наблюдение П8 пробы V51): те же
+    # таблицы пишут критерии отбора, внешние объекты и модули, поэтому подсчёт по одной ноге
+    # `configuration_uuid` читал бы чужие строки как круг стадии S4f.
     for table in EXCHANGE_PLAN_TABLES:
-        counts["s4f:" + table] = int(one(
-            cur, f"SELECT count(*) FROM {table} WHERE configuration_uuid = %s::uuid",
-            [str(cfg_uuid)]) or 0)
+        counts["s4f:" + table] = count_circle_child_rows(cur, cfg_uuid, table)
+    # Узел V52 (шаг П5): строки S4g входят в «что осталось в базе» по тому же правилу;
+    # круг вида считается тем же предикатом, что и снятие — две таблицы вида по ноге
+    # `configuration_uuid`, дети по uuid родителей круга (таблицы общие).
+    for table in FILTER_CRITERIA_TABLES + FILTER_CRITERIA_CHILD_TABLES:
+        counts["s4g:" + table] = count_criterion_child_rows(cur, cfg_uuid, table)
     counts["s4b:bsl_modules"] = int(one(
         cur, "SELECT count(*) FROM bsl_modules WHERE configuration_uuid = %s::uuid "
              "AND parent_type = 'configuration_objects'", [str(cfg_uuid)]) or 0)
@@ -513,6 +543,7 @@ def stage_row_prefix(stage):
             STAGE_SESSION_PARAMETERS: "s4c:", STAGE_ROLES: "s4d:",
             STAGE_COMMON_ATTRIBUTES: "s4e:",
             STAGE_EXCHANGE_PLANS: "s4f:",
+            STAGE_FILTER_CRITERIA: "s4g:",
             STAGE_OBJECT_MODULES: "s4b:"}[stage]
 
 
@@ -688,7 +719,7 @@ def main() -> int:
               and final["index"] == baseline["index"]
               and all(final[key] >= baseline[key] for key in final
                       if key.startswith(("s3:", "s4:", "s4c:", "s4d:", "s4e:", "s4f:",
-                                         "s4b:"))),
+                                         "s4g:", "s4b:"))),
               {key: (baseline[key], final[key]) for key in final
                if final[key] < baseline[key]})
         check("3.4 карточка успешной загрузки раздела остановки не содержит",

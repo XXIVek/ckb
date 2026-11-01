@@ -198,6 +198,36 @@
     BGU2 и BP3 при разных uuid, а 14 uuid детей совпадают между конфигурациями (замер 3.2),
     и без ключа конфигурации две выгрузки слились бы в одну строку.
 
+Узел V52 (01.11.2026, шаг П5) — свойства критериев отбора, позиция 2.7 нормативного списка
+(`docs/CONFIGURATION_FILTER_CRITERIA_PLAN.md`):
+
+    src/configuration_filter_criteria_loader.py :: load_filter_criteria(source_path,
+    configuration_uuid=None, changed_at=None)  →  таблицы вида `filter_criteria`,
+    `filter_criterion_content` и его дети `forms`, `form_ext`, `commands` (таблицы общие)
+
+Порядок вызова повторяет S3/S4/S4c/S4d/S4e/S4f: стадия идёт ПОСЛЕ фиксации заголовка и
+индекса состава, потому что цели перечня `<Content>` и ссылки блока `<Type>` разрешаются
+записями `configuration_objects` (Q4). Дальнейшее отличает её от соседних стадий:
+
+  * стадия `s4g_filter_criteria` стоит между `s4f_exchange_plans` и `s4b_object_modules` —
+    порядок `STAGES` повторяет порядок нормативного списка (2.7 идёт сразу за 2.6, Q10
+    вариант A); перенумерации нет, S5 по-прежнему зарезервирован за анализом;
+  * ответ лежит в собственном ключе `filter_criteria` (правило C3);
+  * групп `kinds` у стадии и у отдельного входа `load_filter_criteria_tool` НЕТ — это
+    решение Q5 (вариант A), а не упущение: строка условия существует только через id строки
+    вида (Q1), а порога цены, при котором круг стоило бы резать, замер 1.4 не дал (1 219
+    целей на весь круг, максимум 727 в одном файле);
+  * круг пишется ОДНОЙ транзакцией, порядок записи держится иерархией данных: строки вида
+    (`insert_ids`, `RETURNING id`) → дети → `form_ext` → строки перечня `<Content>` (ссылка
+    на числовой `filter_criterion_id` конкретной ревизии — своей цепи у строки условия нет,
+    Q2 вариант A);
+  * строки вида снимаются вместе с заголовком явным `DELETE` (`remove_filter_criteria` в
+    `_remove_rows`), начиная с `form_ext` (порядок держит `REMOVE_ORDER` слоя). Детей вида —
+    формы и команды — снимает предикат по uuid родителей круга: таблицы `forms`, `form_ext`,
+    `commands` общие для внешнего контура, вида V51 и этого узла, и снятие по одной ноге
+    `configuration_uuid` сняло бы строки детей всех объектов конфигурации (наблюдение П4);
+  * тела модулей вида узел НЕ читает: файлы названы дескрипторами, тексты принадлежат V47
+    (Q8) — двух чтений одного файла два узла не делают.
 
 
 Чтения идут через psycopg2 (`src/external_db.py`), а не psql-подпроцессом: `_run_psql` /
@@ -277,6 +307,22 @@ from configuration_exchange_plans_loader import (
     load_exchange_plans,
     remove_exchange_plans,
 )
+# Узел V52 (стадия S4g, позиция 2.7 нормативного списка): свойства критериев отбора — тот
+# же слой, что и отдельный инструмент `load_filter_criteria_tool` (шаг П5); контракт стадии и
+# форматёр — в configuration_load_contract. Строки круга снимаются вместе с заголовком явным
+# DELETE (внешнего ключа и каскада в схеме нет осознанно — прецедент V20.1), поэтому
+# `_remove_rows` обязан вызвать его явно: без этого force=True оставил бы в базе прежний
+# состав вида (для BP3 это 6 строк вида и 492 строки перечня `<Content>` — замер 1.4).
+# Снятие начинается с `form_ext` (порядок держит `REMOVE_ORDER` слоя). Детей вида — формы и
+# команды — снимает ограниченный предикат по uuid родителей круга: таблицы `forms`,
+# `form_ext`, `commands` общие для внешнего контура, вида V51 и этого узла, поэтому снятие по
+# одной ноге `configuration_uuid` сняло бы строки детей всех объектов конфигурации
+# (наблюдение П4 узла V52, тот же дефект, что закрывал V51).
+from configuration_filter_criteria_loader import (
+    existing_criterion_uuids,
+    load_filter_criteria,
+    remove_filter_criteria,
+)
 # Узел V47 (стадия S4b): модули объектов конфигурации — вторая транзакция после фиксации
 # содержимого (Q6, граница D7). Точка входа стадии одна и отдельного инструмента у неё нет
 # (Q4.1), поэтому здесь импортируется и ответ «стадия не выполнялась» (`mark_index_unavailable`):
@@ -294,6 +340,8 @@ from configuration_load_contract import (
     COMMON_ATTRIBUTES_SECTION_HEADER,
     EXCHANGE_PLAN_REPEAT_HINT,
     EXCHANGE_PLAN_SECTION_HEADER,
+    FILTER_CRITERIA_REPEAT_HINT,
+    FILTER_CRITERIA_SECTION_HEADER,
     NOT_RUN_STOPPED_REASON,
     OBJECT_MODULES_SECTION_HEADER,
     ROLES_REPEAT_HINT,
@@ -306,6 +354,7 @@ from configuration_load_contract import (
     STAGE_CHILD_OBJECTS,
     STAGE_COMMON_ATTRIBUTES,
     STAGE_EXCHANGE_PLANS,
+    STAGE_FILTER_CRITERIA,
     STAGE_INCOMPLETE_GROUPS,
     STAGE_OBJECT_MODULES,
     STAGE_ROLES,
@@ -317,6 +366,7 @@ from configuration_load_contract import (
     child_objects_defaults,
     common_attributes_defaults,
     exchange_plans_defaults,
+    filter_criteria_defaults,
     roles_defaults,
     root_modules_defaults,
     session_parameters_defaults,
@@ -631,6 +681,20 @@ def _remove_rows(cur, cfg_id, configuration_uuid=None):
         plan_uuids = sorted(existing_plan_revisions(cur, configuration_uuid))
         parents = plan_uuids + existing_section_uuids(cur, plan_uuids)
         children.update(remove_exchange_plans(cur, configuration_uuid, parents))
+    # Узел V52 (стадия S4g): строки круга критериев отбора тоже адресуются uuid заголовка,
+    # а внешнего ключа и каскада по нему в схеме нет осознанно (прецеденты V20.1…V51).
+    # Снятие обязан выполнять этот же явный DELETE: без него force=True оставил бы в базе
+    # строки вида, которые ни к какой конфигурации не относятся и не читаются ни одной
+    # карточкой, а `delete_configuration` упал бы на отсутствии каскада. Родителями детей
+    # держат uuid строк вида, которые ещё лежат в базе (`existing_criterion_uuids` — тот же
+    # приём, что `existing_plan_revisions` V51): детей обязан снять и у вида, файла которого
+    # в этой выгрузке больше нет, иначе его формы и команды остались бы сиротами. Своих
+    # табличных частей у вида нет (замер 1.2), поэтому uuid частей к перечню добавлять не
+    # нужно — в отличие от V51.
+    if configuration_uuid:
+        children.update(remove_filter_criteria(
+            cur, configuration_uuid, sorted(existing_criterion_uuids(cur,
+                                                                    configuration_uuid))))
     cur.execute("DELETE FROM configurations WHERE id = %s", [cfg_id])
     children["configurations"] = cur.rowcount
     return children
@@ -729,7 +793,8 @@ def _objects_table_available():
 
 def _written_before_stop_note(new_id, objects_written, header_arrays_filled,
                               root_modules, child_objects, session_parameters,
-                              roles=None, common_attributes=None, exchange_plans=None):
+                              roles=None, common_attributes=None, exchange_plans=None,
+                              filter_criteria=None):
     """Что реально лежит в базе на момент остановки конвейера (узел V48, шаг П8).
 
     Строка обязана быть: остановка стадии откатом не является (стадии S3+ идут после коммита
@@ -782,6 +847,18 @@ def _written_before_stop_note(new_id, objects_written, header_arrays_filled,
                 for table in ("exchange_plans", "exchange_plan_content", "commands",
                               "attributes", "tabular_sections", "forms", "form_ext",
                               "templates"))
+        )
+    # Узел V52 (стадия S4g): круг называется своими пятью таблицами — «критерии отбора
+    # записаны» без числа строк перечня `<Content>` и без числа форм/команд читалось бы как
+    # полный состав вида, хотя условий в базе может и не быть (пустой `<Content>` — состояние
+    # `empty_content` строки вида, MinCfg и KomMag).
+    if filter_criteria and filter_criteria.get("success"):
+        parts.append(
+            "свойства критериев отбора: "
+            + ", ".join(
+                f"{table}={int((filter_criteria.get('written_by_table') or {}).get(table) or 0)}"
+                for table in ("filter_criteria", "filter_criterion_content", "forms",
+                              "form_ext", "commands"))
         )
     return "; ".join(parts)
 
@@ -1088,6 +1165,12 @@ def register_configuration(source_path, force=False, xml_path=None):
     # запрашиваются: конвейер обязан записать весь круг (Q5, п. 1), раздельный вход — у
     # отдельного инструмента `load_exchange_plans_tool`.
     exchange_plans = exchange_plans_defaults()
+    # Узел V52 (стадия S4g, позиция 2.7 списка): свойства критериев отбора — ответ в
+    # собственном ключе `filter_criteria` (правило C3). Групп `kinds` у стадии нет — это
+    # решение Q5 узла V52 (вариант A): строка условия существует только через id строки вида
+    # (Q1), поэтому конвейер обязан записать весь круг целиком, а раздельной дозагрузки
+    # группами у вида нет ни у стадии, ни у отдельного входа.
+    filter_criteria = filter_criteria_defaults()
     object_modules = object_modules_defaults()
     # Узел V48 (шаг П8, правило C2): пропущенная стадия называет причину пропуска. Без неё
     # форматёр стадии печатает «загрузчик не назвал причину», и читатель карточки видит
@@ -1097,7 +1180,7 @@ def register_configuration(source_path, force=False, xml_path=None):
     # (тот же приём, что `mark_index_unavailable` узла V47). Причина — в `reason`, а не в
     # `error`: «не выполнялась» и «отказала после начала работы» различаются именно так.
     for _empty_stage in (child_objects, session_parameters, roles, common_attributes,
-                         exchange_plans, object_modules):
+                         exchange_plans, filter_criteria, object_modules):
         _empty_stage["reason"] = NOT_RUN_STOPPED_REASON
     object_modules["status"] = STATUS_NOT_RUN
     stopped_stage = stopped_stage_defaults()
@@ -1116,7 +1199,8 @@ def register_configuration(source_path, force=False, xml_path=None):
             stage_id, stage_result,
             _written_before_stop_note(new_id, objects_written, header_arrays_filled,
                                       root_modules, child_objects, session_parameters,
-                                      roles, common_attributes, exchange_plans),
+                                      roles, common_attributes, exchange_plans,
+                                      filter_criteria),
             warnings, incomplete_groups)
 
     if not stopped:
@@ -1366,6 +1450,56 @@ def register_configuration(source_path, force=False, xml_path=None):
             stopped = True
             load_incomplete = True
 
+    # ── узел V52 (стадия S4g, позиция 2.7 списка): свойства критериев отбора ──────────
+    # Порядок вызова повторяет S3/S4/S4c/S4d/S4e/S4f: ПОСЛЕ коммита транзакции заголовка
+    # (своим соединением стадия не увидела бы ни незакоммиченного заголовка, ни строк индекса
+    # состава, по которым разрешаются цели перечня `<Content>` и ссылки блока `<Type>` — Q4),
+    # ключ — uuid, каталог тот же `root_source`. Стадия отдельная, а не расширение S4f
+    # (прецедент Q5 узлов V48–V51): правило C3 требует своего ключа ответа `filter_criteria`;
+    # порядок `STAGES` повторяет порядок нормативного списка (2.7 идёт сразу за 2.6). Отказ
+    # стадии, как у S3/S4/S4c–S4f, записанный заголовок не отменяет (C5) — но останавливает
+    # конвейер (решение Q8 узла V48, вариант A): S4b после отказа S4g не выполняется и
+    # читается `not_run`.
+    #
+    # Конвейер просит ВЕСЬ круг: групп `kinds` у вида нет (Q5 узла V52, вариант A), потому
+    # что строка условия неотделима от строки вида (Q1). Отсутствие каталога `FilterCriteria/`
+    # — не отказ, а ответ о выгрузке: `files_found = 0` с наблюдением `directory_missing`
+    # (ни одна из четырёх замеренных выгрузок такого не даёт — состояние держит отдельная
+    # проба П4 с пустым кругом).
+    #
+    # Штамп времени общий с остальными стадиями этой загрузки (M2) — `load_moment` задан
+    # выше, где начинается событие детей заголовка.
+    if not stopped:
+        try:
+            filter_criteria = load_filter_criteria(
+                root_source, configuration_uuid=row["uuid"], changed_at=load_moment)
+        except Exception as exc:  # noqa: BLE001 — отказ стадии называется, а не бросается
+            filter_criteria = filter_criteria_defaults()
+            filter_criteria["configuration_id"] = new_id
+            filter_criteria["configuration_uuid"] = row["uuid"]
+            filter_criteria["configuration_name"] = row["name"]
+            filter_criteria["status"] = STATUS_ERROR
+            filter_criteria["error"] = (
+                f"исключение слоя свойств критериев отбора: {exc}")
+            filter_criteria["reason"] = filter_criteria["error"]
+        for criterion_warning in filter_criteria.get("warnings") or []:
+            warnings.append(f"критерии отбора: {criterion_warning}")
+        if not filter_criteria.get("success"):
+            # Заголовок, индекс состава, модули корня, свойства подсистем с общими модулями,
+            # параметры сеанса, роли, общие реквизиты и планы обмена уже записаны, и отказ этой
+            # стадии их не отменяет (C5). Молчать нельзя по той же причине, что у V44/V46 и
+            # V48–V51: после force=True прежние строки сняты, и «загружено» без этой строки
+            # читалось бы как полный состав конфигурации.
+            warnings.append(
+                "Свойства критериев отбора не загружены — причина названа строкой "
+                "«Стадия не выполнена» в разделе «" + FILTER_CRITERIA_SECTION_HEADER
+                + "» карточки. Чем продолжить: "
+                + f"{FILTER_CRITERIA_REPEAT_HINT} (configuration_uuid={row['uuid']})."
+            )
+            stopped_stage = _stop_here(STAGE_FILTER_CRITERIA, filter_criteria)
+            stopped = True
+            load_incomplete = True
+
     # ── узел V47 (стадия S4b): модули объектов конфигурации ────────────────────────────
     # Вторая транзакция ПОСЛЕ фиксации содержимого конфигурации (решение Q6, граница D7
     # узла V46): отказ стадии не откатывает заголовок, индекс состава, модули корня и
@@ -1485,6 +1619,12 @@ def register_configuration(source_path, force=False, xml_path=None):
         # `common_attributes` (правило C3). Текст раздела даёт общий форматёр контракта —
         # тот же, что отдаёт отдельный инструмент `load_exchange_plans_tool` (шаг П5).
         "exchange_plans": exchange_plans,
+        # узел V52: машинная часть стадии S4g (позиция 2.7 списка) — полная; ответ лежит в
+        # собственном ключе, а не внутри `child_objects`, `roles`, `common_attributes` или
+        # `exchange_plans` (правило C3). Текст раздела даёт общий форматёр контракта — тот
+        # же, что отдаёт отдельный инструмент `load_filter_criteria_tool` (шаг П5). Групп
+        # `kinds` в ответе нет — это решение Q5 узла V52 (вариант A), а не пропуск.
+        "filter_criteria": filter_criteria,
         # узел V47: машинная часть стадии S4b — полная (тот же закрытый контракт, который
         # читают проба П4 и проверка П5); текст раздела даёт общий форматёр контракта.
         # `load_incomplete`/`incomplete_groups` — признак того, что состав в БД неполный

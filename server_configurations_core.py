@@ -143,16 +143,29 @@ from configuration_common_attributes_loader import load_common_attributes
 # детей выводятся из атрибутов uuid выгрузки, а не из записанных строк детей. Пустое значение
 # `kinds` означает весь круг.
 from configuration_exchange_plans_loader import load_exchange_plans
+# Узел V52 (01.11.2026, шаг П5) — свойства критериев отбора, позиция 2.7 нормативного
+# списка (docs/CONFIGURATION_FILTER_CRITERIA_PLAN.md): десятый инструмент реестра. Порядок
+# тот же, что у V44/V46/V48/V49/V50/V51: одна и та же функция слоя стоит за стадией
+# конвейера S4g (src/configuration_loader.py) и за этим инструментом; закрытый контракт и
+# словари состояний живут в src (configuration_filter_criteria*,
+# configuration_load_contract), а текст раздела даёт общий форматёр — карточка загрузки и
+# инструмент описывают слой одинаково (прецедент V45). Отличие от входа V51 — групп `kinds`
+# НЕТ (решение Q5 узла V52, вариант A): строка условия существует только через id строки
+# вида (Q1), а порога цены, при котором круг стоило бы резать, замер 1.4 не дал (1 219 целей
+# на весь круг, максимум 727 в одном файле) — вход дозагружает весь круг сразу.
+from configuration_filter_criteria_loader import load_filter_criteria
 from configuration_load_contract import (
     CHILD_SECTION_HEADER,
     COMMON_ATTRIBUTES_SECTION_HEADER,
     EXCHANGE_PLAN_SECTION_HEADER,
+    FILTER_CRITERIA_SECTION_HEADER,
     ROLES_SECTION_HEADER,
     ROOT_MODULES_SECTION_HEADER,
     SESSION_PARAMETERS_SECTION_HEADER,
     format_child_object_lines,
     format_common_attributes_lines,
     format_exchange_plans_lines,
+    format_filter_criteria_lines,
     format_roles_lines,
     format_root_modules_lines,
     format_session_parameters_lines,
@@ -940,6 +953,124 @@ def load_exchange_plans_tool(source_path: str, configuration_uuid: str = None,
             load_exchange_plans(source_path, configuration_uuid, kinds))
     except Exception as e:
         return ("❌ Не могу загрузить свойства планов обмена: внутренняя ошибка "
+                f"загрузчика: {str(e)}")
+
+
+def _format_filter_criteria_result(result: dict) -> str:
+    """Карточка стадии S4g (узел V52, позиция 2.7); текст даёт общий форматёр контракта.
+
+    Тот же приём, что у V44/V45/V46/V48/V49/V50/V51: ключи ответа — закрытый словарь
+    `configuration_load_contract.filter_criteria_defaults()`, его возвращает слой
+    `load_filter_criteria`, его же печатает раздел карточки `load_1c_catalog_tool`. Свой
+    список ключей здесь не заводится, а строку причины печатает форматёр («Стадия не
+    выполнена: …» / «Стадия не удалась: …») — повторить её здесь значило бы дать два текста
+    об одном отказе.
+    """
+    if not result.get("success"):
+        lines = ["❌ Не могу загрузить свойства критериев отбора."]
+        lines.extend(format_filter_criteria_lines(result))
+        if result.get("configuration_id") is not None:
+            lines.append(
+                "Строка заголовка конфигурации при этом существует: причину называет сам "
+                "слой загрузки — нет Configuration.xml, индекс состава не читается, файл "
+                "регистрации вида не разобран, файл круга не подтверждён записью индекса, "
+                "блок <Type> имеет форму, не входящую в замкнутый словарь контейнеров "
+                "(`Type` | `TypeSet`), или разрезана строка вида и её перечень <Content>."
+            )
+        lines.append(
+            "Подсказка: таблицы слоя создаёт шаг 2 установки "
+            "(create_1c_configurations_db.sql) либо migrate_v52_filter_criteria.sql."
+        )
+        return "\n".join(lines)
+    lines = ["✅ Свойства критериев отбора загружены (узел V52, стадия S4g, позиция 2.7)."]
+    lines.append(f"{FILTER_CRITERIA_SECTION_HEADER}:")
+    lines.extend(format_filter_criteria_lines(result, indent="   "))
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def load_filter_criteria_tool(source_path: str, configuration_uuid: str = None):
+    """Загрузить свойства критериев отбора конфигурации (узел V52, стадия S4g).
+
+    Слой тот же, что стадия S4g конвейера `load_1c_catalog_tool`: отдельная точка входа нужна
+    для случая «изменились только файлы регистрации вида» — заголовок и индекс состава при
+    этом не меняются, и заново разбирать всю выгрузку не нужно (тот же порядок, что у
+    `load_configuration_root_modules_tool` (V44), `load_configuration_object_properties_tool`
+    (V46), `load_session_parameters_tool` (V48), `load_roles_tool` (V49),
+    `load_common_attributes_tool` (V50) и `load_exchange_plans_tool` (V51); решение оператора
+    Q5 узла V48 — свой вход на каждую позицию нормативного списка).
+
+    Позиция нормативного списка — 2.7 «Критерии отбора» файла «Структура конфигурации.txt»
+    (её номер называется и в заголовке раздела ответа). Круг — файл регистрации вида
+    `FilterCriteria/<Имя>.xml` с его подкаталогами `Forms/`, `Commands/`, `Ext/` и записи
+    индекса состава того же вида (`FilterCriterion.<Имя>`); третьей независимой ногой круга
+    является перечень заголовка `configurations.filter_criteria`, который заполняет стадия S2
+    и который стадия S4g не пишет. Расхождения ног называются `index_only`, `file_only`,
+    `uuid_mismatch`, расхождения детей с индексом — `child_mismatches` и псевдозаписи слотов
+    индекса (`index_pseudo_entries`), сверка объявления вида с его каталогом —
+    `declaration_mismatches`; нули являются ответом, а не молчанием (замеры 1.1 дают 1/2/6/6
+    файлов и 0/7/727/492 целей перечня на четырёх выгрузках).
+
+    Записываются таблицы вида `filter_criteria` (11 свойств файла регистрации, блок `<Type>` в
+    закрытом словаре записей с ключом `container` и состояния ссылок на основную и
+    вспомогательную формы) и `filter_criterion_content` (строки перечня `<Content>`: цель,
+    порядок в файле, состояние разрешения цели), а также дети вида — `forms` с содержимым
+    `form_ext` и `commands` (таблицы общие с внешним контуром и с видом V51, поэтому и
+    пишутся, и снимаются предикатом по uuid родителей круга). Строка условия версионируется НЕ
+    своей цепью (Q2, вариант A): ключ начинается с `filter_criterion_id` — числового id
+    конкретной ревизии строки вида, поэтому порядок записи держится иерархией данных (сначала
+    вид через `insert_ids`, затем дети и перечень) одной транзакцией, а каскад
+    `filter_criterion_content_filter_criterion_id_fkey` снимает условие вместе с ревизией.
+
+    Групп запроса (`kinds`) у этого входа НЕТ — это решение, а не упущение (Q5, вариант A):
+    строка условия существует только через id строки вида (Q1, вариант A), поэтому частичная
+    запись круга описывала бы состав, которого в выгрузке нет, а порога цены, при котором круг
+    стоило бы резать, замер 1.4 не дал — вход дозагружает весь круг сразу.
+
+    Состояния разбора различаются закрытыми словарями и называются, а не читаются нулями:
+    свойства (`all_known`/`unknown_value`/`unknown_tag`), перечень (`with_content`/
+    `empty_content` — MinCfg и KomMag дают пустой блок состоянием строки вида), дети
+    (`with_children`/`empty_children`/`indexed_no_file`/`file_not_in_index`), ссылки на формы
+    (`with_reference`/`empty_value`/`absent`/`unknown_form` — BGU2 и BP3 дают пустые
+    значения), блок `<Type>` (`parsed`/`partial`/`absent`/`unknown_form`), его кратность
+    (`absent`/`single`/`composite`), классы (`primitive`/`object_ref`/`defined_type_ref`/
+    `unknown`) и форма контейнера (`Type`/`TypeSet` — KomMag даёт `<v8:TypeSet>`, Q6);
+    разрешение цели (`exact`/`prefix_only`/`unresolved`) и её состав по видам метаданных —
+    ответ о круге, а не потерянная строка (Q4).
+
+    Отказ разбора ЛЮБОГО файла круга останавливает стадию ДО записи: половина круга читалась
+    бы как полный состав вида (приём V12/V46/V48/V49/V50/V51), прежние строки при этом не
+    снимаются. Отсутствующий каталог `FilterCriteria/` — не отказ, а ответ о выгрузке:
+    `files_found = 0` с наблюдением `directory_missing`.
+
+    Повтор снимает прежние строки этой конфигурации и пишет заново, снятое названо; история
+    состояний не заводится (её даёт узел правки объекта, которого в схеме ещё нет, D8).
+    Конфигурация должна быть уже загружена точкой входа `load_1c_catalog_tool`: внешнего
+    ключа в схеме нет осознанно (прецедент V20.1). Записав и зафиксировав строки, слой
+    пересобирает статистику затронутых таблиц (`ANALYZE`, мера V46); отказ этой операции —
+    предупреждение, а не отказ загрузки.
+
+    Чего инструмент НЕ делает: не загружает заголовок конфигурации и индекс состава (это
+    точка входа `load_1c_catalog_tool`), не читает тела модулей вида — их пишет узел V47 в
+    `bsl_modules`, здесь файлы названы дескрипторами (Q8), не хранит справочные ресурсы формы
+    (`Ext/Help.xml`, каталог `Ext/Help/`) — колонок под них в схеме нет, наличие называется
+    наблюдениями `help_file` и `help_resources_dir` (Q7), не загружает определённые типы
+    (`DefinedTypes` в выгрузке вида нет, замер 2.4.4) и не трогает остальные группы A–H
+    модели V38.
+
+    Args:
+        source_path: Каталог XML-выгрузки конфигурации. Обязателен: провенанс строк
+            конфигурации в БД не ведётся (решение D-C), по строке заголовка каталог не
+            восстанавливается.
+        configuration_uuid: Необязательный uuid заголовка из БД. Если задан — сверяется с
+            uuid из Configuration.xml, и расхождение называется отказом, а не разрешается
+            молча (иначе строки свойств ушли бы чужой конфигурации).
+    """
+    try:
+        return _format_filter_criteria_result(
+            load_filter_criteria(source_path, configuration_uuid))
+    except Exception as e:
+        return ("❌ Не могу загрузить свойства критериев отбора: внутренняя ошибка "
                 f"загрузчика: {str(e)}")
 
 

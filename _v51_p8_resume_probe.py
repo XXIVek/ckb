@@ -10,7 +10,12 @@ MCP-инструмент (двух кодов, способных разойти
 проверяются три факта:
 
   1 — конвейер останавливается на S4f (подмена функции стадии, как в
-      `_v51_p8_stop_probe.py`): строки круга вида сняты, заголовок и индекс состава остались;
+      `_v51_p8_stop_probe.py`): строки круга вида сняты, заголовок и индекс состава остались.
+      После отказа S4f не вызываются ВСЕ последующие стадии — и S4g критериев отбора (узел V52,
+      шаг П5: стадия внесена в `STAGES` между `s4f_exchange_plans` и `s4b_object_modules`), и
+      S4b модулей объектов. Обе отсчитываются обёртками, которые зовут настоящую функцию и
+      записывают число вызовов: «не вызывалась» доказывается нулём счётчика, а не отсутствием
+      записи в словаре (тот же урок, что у `_v51_p8_stop_probe.py`).
   2 — одиночный вызов слоя по каталогу выгрузки восстанавливает круг; заголовок (id, uuid,
       имя, `created_at`) и индекс состава НЕ изменились — продолжение не требует полной
       перезагрузки конфигурации; снятые прежние строки названы числами `removed_by_table` и
@@ -44,6 +49,7 @@ import configuration_loader as CL  # noqa: E402  — подмена функци
 from config_load_router import load_catalog  # noqa: E402
 from configuration_exchange_plans_loader import (  # noqa: E402
     REMOVE_ORDER as CIRCLE_TABLES,
+    count_circle_child_rows,
     load_exchange_plans,
 )
 from configuration_load_contract import (  # noqa: E402
@@ -51,6 +57,7 @@ from configuration_load_contract import (  # noqa: E402
     STAGE_CHILD_OBJECTS,
     STAGE_COMMON_ATTRIBUTES,
     STAGE_EXCHANGE_PLANS,
+    STAGE_FILTER_CRITERIA,
     STAGE_OBJECT_MODULES,
     STAGE_ROLES,
     STAGE_ROOT_MODULES,
@@ -60,6 +67,7 @@ from configuration_load_contract import (  # noqa: E402
     child_objects_defaults,
     common_attributes_defaults,
     exchange_plans_defaults,
+    filter_criteria_defaults,
     format_exchange_plans_lines,
     root_modules_defaults,
     roles_defaults,
@@ -73,11 +81,16 @@ DUMPS = ("MinCfg", "KomMag", "BGU2", "BP3")
 
 # Стадии, которые подменяются успешным нулевым ответом, чтобы конвейер дошёл ровно до S4f и
 # остановился на ней: тот же приём, что в `_v51_p8_stop_probe.py` (подмена в модуле
-# загрузчика, а не локальной копии). S4b не подменяется: после отказа S4f она не вызывается.
+# загрузчика, а не локальной копии). S4g и S4b НЕ подменяются заглушками: после отказа S4f
+# они не вызываются, а проверка этого факта требует счётчика — поэтому на них ставится
+# обёртка, которая зовёт настоящую функцию и помечает вызов в `calls`. S4g стоит между S4f
+# и S4b с узла V52 (шаг П5), и пропуск только S4b ничего бы не доказал: отказ S4f обязан
+# снять со вызовов весь хвост `STAGES`.
 EARLIER_STAGES = (
     STAGE_ROOT_MODULES, STAGE_CHILD_OBJECTS, STAGE_SESSION_PARAMETERS, STAGE_ROLES,
     STAGE_COMMON_ATTRIBUTES,
 )
+LATER_STAGES = (STAGE_FILTER_CRITERIA, STAGE_OBJECT_MODULES)
 STAGE_FUNCTIONS = {
     STAGE_ROOT_MODULES: "load_root_modules",
     STAGE_CHILD_OBJECTS: "load_object_properties",
@@ -85,6 +98,7 @@ STAGE_FUNCTIONS = {
     STAGE_ROLES: "load_roles",
     STAGE_COMMON_ATTRIBUTES: "load_common_attributes",
     STAGE_EXCHANGE_PLANS: "load_exchange_plans",
+    STAGE_FILTER_CRITERIA: "load_filter_criteria",
     STAGE_OBJECT_MODULES: "load_object_modules",
 }
 DEFAULTS = {
@@ -94,6 +108,7 @@ DEFAULTS = {
     STAGE_ROLES: roles_defaults,
     STAGE_COMMON_ATTRIBUTES: common_attributes_defaults,
     STAGE_EXCHANGE_PLANS: exchange_plans_defaults,
+    STAGE_FILTER_CRITERIA: filter_criteria_defaults,
     STAGE_OBJECT_MODULES: object_modules_defaults,
 }
 
@@ -124,34 +139,21 @@ def one(cur, sql, params=None):
 
 
 def circle_counts(cur, cfg_uuid):
-    """Строки круга вида этой конфигурации по восьми таблицам (`form_ext` — связкой по форме)."""
-    counts = {}
-    for table in CIRCLE_TABLES:
-        if table == "form_ext":
-            counts[table] = int(one(
-                cur, "SELECT count(*) FROM form_ext fe JOIN forms f ON f.id = fe.form_id "
-                     "WHERE f.configuration_uuid = %s::uuid", [str(cfg_uuid)]) or 0)
-        else:
-            counts[table] = int(one(
-                cur, f"SELECT count(*) FROM {table} WHERE configuration_uuid = %s::uuid",
-                [str(cfg_uuid)]) or 0)
-    return counts
+    """Строки круга вида этой конфигурации по восьми таблицам.
+
+    Общий круг детей считается загрузчиком (`count_circle_child_rows`) — тем же предикатом,
+    что и снятие. Подсчёт по одной ноге `configuration_uuid` читал бы строки детей других
+    видов (критерии отбора узла V52 пишут `forms`, `form_ext`, `commands`) как круг стадии
+    S4f: наблюдение П8 прогона `_v51_p8_stop_probe.py`, повторённое здесь на проверке 2.3.
+    """
+    return {table: count_circle_child_rows(cur, cfg_uuid, table)
+            for table in CIRCLE_TABLES}
 
 
 def other_circle_counts(cur, cfg_uuid):
-    counts = {}
-    for table in CIRCLE_TABLES:
-        if table == "form_ext":
-            counts[table] = int(one(
-                cur, "SELECT count(*) FROM form_ext fe JOIN forms f ON f.id = fe.form_id "
-                     "WHERE f.configuration_uuid IS NOT NULL "
-                     "AND f.configuration_uuid <> %s::uuid", [str(cfg_uuid)]) or 0)
-        else:
-            counts[table] = int(one(
-                cur, f"SELECT count(*) FROM {table} "
-                     "WHERE configuration_uuid IS NOT NULL "
-                     "AND configuration_uuid <> %s::uuid", [str(cfg_uuid)]) or 0)
-    return counts
+    """Дети ЧУЖИХ конфигураций — неприкосновенность чужого круга (тот же круг родителей)."""
+    return {table: count_circle_child_rows(cur, cfg_uuid, table, other_configurations=True)
+            for table in CIRCLE_TABLES}
 
 
 def header_snapshot(cur, cfg_uuid):
@@ -199,8 +201,10 @@ def by_table(answer, key):
 def stop_at_s4f(dump_dir, reason):
     """Один прогон конвейера с отказом S4f: предыдущие стадии — пустой успех, S4f — отказ.
 
-    S4b не подменяется: после отказа S4f конвейер обязан её не звать, и это проверяется
-    счётчиком вызовов (`calls`), а не совпадением со статусом `not_run`.
+    S4g и S4b не подменяются ответами: после отказа S4f конвейер обязан их не звать, и это
+    проверяется счётчиком вызовов (`calls`), а не совпадением со статусом `not_run`. Обёртки
+    later-стадий зовут настоящую функцию и лишь помечают вызов — подмена ответа скрыла бы
+    реальный прогон (или реальный пропуск) стадий хвоста.
     """
     calls = {}
     originals = {}
@@ -226,6 +230,13 @@ def stop_at_s4f(dump_dir, reason):
         answer["reason"] = reason
         return answer
     setattr(CL, STAGE_FUNCTIONS[STAGE_EXCHANGE_PLANS], _broken)
+    for stage in LATER_STAGES:
+        originals[stage] = getattr(CL, STAGE_FUNCTIONS[stage])
+
+        def _counted(*args, _stage=stage, _fn=originals[stage], **kwargs):
+            calls[_stage] = calls.get(_stage, 0) + 1
+            return _fn(*args, **kwargs)
+        setattr(CL, STAGE_FUNCTIONS[stage], _counted)
     try:
         return load_catalog(str(dump_dir), force=True), calls
     finally:
@@ -279,8 +290,10 @@ def main() -> int:
               "на карточку и на ответ отдельного входа, прецедент V45)",
               EXCHANGE_PLAN_REPEAT_HINT in str(stopped.get("resume_with")),
               EXCHANGE_PLAN_REPEAT_HINT[:70])
-        check("2.2 S4b после отказа не вызывалась",
-              calls.get(STAGE_OBJECT_MODULES) in (None, 0), calls)
+        check("2.2 хвост `STAGES` после отказа S4f не вызывался — ни S4g критериев отбора "
+              "(узел V52, стадия между S4f и S4b), ни S4b модулей объектов",
+              all(calls.get(stage) in (None, 0) for stage in LATER_STAGES),
+              {stage: calls.get(stage, 0) for stage in LATER_STAGES})
         after_stop = circle_counts(cur, cfg_uuid)
         check("2.3 круг вида снят и не заполнен — остановка не откат (Q8 п. 2)",
               all(value == 0 for value in after_stop.values()), after_stop)

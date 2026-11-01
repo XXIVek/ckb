@@ -298,6 +298,19 @@ def main(argv):
         totals["container_typeset"] += result["types_by_container"].get(CONTAINER_TYPE_SET, 0)
         for kind, count in result["ext_observations"].items():
             observations[kind] = observations.get(kind, 0) + count
+        # Два счётчика одного факта обязаны называть одно число. Прогон П4 слоя (02.11.2026)
+        # измерил квадратичное завышение `module_files_by_kind` — 27 при `module_files_total`
+        # = 6 на BGU2 и 12 при 3 на BP3: цикл накопления проходил по всему собранному кругу
+        # на каждом файле. Проверка стоит здесь, а не только в пробе слоя: разбор даёт оба
+        # числа, и расхождение видно именно на разборе, до всякой записи в базу.
+        check("%s: модули по родам согласованы с общим числом файлов модулей" % name,
+              sum((result.get("module_files_by_kind") or {}).values())
+              == int(result["module_files_total"]),
+              "по родам %s, всего %s" % (result["module_files_by_kind"],
+                                         result["module_files_total"]))
+        check("%s: форматы описаний форм согласованы с числом строк form_ext" % name,
+              sum((result.get("form_ext_formats") or {}).values()) == len(result["form_ext"]),
+              "форматы %s, строк %s" % (result["form_ext_formats"], len(result["form_ext"])))
         print("  детей: форм %d, команд %d; файлов модулей названо %d; записи типа по "
               "классам: %s" % (len(result["forms"]), len(result["commands"]),
                                result["module_files_total"], result["types_by_class"]))

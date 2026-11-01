@@ -93,6 +93,14 @@ from configuration_exchange_plans import (
     PARENT_TYPE_CONFIGURATION,
     TABLE_NAME as EXCHANGE_PLAN_TABLE,
 )
+# Узел V52 (критерии отбора, шаг П4, 01.11.2026): имена двух таблиц вида задаёт разбор
+# (`src/configuration_filter_criteria.py`), а не писатель — тот же порядок, что у V51. Второй
+# перечень имён разъехался бы с первым при первой же правке, а проверка узла сверяет с живой
+# схемой именно эти имена. Цикла импортов нет: разбор вида не импортирует писателей.
+from configuration_filter_criteria import (
+    CONTENT_TABLE_NAME as FILTER_CRITERIA_CONTENT_TABLE,
+    TABLE_NAME as FILTER_CRITERIA_TABLE,
+)
 
 # Ревизионные колонки в спецификациях версионированных писателей (M1). Порядок -
 # тот же, что в DDL (шаг 1 src/generate_ddl.py): integer / timestamp / text / boolean.
@@ -2127,6 +2135,155 @@ class CommandsRowWriter(TableRowWriter):
     })
 
 
+# ── узел V52 (критерии отбора, шаг П4, позиция 2.7 нормативного списка) ──────────────
+#
+# Норматив — docs/CONFIGURATION_FILTER_CRITERIA_PLAN.md (раздел 3 — модель, раздел 5 —
+# решения Q1…Q8, раздел 7 — шаг П4). Писателей у узла ДВА, а не четыре и не семь:
+#
+# * строка вида `filter_criteria` — версионируемая цепью
+#   (`configuration_uuid`, `object_name`, `revision_no`) (M1 плана: 14 различных uuid на 15
+#   верхних записей индекса и повторяющиеся имена — ключ без границы конфигурации слил бы
+#   выгрузки в одну строку);
+# * строки перечня `<Content>` `filter_criterion_content` — без своей цепи (Q2, вариант A):
+#   ключ начинается с числового `filter_criterion_id`, то есть с ссылки на КОНКРЕТНУЮ ревизию
+#   строки вида, а каскад `filter_criterion_content_filter_criterion_id_fkey` снимает их
+#   вместе с ревизией. Таблица названа исключением `CONFIGURATION_UNVERSIONED_TABLES`
+#   (прецеденты `role_rights` V49, `common_attribute_targets` V50), поэтому спецификация
+#   здесь WITHOUT `versioned_columns()` — вызов добавил бы колонки, которых в DDL нет.
+#
+# Писателей детей у V52 СВОИХ НЕТ — это решение, а не упущение (Q3, вариант A): формы и
+# команды вида пишутся существующими таблицами `forms`/`form_ext`/`commands` и существующими
+# писателями (`ExchangePlanFormsRowWriter`, `FormExtRowWriter`, `CommandsRowWriter`), потому
+# что колонки этих таблиц общие для видов конфигурации и новых колонок узел не заводил
+# (шаг П1 ничего в них не добавлял). Имена классов держат узел, который их ввёл, и это
+# названо прямо: реестр выбирает писателя по таблице, а таблица у двух видов одна — второй
+# записи `forms` в реестре не бывает (приём V51, абзац про писателей детей).
+#
+# Имена колонок совпадают с полями контракта разбора
+# (`src/configuration_filter_criteria.py::read_object_file`) намеренно — чтобы маппинг
+# читался текстом, а не по памяти (приём узлов V33, V48, V50, V51).
+#
+# Колонки строки вида, смысл которых не выводится из имени:
+#
+#   * `type_raw` — блок `<Type>` исходным текстом файла: классификация типа является ОТВЕТОМ
+#     разбора (Q6), и без исходного блока её не перепроверить ни проверке узла, ни читающему;
+#     `types` — jsonb-массив записей с ключом `container` (`Type` | `TypeSet`) — единственный
+#     способ назвать форму контейнера, которую даёт KomMag (замер П2); CHECK по отдельной
+#     записи массива PostgreSQL не выражает (замер V48 2.5);
+#   * `default_form_state`/`auxiliary_form_state` — пара с колонками значения: CHECK
+#     `filter_criteria_form_ref_value_matches_state` держит «пустой тег» и «тега нет» без
+#     текста, поэтому писатель обязан отдавать обе колонки одной строкой (M5);
+#   * `form_names` — `text_array_nullable`, формы адресуются ИМЕНЕМ (uuid формы повторяется
+#     между конфигурациями, замер V51 3.2), `command_uuids` — `uuid_array_nullable`, команды
+#     адресуются uuid элемента `<Command uuid>` (замер П2: у `Form` атрибута uuid нет);
+#     пустой перечень остаётся NULL, а не '{}' (границы K1–K6 узла V43, ===EMPTY); виду
+#     нужен явный каст параметра (`PARAM_CASTS`), тот же урок, что проба П5 узла V51;
+#   * `content_state`/`content_count` — состояние и размер перечня `<Content>`: сам перечень
+#     разбирается второй таблицей, а его состояние называется строкой вида, потому что
+#     «условий нет» (`empty_content`, MinCfg и KomMag) и «условий не читали» — разные ответы;
+#   * `children_state` — словарь V51 переиспользуется без правок: виновники те же
+#     («детей нет» против «круг не сходится с индексом»);
+#   * `source_path` — путь относительно КОРНЯ выгрузки (`FilterCriteria/<Имя>.xml`), а не
+#     каталога вида (поправка V46).
+
+
+class FilterCriteriaRowWriter(TableRowWriter):
+    """Строка критерия отбора конфигурации (таблица `filter_criteria`, узел V52, позиция 2.7).
+
+    Обязательных колонок без значения у разбора нет: файл без `<Name>` нечем ключить, а файл
+    без атрибута `uuid` не является ссылкой на объект метаданных (правило R3) — оба называются
+    отказом разбора файла, а не NULL-колонкой. Именно поэтому писатель не подставляет
+    значений: пустое значение здесь означало бы потерянный факт, а не состояние выгрузки.
+    """
+
+    TABLE = FILTER_CRITERIA_TABLE
+    COLUMNS = versioned_columns({
+        "configuration_uuid": "uuid",
+        "object_uuid": "uuid",
+        "object_name": "text",
+        "full_name": "text",
+        "synonym": "jsonb_nullable",
+        "comment": "text",
+        "type_raw": "text",
+        "type_multiplicity": "text",
+        "type_parse_state": "text",
+        "types": "jsonb_array",
+        "type_qualifiers": "jsonb_nullable",
+        "use_standard_commands": "bool",
+        "default_form": "text",
+        "auxiliary_form": "text",
+        "list_presentation": "jsonb_nullable",
+        "extended_list_presentation": "jsonb_nullable",
+        "explanation": "jsonb_nullable",
+        "default_form_state": "text",
+        "auxiliary_form_state": "text",
+        "form_names": "text_array_nullable",
+        "command_uuids": "uuid_array_nullable",
+        "content_state": "text",
+        "content_count": "int",
+        "children_state": "text",
+        "properties_state": "text",
+        "unknown_property_names": "text_array_nullable",
+        "source_path": "text",
+    })
+
+
+class FilterCriterionContentRowWriter(TableRowWriter):
+    """Строка перечня `<Content>` критерия отбора (таблица `filter_criterion_content`, Q1).
+
+    Спецификация НЕ оборачивается в `versioned_columns()`: своей цепи ревизий у строки нет
+    (Q2, вариант A), её текущность читается витриной `v_current_filter_criterion_content`
+    связкой по `filter_criterion_id`, а снимается она каскадом вместе с ревизией вида.
+
+    Колонки, смысл которых не выводится из имени:
+
+      * `filter_criterion_id` — ЧИСЛОВОЙ id конкретной ревизии строки вида: его даёт
+        `insert_ids` родителя (приём `common_attribute_targets` V50 и `role_rights` V49), а
+        не пара (uuid, `revision_no`), как у `exchange_plan_content` V51;
+      * `configuration_uuid` повторяет значение строки вида осознанно: запрос «по каким полям
+        можно отбирать этот вид метаданных» идёт по строкам условия, и без колонки он требовал
+        бы связки с таблицей вида и с её витриной на каждом шаге (тот же порядок, что
+        `role_rights` V49, `common_attribute_targets` V50);
+      * `criterion_object_uuid`/`criterion_full_name` — указатель на критерий в форме
+        индекса состава (`FilterCriterion.<Имя>`): он остаётся читаемым и тогда, когда строка
+        вида снята перезагрузкой (прецедент `attribute_full_name` V50);
+      * `ordinal` — позиция записи в файле; порядок писатель не меняет (прецедент `ordinal`
+        V50/V51): ни uuid, ни имени у элемента `<Item>` нет (замер 2.2), идентичность строки
+        даёт только порядок;
+      * `target_tag` — измеренный тег элемента (`Item` на всех 1 219 записях): форма перечня
+        является свойством выгрузки, а не обещанием разбора; колонки под атрибут
+        `xsi:type="xr:MDObjectRef"` схема не заводит — константа на весь круг описывала бы
+        то, чего узел не измеряет, а факт держат константа слоя и проверка П6;
+      * `target_object_id`/`target_object_uuid`/`target_unresolved_path` — ссылка на СТРОКУ
+        индекса состава: внешнего ключа нет осознанно, потому что цель бывает `prefix_only`
+        или `unresolved` (CHECK согласует состояние со ссылкой и остатком пути — тот же
+        контракт, что `role_rights` V49, `common_attribute_targets` V50,
+        `exchange_plan_content` V51). `target_object_id` — текст, а не uuid: идентификаторы
+        индекса состава бывают составными (замер V33 D2).
+
+    Размер страницы вставки назван (приём V33/V47/V51): 1 219 строк на четыре выгрузки
+    (BGU2 727, BP3 492 — замер 1.4); одна `execute_values` на весь список держала бы весь
+    SQL-текст в памяти и не давала бы ничего наблюдать.
+    """
+
+    PAGE_SIZE = 200
+    TABLE = FILTER_CRITERIA_CONTENT_TABLE
+    COLUMNS = {
+        "filter_criterion_id": "int",
+        "configuration_uuid": "uuid",
+        "criterion_object_uuid": "uuid",
+        "criterion_full_name": "text",
+        "ordinal": "int",
+        "target_tag": "text",
+        "target_full_name": "text",
+        "target_object_type": "text",
+        "target_object_id": "text",
+        "target_object_uuid": "uuid",
+        "target_resolve_state": "text",
+        "target_unresolved_path": "text",
+    }
+
+
 # Контракт разбора → писатель: выбор по словарю, а не по имени таблицы (приём
 # ROOT_MODULE_WRITERS: ошибка выбора превращается в запись не в ту таблицу).
 # Узел V49 (роли): писатели группы свои, реестр — общий механизм
@@ -2173,6 +2330,16 @@ CONFIGURATION_OBJECT_WRITERS = {
     EXCHANGE_PLAN_TABLE: ExchangePlanRowWriter,
     EXCHANGE_PLAN_CONTENT_TABLE: ExchangePlanContentRowWriter,
     EXCHANGE_PLAN_COMMANDS_TABLE: CommandsRowWriter,
+    # Узел V52 (критерии отбора, 01.11.2026, позиция 2.7 нормативного списка): две таблицы
+    # вида — строка критерия и строки его перечня `<Content>` (Q1, вариант A). Писателя детей
+    # в реестре нет намеренно и это названо, а не обойено молча: таблицы `forms`, `form_ext`,
+    # `commands` общие для видов конфигурации (Q3, вариант A), а реестр выбирает писателя по
+    # таблице — второй записи той же таблицы не бывает. Стадия выбирает писателей детей по
+    # имени класса (тот же приём, что у V51 и у `ConfigurationObjectModuleRowWriter` V47).
+    # Строка условия не имеет своей цепи ревизий и названа исключением
+    # `CONFIGURATION_UNVERSIONED_TABLES` (Q2, вариант A).
+    FILTER_CRITERIA_TABLE: FilterCriteriaRowWriter,
+    FILTER_CRITERIA_CONTENT_TABLE: FilterCriterionContentRowWriter,
 }
 
 # Таблицы, чей писатель зарегистрирован общим реестром, но своей ЦЕПИ РЕВИЗИЙ у таблицы

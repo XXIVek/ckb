@@ -1608,6 +1608,13 @@ def read_object_file(path, index_rows: Optional[Iterable[Dict]] = None,
             forms = parsed["forms"]
             form_ext = parsed["form_ext"]
             module_files = parsed["bsl_modules"]
+            # Файлы модулей команд (`Commands/<Имя>/Ext/CommandModule.bsl`) слой V13/V14 не
+            # видит: у вида команды свои, обход `Commands/` принадлежит узлу вида. Функция узла
+            # V51 переиспользуется, а не копируется (правило П3): дескриптор тот же, тела читает
+            # V47 (Q8). Без этого шага счётчик модульных файлов круга отстаёт от меры каталога на
+            # число модулей команд — прогон П6 измерил 11 файлов против 10 названных (MinCfg даёт
+            # один `CommandModule.bsl`, записью индекса состава подтверждённый).
+            module_files.extend(ep.read_command_module_files(object_dir, commands, warnings))
             warnings.extend(parsed["warnings"])
             file_forms = [str(row.get("name") or "") for row in forms]
             ext_observations = (read_ext_observations(object_dir, warnings)
@@ -1888,6 +1895,15 @@ def collect_filter_criteria(source_dir, index_rows: Optional[Iterable[Dict]] = N
             continue
         row = parsed["row"]
         rows.append(row)
+        # Строка условия обязана нести указатель на критерий, к которому она относится
+        # (колонки `criterion_object_uuid`/`criterion_full_name` таблицы П1): ни uuid, ни
+        # имени у элемента `<Item>` нет (замер 2.2), поэтому связать строку с ревизией вида
+        # после склейки круга было бы нечем. Указатель кладёт разбор, а не загрузчик:
+        # тот же порядок, что `exchange_plan_full_name` у V51 и `attribute_full_name` у V50
+        # (прецедент `role_name` V49) — ключом служит индексное имя `FilterCriterion.<Имя>`.
+        for content_row in parsed["content"]:
+            content_row["criterion_object_uuid"] = row["object_uuid"]
+            content_row["criterion_full_name"] = row["full_name"]
         content_rows.extend(parsed["content"])
         commands.extend(parsed["commands"])
         forms.extend(parsed["forms"])
@@ -1938,10 +1954,16 @@ def collect_filter_criteria(source_dir, index_rows: Optional[Iterable[Dict]] = N
         declaration_mismatches.extend(parsed["declaration_mismatches"])
         for kind, _path in parsed["ext_observations"]:
             ext_observations[kind] = ext_observations.get(kind, 0) + 1
-        for entry in form_ext:
+        # Счётчики считаются по записям ЭТОГО файла, а не по накопленному кругу: прогон П4
+        # слоя (02.11.2026) измерил квадратичное завышение на многофайловых кругах —
+        # `module_files_by_kind` давал 27 при `module_files_total` = 6 на BGU2 и 12 при 3 на
+        # BP3, потому что цикл повторялся на каждом файле по уже собранному списку. Два
+        # счётчика одного факта в ответе не должны противоречить друг другу: карточка
+        # показывает и то, и другое.
+        for entry in parsed["form_ext"]:
             key = str(entry.get("ext_format"))
             forms_by_format[key] = forms_by_format.get(key, 0) + 1
-        for entry in module_files:
+        for entry in parsed["module_files"]:
             key = str(entry.get("module_name"))
             modules_by_kind[key] = modules_by_kind.get(key, 0) + 1
         prefixes.update(diagnostics["namespace_prefixes"])

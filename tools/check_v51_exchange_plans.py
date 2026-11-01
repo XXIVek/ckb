@@ -1263,12 +1263,29 @@ def check_empty_circle(cur, header, dump_dir, index_info, expect, tag):
           _brief(parsed["observations"][:MAX_NAMES]))
     check(f"{tag}: разбора, который не удался, нет", not parsed["files_failed"],
           _brief(parsed["files_failed"][:MAX_NAMES]))
-    for table in (TABLE_NAME, CONTENT_TABLE_NAME, COMMANDS_TABLE_NAME, "attributes",
-                  "tabular_sections", "forms", "templates"):
+    for table in (TABLE_NAME, CONTENT_TABLE_NAME):
         rows = q(cur, f"SELECT id FROM {table} WHERE configuration_uuid = %s::uuid",
                  [str(header["uuid"])])
         check(f"{tag}: строк {table} — 0 (позиции вида нет в выгрузке)", not rows,
               f"факт: {len(rows)}")
+    # Общий круг детей (урок V52, 02.11.2026): таблицы `forms`, `commands`, `attributes`,
+    # `tabular_sections`, `templates` пишут строки детей разных видов конфигурации — узел
+    # V52 добавляет в них формы и команды каталога `FilterCriteria/`. Проверять «пустой круг
+    # планов обмена» по всей ноге `configuration_uuid` больше нельзя: чужой круг того же
+    # вида конфигурации читался бы как строки планов обмена. Область счёта — родители этого
+    # вида из индекса состава (для пустого круга их нет, и ноль становится ответом о
+    # выгрузке, а не совпадением с чужими строками).
+    plan_uuids = [str(row["uuid"]) for row in q(
+        cur, "SELECT uuid FROM configuration_objects WHERE configuration_id = %s "
+             "AND object_type = 'ExchangePlan'", [int(header["id"])])]
+    for table in (COMMANDS_TABLE_NAME, "attributes", "tabular_sections", "forms",
+                  "templates"):
+        rows = q(cur, f"SELECT id FROM {table} WHERE parent_type = "
+                      "'configuration_objects' AND parent_uuid = ANY(%s::uuid[]) "
+                      "AND configuration_uuid = %s::uuid",
+                 [plan_uuids, str(header["uuid"])])
+        check(f"{tag}: строк {table} круга планов обмена — 0 (позиции вида нет в выгрузке)",
+              not rows, f"факт: {len(rows)}, родителей круга: {len(plan_uuids)}")
     return {"parsed": parsed, "db_plans": [], "raw_totals": raw_totals,
             "index_all_rows": index_info["rows"], "empty": True}
 

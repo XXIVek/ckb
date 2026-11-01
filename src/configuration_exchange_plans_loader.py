@@ -126,7 +126,12 @@ from configuration_load_contract import (
 )
 from configuration_object_properties_loader import refresh_table_statistics
 from configuration_root_module_loader import configuration_uuid_from_layout
-from current_revision import CHANGED_BY_LOAD, FIRST_REVISION, stamp_revision_rows
+from current_revision import (
+    CHANGED_BY_LOAD,
+    FIRST_REVISION,
+    current_view,
+    stamp_revision_rows,
+)
 from external_db import transaction
 from external_table_writer import (
     CONFIGURATION_OBJECT_WRITERS,
@@ -368,6 +373,88 @@ def remove_exchange_plans(cur, configuration_uuid: str, parents: Sequence[str],
             )
         removed[table] = cur.rowcount
     return removed
+
+
+# ---------------------------------------------------------------------------
+# Круг детей вида для сторонних проверок (узел V52, наблюдение П8)
+# ---------------------------------------------------------------------------
+# Общая часть предиката, по которой строки детей относятся к кругу вида. Таблицы
+# `attributes`, `tabular_sections`, `forms`, `form_ext`, `templates`, `commands` пишут и
+# другие узлы: внешние объекты (V13/V14), модули (V47) и критерии отбора (V52). Поэтому
+# подсчёт по одной ноге `configuration_uuid` не различает виды — строки детей ЧУЖИХ видов
+# читались бы как круг стадии S4f (замер узла V52 на MinCfg: в `commands` появилась строка
+# команды критерия отбора, и пробы `_v48_p8_stop_probe.py`, `_v49_p8_stop_probe.py`,
+# `_v50_p8_stop_probe.py`, `_v51_p8_stop_probe.py` сообщили бы, что круг стадии S4f снят не
+# полностью, хотя стадия S4f ни снимала, ни писала эти строки).
+#
+# Проверка обязана мерить ровно тот же круг, что и снятие (`remove_exchange_plans`), поэтому
+# условие живёт рядом со снятием, а не в четырёх пробах. Родители берутся из витрины
+# текущего состояния таблицы вида: у строк вида есть цепь ревизий, и подсчёт по самой таблице
+# посчитал бы детей удалённой ревизии. Имя витрины даёт `current_view` — второго написания
+# имён в проекте нет.
+SHARED_CHILD_TABLES = (ATTRIBUTES_TABLE, TABULAR_SECTIONS_TABLE, FORMS_TABLE,
+                      FORM_EXT_TABLE, TEMPLATES_TABLE, COMMANDS_TABLE_NAME)
+
+
+def count_circle_child_rows(cur, configuration_uuid: str, table: str,
+                            other_configurations: bool = False) -> int:
+    """Сколько строк общей таблицы детей относится к кругу вида «план обмена».
+
+    `other_configurations=False` — круг своей конфигурации (нога `configuration_uuid` плюс
+    родители круга вида). `other_configurations=True` — дети ЧУЖИХ конфигураций,
+    неприкосновенность чужого круга: родителем считается план ТОЙ ЖЕ конфигурации, к которой
+    принадлежит строка ребёнка. Связывать родителя с uuid прогона нельзя: предикат
+    `configuration_uuid <> %s` вместе с `plans.configuration_uuid = %s` дал бы пустой ответ
+    при любом состоянии базы, и сравнение «до/после» перестало бы что-либо доказывать.
+
+    `form_ext` ноги `configuration_uuid` не имеет (область видимости задаёт строка формы —
+    наблюдение П6 узла V51), поэтому она считается связкой по `forms`. Вид родителя и имя
+    таблицы вида — единственные источники этих имён; для таблиц, не общих с другими узлами,
+    ответ даёт обычный подсчёт по ноге конфигурации.
+    """
+    if table in (TABLE_NAME, CONTENT_TABLE_NAME):
+        if other_configurations:
+            sql = (f"SELECT count(*) FROM {table} WHERE configuration_uuid IS NOT NULL "
+                   "AND configuration_uuid <> %s::uuid")
+            params = [str(configuration_uuid)]
+        else:
+            sql = f"SELECT count(*) FROM {table} WHERE configuration_uuid = %s::uuid"
+            params = [str(configuration_uuid)]
+        cur.execute(sql, params)
+        return int(cur.fetchone()[0] or 0)
+
+    if table not in SHARED_CHILD_TABLES:
+        raise ValueError(
+            f"таблица {table!r} не входит в круг детей вида {TABLE_NAME!r}: "
+            f"перечень общий с снятием — {', '.join(SHARED_CHILD_TABLES)}"
+        )
+
+    view = current_view(TABLE_NAME)
+    if table == FORM_EXT_TABLE:
+        from_sql = f"FROM {FORM_EXT_TABLE} fe JOIN {FORMS_TABLE} f ON f.id = fe.form_id"
+        alias = "f"
+    else:
+        from_sql = f"FROM {table}"
+        alias = table
+    if other_configurations:
+        where = (
+            f"{alias}.configuration_uuid IS NOT NULL "
+            f"AND {alias}.configuration_uuid <> %s::uuid "
+            f"AND {alias}.parent_type = %s AND {alias}.parent_uuid IN "
+            f"(SELECT object_uuid FROM {view} ep "
+            f"WHERE ep.configuration_uuid = {alias}.configuration_uuid)"
+        )
+        params = [str(configuration_uuid), PARENT_TYPE_CONFIGURATION]
+    else:
+        where = (
+            f"{alias}.configuration_uuid = %s::uuid AND "
+            f"{alias}.parent_type = %s AND {alias}.parent_uuid IN "
+            f"(SELECT object_uuid FROM {view} WHERE configuration_uuid = %s::uuid)"
+        )
+        params = [str(configuration_uuid), PARENT_TYPE_CONFIGURATION,
+                  str(configuration_uuid)]
+    cur.execute(f"SELECT count(*) {from_sql} WHERE {where}", params)
+    return int(cur.fetchone()[0] or 0)
 
 
 def _require_header(configuration_uuid: str) -> Tuple[Optional[Dict], Optional[str]]:

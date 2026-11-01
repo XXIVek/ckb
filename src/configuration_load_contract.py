@@ -186,6 +186,31 @@ from configuration_exchange_plans import (
     TARGET_STATES as EXCHANGE_PLAN_TARGET_STATES,
     group_tables as exchange_plan_group_tables,
 )
+# Узел V52 (критерии отбора, 01.11.2026, позиция 2.7 нормативного списка): имена таблиц
+# вида, каталог, метка метаданных и закрытые словари состояний задаёт разбор
+# (`src/configuration_filter_criteria.py`) — тот же порядок, что у V48, V49, V50 и V51:
+# второго перечня таблиц или состояний в проекте нет, а форматёр и проверка узла читают эти
+# же словари. Импорт нужен одному месту — назвать круг таблиц своей стадии, чтобы
+# регистрация вида в круге версионности (`CONFIGURATION_VERSIONED_TABLES`, шаг П1) не
+# добавила чужие таблицы к кругу S4: проба `_v46_p4_writer_probe.py` падает на `KeyError`
+# ровно на той таблице, которую стадия не объявила (замер 30.10.2026). Разбор ничего из
+# этого контракта не импортирует, цикл односторонний.
+from configuration_filter_criteria import (
+    CHILD_STATES as FILTER_CRITERIA_CHILD_STATES,
+    CIRCLE_DISCREPANCIES as FILTER_CRITERIA_CIRCLE_DISCREPANCIES,
+    CONTENT_STATES as FILTER_CRITERIA_CONTENT_STATES,
+    CONTENT_TABLE_NAME as FILTER_CRITERIA_CONTENT_TABLE,
+    DIR_NAME as FILTER_CRITERIA_DIR,
+    FORM_REF_STATES as FILTER_CRITERIA_FORM_REF_STATES,
+    MULTIPLICITY_VALUES as FILTER_CRITERIA_MULTIPLICITY_VALUES,
+    OBJECT_KIND_TAG as FILTER_CRITERIA_META_TAG,
+    PROPERTIES_STATES as FILTER_CRITERIA_PROPERTIES_STATES,
+    TABLE_NAME as FILTER_CRITERIA_TABLE,
+    TARGET_STATES as FILTER_CRITERIA_TARGET_STATES,
+    TYPE_BLOCK_STATES as FILTER_CRITERIA_TYPE_STATES,
+    TYPE_CLASS_VALUES as FILTER_CRITERIA_TYPE_CLASS_VALUES,
+    TYPE_CONTAINERS as FILTER_CRITERIA_TYPE_CONTAINERS,
+)
 from current_revision import CONFIGURATION_VERSIONED_TABLES
 
 # ── стадии конвейера: один перечень на контракт, карточку и проверку ───────────────
@@ -232,6 +257,22 @@ STAGE_COMMON_ATTRIBUTES = "s4e_common_attributes"
 # без объявленного круга загрузки означала бы, что чужая стадия её снимает (дефект,
 # названный узлами V49 и V50).
 STAGE_EXCHANGE_PLANS = "s4f_exchange_plans"
+# Узел V52 (01.11.2026, позиция 2.7 нормативного списка): свойства критериев отбора —
+# отдельная стадия по той же причине, что S4c (V48), S4d (V49), S4e (V50) и S4f (V51):
+# правило C3 требует своего ключа ответа `filter_criteria`, а разбивать чужой ключ значило
+# бы переименовывать контракт соседнего узла. Номер S4g, а не S5: S5 остаётся за
+# планируемой стадией анализа.
+# В `STAGES` ниже стадия вносится шагом П5 (позиция 2.7 идёт сразу за 2.6, то есть между
+# S4f и S4b — порядок нормативного списка держит `STAGES`, а не порядок номеров): слой
+# `load_filter_criteria` (src/configuration_filter_criteria_loader.py) появляется шагом П4
+# этим же, а точка входа `load_filter_criteria_tool` — шагом П5. Круг таблиц стадии
+# (`FILTER_CRITERIA_TABLES`) объявлен уже на П4: версионная таблица без объявленного круга
+# загрузки означала бы, что чужая стадия её снимает (дефект, названный узлами V49, V50, V51).
+# Групп запроса (`kinds`) у вида НЕТ — это решение, а не упущение (Q5, вариант A): строка
+# условия существует только через id строки вида (Q1, вариант A), а цена круга не даёт
+# порога, при котором раздельная дозагрузка была бы оправдана (замер 1.4: 1 219 целей на
+# весь круг, максимум 727 в одном файле) — отдельный вход дозагружает весь круг сразу.
+STAGE_FILTER_CRITERIA = "s4g_filter_criteria"
 # Узел V47 (28.10.2026): тексты модулей объектов конфигурации. Номер S4b, а не S5:
 # S5 остаётся за планируемой стадией анализа (дополнение оператора 23.10.2026), которой
 # в `STAGES` нет. Стадия идёт сразу за S4 и является второй транзакцией загрузки (Q6,
@@ -253,6 +294,11 @@ STAGES: Tuple[Tuple[str, str], ...] = (
     # транзакцией загрузки (Q6 узла V46), а не позицией списка.
     (STAGE_EXCHANGE_PLANS,
      "Свойства планов обмена (ExchangePlans, позиция 2.6)"),
+    # Узел V52 (позиция 2.7 списка, решение Q10 вариант A): 2.7 идёт сразу за 2.6, литера
+    # `s4g` в коде свободна — перенумерации прежних стадий нет. S4b остаётся последней,
+    # потому что является второй транзакцией загрузки (Q6 узла V46), а не позицией списка.
+    (STAGE_FILTER_CRITERIA,
+     "Свойства критериев отбора (FilterCriteria, позиция 2.7)"),
     (STAGE_OBJECT_MODULES, "Модули объектов конфигурации (тексты Ext/, вторая транзакция)"),
 )
 
@@ -393,6 +439,13 @@ STAGE_FULL_RELOAD_ONLY: Dict[str, bool] = {
     # Узел V51 (позиция 2.6): отдельный вход `load_exchange_plans_tool` есть (шаг П5),
     # поэтому остановка на S4f продолжение имеет — полная перезагрузка не требуется.
     STAGE_EXCHANGE_PLANS: False,
+    # Узел V52 (позиция 2.7, шаг П4 — урок П8 узла V51): ключ и ветка `stage_resume_hint`
+    # вносятся ОДНИМ шагом. Слой `load_filter_criteria` появляется этим же шагом П4, точка
+    # входа группы — шагом П5; отсутствие ключа маскировалось бы значением по умолчанию в
+    # `build_stopped_stage`: стадия без ключа читается стадией без отдельного входа, хотя
+    # продолжение у неё есть. Механика остановки заработает с внесением стадии в `STAGES`
+    # (шаг П5), словарь обязан быть её зеркалом уже сейчас.
+    STAGE_FILTER_CRITERIA: False,
     STAGE_OBJECT_MODULES: True,
 }
 
@@ -415,6 +468,12 @@ STAGE_INCOMPLETE_GROUPS: Dict[str, str] = {
     STAGE_EXCHANGE_PLANS: "свойства планов обмена (позиция 2.6 нормативного списка, "
                           "виды ChildObjects/TabularSection/Forms/Templates/Commands и "
                           "перечень <Content>)",
+    # Узел V52 (шаг П4): группа называется позицией нормативного списка и видами детей,
+    # которых касается круг, — по образцу записей S4c…S4f. Без записи остановка на S4g
+    # оставила бы ответ без машиночитаемого признака неполноты: `incomplete_groups`
+    # строится из этого словаря (`_stage_stop` в загрузчике), а не из текста стадии.
+    STAGE_FILTER_CRITERIA: "свойства критериев отбора (позиция 2.7 нормативного списка, "
+                           "его формы и команды и перечень <Content>)",
     STAGE_OBJECT_MODULES: "модули объектов конфигурации (группа C модели V38, Ext/)",
 }
 
@@ -471,7 +530,9 @@ def stage_resume_hint(stage_id: str) -> str:
     Подсказки берутся из текстов стадий, а не переписываются: S3 и S4 имеют отдельные входы
     групп (узлы V45, V46), S4c — свой вход (шаг П5 того же узла), S4d — свой вход (шаг П5
     узла V49), S4e — свой вход (шаг П5 узла V50), S4f — свой вход `load_exchange_plans_tool`
-    (шаг П5 узла V51), S4b — не имеет (решение Q4.1). Стадия без подсказки была бы ошибкой
+    (шаг П5 узла V51), S4g — свой вход `load_filter_criteria_tool` (шаг П5 узла V52),
+    S4b — не имеет (решение Q4.1). Стадия без
+    подсказки была бы ошибкой
     контракта, поэтому ответ по умолчанию — полная перезагрузка, а не пустая строка. Отсутствие
     ветви у стадии с существующим отдельным входом назвало бы её продолжение неправдой:
     оператору предложили бы полный перезапуск там, где есть точечный вход (тот же дефект,
@@ -489,6 +550,8 @@ def stage_resume_hint(stage_id: str) -> str:
         return COMMON_ATTRIBUTES_REPEAT_HINT
     if stage_id == STAGE_EXCHANGE_PLANS:
         return EXCHANGE_PLAN_REPEAT_HINT
+    if stage_id == STAGE_FILTER_CRITERIA:
+        return FILTER_CRITERIA_REPEAT_HINT
     if stage_id == STAGE_OBJECT_MODULES:
         return OBJECT_MODULES_RELOAD_HINT
     return "полная перезагрузка load_1c_catalog_tool(source_path=…, force=True)"
@@ -958,13 +1021,87 @@ COMMON_ATTRIBUTES_BOUNDARY = (
     "2.10: ссылки дают подсистемы, роли и функциональные опции, чьи слои не загружены)"
 )
 
+# ── контракт стадии S4g (узел V52, шаг П4, позиция 2.7 списка) ───────────────────────
+# Круг таблиц стадии и тексты контракта объявлены одним местом — по той же причине, что у
+# V48, V49, V50 и V51: текст незакрытой части ссылается на раздел, где читается отказ
+# стадии, а держать два написания одного заголовка нельзя. Имена таблиц, каталог вида,
+# метка метаданных и словари состояний приходят импортом из разбора
+# (`src/configuration_filter_criteria.py`) — второго перечня таблиц или состояний в проекте
+# нет.
+#
+# Дефект, который закрывает эта константа, — тот же, что называли узлы V49, V50 и V51:
+# регистрация `filter_criteria` в круге версионности (шаг П1) молча добавила бы её к кругу
+# стадии S4, и проба `_v46_p4_writer_probe.py` падает на `KeyError: 'filter_criteria'`,
+# потому что контракт `CHILD_TABLES` становится шире круга стадии, а стадия S4 снимала и
+# анализировала бы чужие строки (замеры П0: 15 файлов регистрации и 1 219 целей на четыре
+# выгрузки). Групп `kinds` нет, поэтому константа называет только круг стадии — без
+# `*_TABLES_BY_KIND`, которых у V51 восемь: строка условия неотделима от строки вида (Q1,
+# вариант A), а таблицы детей (`forms`, `form_ext`, `commands`) общи с узлом V51 и в круг
+# этой стадии НЕ входят — их снимает и пишет предикатом по uuid родителей, и второй
+# перечень тех же таблиц появился бы только ради того, чтобы разойтись с первым.
+FILTER_CRITERIA_TABLES: Tuple[str, ...] = (
+    FILTER_CRITERIA_TABLE,
+    FILTER_CRITERIA_CONTENT_TABLE,
+)
+
+FILTER_CRITERIA_SECTION_HEADER = "СВОЙСТВА КРИТЕРИЕВ ОТБОРА (узел V52, позиция 2.7)"
+
+# Что обязан сказать ответ о повторе стадии. Отдельная точка входа группы —
+# `load_filter_criteria_tool` (шаг П5 узла, внесена в реестр сервера этим же шагом —
+# `tools/check_mcp_tool_wiring.py` сторожит состав). П4 держал формулировку про слой
+# `load_filter_criteria`, потому что обещать инструмент, которого в реестре нет, — значит
+# дать обещание, которое сервер не выполняет; с десятым инструментом строка меняется одним
+# местом (прецеденты V48/V49/V50/V51).
+FILTER_CRITERIA_REPEAT_HINT = (
+    "Повторить стадию можно отдельным входом группы "
+    "load_filter_criteria_tool(source_path=…) без перезагрузки конфигурации "
+    "(узел V52, шаг П5) либо полной перезагрузкой "
+    "load_1c_catalog_tool(source_path=…, force=True)"
+)
+
+# Граница круга называется и при успехе: «строки записаны» не равно «о критериях отбора
+# сохранено всё». Формулировка держится замеров разделов 1–2 плана V52 и решений Q1, Q3,
+# Q6, Q7, Q8: без неё пустой `<Content>` читался бы как «условий нет», а `TypeSet` — как
+# «типа нет».
+FILTER_CRITERIA_CIRCLE_BOUNDARY = (
+    f"круг узла — файлы регистрации вида {FILTER_CRITERIA_META_TAG} из каталога "
+    f"{FILTER_CRITERIA_DIR}/ (позиция 2.7 списка), подтверждённые записями индекса состава, "
+    "плюс перечень заголовка `configurations.filter_criteria` как независимая третья нога "
+    "(её заполняет стадия S2, стадия S4g её не пишет): в `filter_criteria` идут 11 свойств "
+    "файла регистрации (замер 2.1: ровно один набор тегов на всех 15 файлах), блок `<Type>` "
+    "в закрытом словаре записей с ключом `container` (`Type` | `TypeSet` — KomMag даёт "
+    "`<v8:TypeSet>cfg:DocumentRef</v8:TypeSet>`, собственной ветки парсера у V48/V50 не "
+    "было, и значение читалось бы потерянным — Q6) и состояния ссылок на форму; в "
+    "`filter_criterion_content` — строки перечня `<Content>` (1 219 целей на четыре "
+    "выгрузки: BGU2 727, BP3 492; MinCfg и KomMag дают пустой блок — состояние "
+    "`empty_content` строки вида, а не пустая таблица). Строка условия версионируется НЕ "
+    "своей цепью (Q2, вариант A): ключ начинается с `filter_criterion_id` — числового id "
+    "конкретной ревизии строки вида, текущность читается витриной связкой по этому id, а "
+    "каскад `filter_criterion_content_filter_criterion_id_fkey` снимает условие вместе с "
+    "ревизией. Детей у вида два вида — формы и команды (замер 1.2: строк `Attribute`, "
+    "`TabularSection`, `Template` этого вида в индексе состава нет ни в одной выгрузке); "
+    "формы адресуются ИМЕНЕМ, команды — uuid, потому что uuid формы повторяется между "
+    "конфигурациями (замер V51 3.2 — 42 349 общих uuid). Псевдо-записи индекса (модули, "
+    "пары `.Form`, `Help`) детьми не являются и называются отдельным списком (Q7). Тела "
+    "модулей вида узел НЕ читает: файлы названы дескрипторами, тексты принадлежат узлу V47 "
+    "(Q8); ресурсы справки формы (`Ext/Help.xml`, каталог `Ext/Help/`) не хранятся — "
+    "колонок под них в схеме нет, наличие называется наблюдениями `help_file` и "
+    "`help_resources_dir` (Q7); тегов `Help`/`AdditionalIndexes` в `Properties` этого вида "
+    "нет ни в одном файле круга (замер П2 — негативный факт держит проверка П6, а не "
+    "константная колонка); определённых типов (`DefinedTypes`) в выгрузке вида нет "
+    "(замер 2.4.4), узла для них нет"
+)
+
 # Что из содержимого дочерних объектов стадия S4 НЕ загружает — определение перенесено
 # в это место узлом V50 (шаг П8): текст ссылается на заголовок раздела S4e, объявленного
 # рядом с кругом таблиц вида, поэтому заголовок обязан идти раньше текста (прецедент
 # V48/V49). Узел V51 (шаг П8) добавляет в перечень закрытых видов позицию 2.6 — планы
 # обмена:
 # без строки текст обещал бы, что реквизиты, формы и макеты не загружены вовсе, хотя для
-# вида 2.6 они загружены (наблюдение П8, исправлено этим же шагом). Обоснование того,
+# вида 2.6 они загружены (наблюдение П8, исправлено этим же шагом). Узел V52 (шаг П4)
+# закрывает позицию 2.7 — критерии отбора: без строки текст обещал бы то же самое про вид,
+# для которого закрыты его свойства, блок `<Type>`, перечень `<Content>`, его формы и его
+# команды. Обоснование того,
 # почему часть групп модели V38 остаётся незакрытой, держится у стадии S4 — см. комментарий
 # перед местом, откуда сделан перенос.
 CHILD_NOT_IMPLEMENTED = (
@@ -981,7 +1118,11 @@ CHILD_NOT_IMPLEMENTED = (
     "позиция 2.6 нормативного списка (узел V51, стадия S4f, раздел «"
     + EXCHANGE_PLAN_SECTION_HEADER + "» ниже; для этого вида закрыты его реквизиты, "
     "табличные части, формы с описаниями, макеты, команды и перечень <Content>, а тела "
-    "модулей вида берёт узел V47) и тексты модулей объектов "
+    "модулей вида берёт узел V47), свойства критериев отбора — позиция 2.7 "
+    "нормативного списка (узел V52, стадия S4g, раздел «" + FILTER_CRITERIA_SECTION_HEADER
+    + "» ниже; для этого вида закрыты его свойства, блок <Type>, перечень <Content> как "
+    "отдельная таблица состава, его формы с описаниями и его команды, а тела модулей вида "
+    "берёт тот же узел V47) и тексты модулей объектов "
     "конфигурации — шесть слотов Ext/ (узел V47, стадия S4b, раздел «"
     "МОДУЛИ ОБЪЕКТОВ КОНФИГУРАЦИИ» ниже); не реализованы реквизиты и "
     "табличные части прочих видов объектов "
@@ -992,9 +1133,12 @@ CHILD_NOT_IMPLEMENTED = (
 
 # Таблицы, чьи строки остаются нетронутыми, когда группа не запрошена: ответ обязан назвать
 # это, а не отдать нули как «в конфигурации ничего нет» (C2).
+# Узел V52 (шаг П4) добавляет круг стадии S4g: без этой строки `CHILD_TABLES` — круг стадии
+# S4 — включил бы `filter_criteria`, и стадия S4 снимала и анализировала бы чужие строки
+# (тот же дефект, что закрывали записи V48, V49, V50, V51).
 FOREIGN_STAGE_TABLES: Tuple[str, ...] = (
     SESSION_PARAMETER_TABLES + ROLE_TABLES + COMMON_ATTRIBUTES_TABLES
-    + EXCHANGE_PLAN_TABLES
+    + EXCHANGE_PLAN_TABLES + FILTER_CRITERIA_TABLES
 )
 CHILD_TABLES: Tuple[str, ...] = tuple(
     table for table in CONFIGURATION_VERSIONED_TABLES
@@ -2576,4 +2720,363 @@ def _append_exchange_plan_detail(lines: List[str], result: Dict[str, Any],
         lines.append(f"{indent}⚠️ {warning}")
     lines.append(f"{indent}Граница: {EXCHANGE_PLAN_CIRCLE_BOUNDARY}")
     return lines
+
+def format_filter_criteria_lines(result: Dict[str, Any], indent: str = "") -> List[str]:
+    """Текст стадии S4g по закрытому контракту `filter_criteria_defaults()` (C1, C3).
+
+    Формат один для двух контуров: раздела карточки `load_1c_catalog_tool` и ответа
+    отдельного входа `load_filter_criteria_tool` (шаг П5) — прецеденты V45/V46/V48/V49/V50/V51.
+    Отказ форматёр называет сам, вызывающий причину не повторяет. Групп `kinds` у вида нет
+    (решение Q5, вариант A), поэтому блока «группы круга не запрашивались» здесь нет: он
+    обещал бы раздельный вход дозагрузки, которого у стадии нет (в отличие от V51). Граница
+    круга печатается и при успехе: «строки записаны» не равно «о критерии отбора сохранено
+    всё». Неперечисленные ключи читаются нулями (C1). Имя —
+    `format_filter_criteria_lines`: форматёры стадий слоя называются по одному образцу.
+    """
+    lines: List[str] = []
+    if not result:
+        return lines
+
+    if not result.get("success"):
+        reason = result.get("error") or result.get("reason") or "загрузчик не назвал причину"
+        prefix = ("Стадия не выполнена" if result.get("status") in (None, STATUS_NOT_RUN)
+                  else "Стадия не удалась")
+        lines.append(f"{indent}{prefix}: {reason}")
+        lines.append(f"{indent}{FILTER_CRITERIA_REPEAT_HINT}")
+        for warning in result.get("warnings") or []:
+            lines.append(f"{indent}⚠️ {warning}")
+        return lines
+
+    written_by_table = result.get("written_by_table") or {}
+    removed_by_table = result.get("removed_by_table") or {}
+    lines.append(
+        f"{indent}Записано строк по таблицам: "
+        + ", ".join(f"{table}={int(written_by_table.get(table) or 0)}"
+                    for table in sorted(written_by_table))
+        + f"; всего {int(result.get('rows_written') or 0)} (видов "
+          f"{int(result.get('files_read') or 0)}, условий перечня "
+          f"{int(result.get('targets_total') or 0)}, форм "
+          f"{int(result.get('forms_total') or 0)}, описаний форм "
+          f"{int(result.get('form_ext_total') or 0)}, команд "
+          f"{int(result.get('commands_total') or 0)})"
+    )
+    lines.append(
+        f"{indent}Файлов регистрации вида: {int(result.get('files_found') or 0)} "
+        f"(разобрано {int(result.get('files_read') or 0)}, каталог "
+        f"{result.get('directory') or FILTER_CRITERIA_DIR}/, записей индекса состава вида "
+        f"{int(result.get('index_kind_records') or 0)})"
+    )
+    if int(result.get("removed_previous") or 0):
+        lines.append(
+            f"{indent}Снято прежних строк этой конфигурации: "
+            + ", ".join(f"{table}={int(removed_by_table.get(table) or 0)}"
+                        for table in sorted(removed_by_table))
+        )
+    return _append_filter_criteria_detail(lines, result, indent)
+
+
+def _append_filter_criteria_detail(lines: List[str], result: Dict[str, Any],
+                                  indent: str) -> List[str]:
+    """Второй блок текста стадии S4g: состояния строк, блок `<Type>`, перечень `<Content>`,
+    дети, ноги круга, дескрипторы модулей.
+
+    Разделение формата на две функции — только длина текста: форматёр обязан называть все
+    замкнутые словари состояний контракта (M5), иначе `empty_content` (MinCfg, KomMag) и
+    `empty_value` (BGU2, BP3 — пустые `DefaultForm`/`AuxiliaryForm`) остались бы
+    неразличимы, а нули счётчиков читались бы как «свойств нет».
+    """
+    prop_counts = result.get("counts_by_properties_state") or {}
+    content_counts = result.get("counts_by_content_state") or {}
+    child_counts = result.get("counts_by_children_state") or {}
+    lines.append(
+        f"{indent}Состояния строк вида: свойства — "
+        + ", ".join(f"{state}={int(prop_counts.get(state) or 0)}"
+                    for state in FILTER_CRITERIA_PROPERTIES_STATES)
+        + "; перечень <Content> — "
+        + ", ".join(f"{state}={int(content_counts.get(state) or 0)}"
+                    for state in FILTER_CRITERIA_CONTENT_STATES)
+        + "; дети — "
+        + ", ".join(f"{state}={int(child_counts.get(state) or 0)}"
+                    for state in FILTER_CRITERIA_CHILD_STATES)
+    )
+    form_ref = result.get("counts_by_form_ref_state") or {}
+    for column in ("default_form_state", "auxiliary_form_state"):
+        column_counts = form_ref.get(column) or {}
+        lines.append(
+            f"{indent}Ссылки на формы `{column}` — "
+            + ", ".join(f"{state}={int(column_counts.get(state) or 0)}"
+                        for state in FILTER_CRITERIA_FORM_REF_STATES)
+            + " — пустое значение слота и отсутствие слота различаются состояниями "
+              "`empty_value` и `absent`, а не нулём (замер 2.5: BGU2 и BP3 дают пустые "
+              "значения)"
+        )
+
+    type_counts = result.get("counts_by_type_state") or {}
+    multiplicity = result.get("types_multiplicity") or {}
+    by_class = result.get("types_by_class") or {}
+    by_container = result.get("types_by_container") or {}
+    lines.append(
+        f"{indent}Блок <Type>: состояний — "
+        + ", ".join(f"{state}={int(type_counts.get(state) or 0)}"
+                    for state in FILTER_CRITERIA_TYPE_STATES)
+        + "; кратность — "
+        + ", ".join(f"{mult}={int(multiplicity.get(mult) or 0)}"
+                    for mult in FILTER_CRITERIA_MULTIPLICITY_VALUES)
+        + "; классы — "
+        + ", ".join(f"{kind}={int(by_class.get(kind) or 0)}"
+                    for kind in FILTER_CRITERIA_TYPE_CLASS_VALUES)
+        + f"; записей всего {int(result.get('types_total') or 0)}, ссылок, разрешённых по "
+          f"индексу {int(result.get('types_object_ref_resolved') or 0)}, неразрешённых "
+          f"{int(result.get('types_unresolved_total') or 0)}"
+    )
+    lines.append(
+        f"{indent}Форма контейнера типа — "
+        + ", ".join(f"{name}={int(by_container.get(name) or 0)}"
+                    for name in FILTER_CRITERIA_TYPE_CONTAINERS)
+        + " — `<v8:TypeSet>` (KomMag) читается отдельным состоянием контейнера (Q6): без "
+          "него многотипный критерий выглядел бы разобранным как одиночный"
+    )
+
+    resolve_counts = result.get("counts_by_target_resolve_state") or {}
+    lines.append(
+        f"{indent}Перечень <Content>: разрешение цели — "
+        + ", ".join(f"{state}={int(resolve_counts.get(state) or 0)}"
+                    for state in FILTER_CRITERIA_TARGET_STATES)
+        + f"; целей {int(result.get('targets_total') or 0)}, уникальных "
+          f"{int(result.get('targets_distinct') or 0)}, не разрешено "
+          f"{int(result.get('content_unresolved_total') or 0)}, максимум целей в одном файле "
+          f"{int(result.get('max_targets_per_file') or 0)}, дублей "
+          f"{len(result.get('duplicate_targets') or [])}"
+    )
+    by_object_type = result.get("targets_by_object_type") or {}
+    if by_object_type:
+        lines.append(
+            f"{indent}Цели перечня по видам метаданных: "
+            + ", ".join(f"{name}={int(count)}"
+                        for name, count in sorted(by_object_type.items()))
+            + " — вид цели берётся из записи индекса состава, а не из текста ссылки (Q4)"
+        )
+    item_attributes = result.get("content_item_attributes") or {}
+    if item_attributes:
+        lines.append(
+            f"{indent}Атрибуты элемента `<Item>`: "
+            + ", ".join(f"{name}={int(count)}"
+                        for name, count in sorted(item_attributes.items()))
+            + " — колонок под атрибуты схема не заводит (замер П2: `xsi:type` на всех "
+              "записях круга), факт держит ответ стадии и проверка П6"
+        )
+
+    form_formats = result.get("form_ext_formats") or {}
+    lines.append(
+        f"{indent}Дети вида: описаний содержимого форм "
+        f"{int(result.get('form_ext_total') or 0)}, форматов содержимого — "
+        + (", ".join(f"{name}={int(count)}"
+                     for name, count in sorted(form_formats.items())) or "нет")
+        + " — таблицы детей (`forms`, `form_ext`, `commands`) общи с внешним контуром и с "
+          "видом V51, поэтому и пишутся, и снимаются предикатом по uuid родителей круга, а "
+          "не по ноге конфигурации (наблюдение П4 узла V52)"
+    )
+    lines.append(
+        f"{indent}Файлы модулей вида (дескрипторы, тела пишет V47): "
+        f"{int(result.get('module_files_total') or 0)}"
+        + (", по родам — " + ", ".join(
+            f"{name}={int(count)}"
+            for name, count in sorted((result.get("module_files_by_kind") or {}).items()))
+           if result.get("module_files_by_kind") else "")
+        + " (Q8)"
+    )
+
+    if not result.get("index_available"):
+        lines.append(
+            f"{indent}Индекс состава не читается — сверка файлов регистрации с перечнем и "
+            "разрешение целей перечня невозможны, и «объекта нет в перечне» от «перечень "
+            "этой конфигурации не загружен» этим не отличить"
+        )
+    mismatch_counts = result.get("counts_by_child_mismatch_state") or {}
+    lines.append(
+        f"{indent}Расхождения файлов и индекса состава: "
+        + ", ".join(f"{state}={int(mismatch_counts.get(state) or 0)}"
+                    for state in FILTER_CRITERIA_CIRCLE_DISCREPANCIES)
+        + f" (перечислено `index_only` {len(result.get('index_only') or [])}, `file_only` "
+          f"{len(result.get('file_only') or [])}, `uuid_mismatch` "
+          f"{len(result.get('uuid_mismatch') or [])}); расхождения детей с индексом "
+          f"{int(result.get('child_mismatch_total') or 0)} (псевдозаписей слотов индекса "
+          f"{int(result.get('index_pseudo_entries_total') or 0)}), сверка объявления вида с "
+          f"его каталогом — {int(result.get('declaration_mismatch_total') or 0)} — нули "
+          "являются ответом, а не подразумеванием"
+    )
+
+    unknown = result.get("unknown_properties") or {}
+    unknown_values = result.get("unknown_value_properties") or {}
+    unexpected_tags = [("Properties", "unexpected_child_tags"),
+                       ("<Type>", "unexpected_type_tags"),
+                       ("<Content>", "unexpected_content_tags")]
+    named_tags = [(where, result.get(key) or {}) for where, key in unexpected_tags
+                  if result.get(key)]
+    if unknown or unknown_values or named_tags:
+        lines.append(
+            f"{indent}Неизвестное в тегах вида: имена — "
+            + (", ".join(f"{name}={int(count)}"
+                         for name, count in sorted(unknown.items())) or "нет")
+            + "; значения — "
+            + (", ".join(f"{name}={int(count)}"
+                         for name, count in sorted(unknown_values.items())) or "нет")
+            + "; дочерние теги — "
+            + (", ".join(f"{where}: " + ", ".join(
+                f"{name}={int(count)}" for name, count in sorted(values.items()))
+                for where, values in named_tags) or "нет")
+            + " — незнакомое имя или значение остаётся значением с состоянием "
+              "`unknown_value`/`unknown_tag`, а не отказом записи (Q7, вариант A)"
+        )
+    ext_counts = result.get("counts_by_ext_observation") or {}
+    if ext_counts or result.get("observations"):
+        lines.append(
+            f"{indent}Наблюдения круга и о прочем в Ext/: "
+            + ", ".join(f"{kind}={count}" for kind, count in sorted(ext_counts.items()))
+            + "; наблюдений круга "
+            + ", ".join(str(kind) for kind, _ in (result.get("observations") or []))
+            + " — справочные ресурсы формы называются наблюдением, потому что колонок под "
+              "них в схеме нет, а «ресурсов нет» и «ресурсы не трогали» — разные ответы (Q7)"
+        )
+    prefixes = result.get("namespace_prefixes") or []
+    if prefixes:
+        lines.append(f"{indent}Префиксы пространств имён файлов круга: "
+                     + ", ".join(str(name) for name in prefixes))
+    for failure in (result.get("files_failed") or [])[:10]:
+        lines.append(f"{indent}  ⚠️ файл не разобран: {failure.get('source_path')} — "
+                     f"{failure.get('reason')}")
+
+    refreshed = int(result.get("statistics_refreshed") or 0)
+    if refreshed:
+        lines.append(
+            f"{indent}Статистика таблиц {', '.join(FILTER_CRITERIA_TABLES)} пересобрана "
+            f"(ANALYZE): {refreshed} — без неё читатели витрин текущего состояния платят "
+            "минутами (мера V46)"
+        )
+    for warning in result.get("warnings") or []:
+        lines.append(f"{indent}⚠️ {warning}")
+    lines.append(f"{indent}Граница: {FILTER_CRITERIA_CIRCLE_BOUNDARY}")
+    return lines
+
+
+def filter_criteria_defaults() -> Dict[str, Any]:
+    """Закрытый контракт стадии S4g с нулями (C1, C2, C3; узел V52, шаг П4).
+
+    Словарь плоский — тот же, что возвращает слой `load_filter_criteria`; конвейер
+    вкладывает его в свой ключ `filter_criteria` без переименования (C3). Групп `kinds` в
+    контракте нет — это решение Q5 (вариант A), а не пропуск: строка условия существует
+    только через id строки вида (Q1, вариант A), поэтому состояния «записать вид без
+    условия» в модели нет, а порога цены, при котором круг стоило бы резать, замер 1.4 не
+    дал (1 219 целей на весь круг, максимум 727 в одном файле).
+
+    Отдельно обязаны быть названы (план, разделы 2 и 5):
+
+    * числа по таблицам (`removed_by_table`/`written_by_table`) — двумя таблицами вида, а не
+      одним числом: «записано 7» и «записано 7 критериев + 727 условий» для читателя —
+      разные факты; строки детей (`forms`, `form_ext`, `commands`) добавляются в словари
+      загрузчиком, потому что их снимает и пишет предикат по uuid родителей;
+    * замкнутые словари состояний по всем колонкам `STATE_VOCABULARIES` разбора, включая
+      нули: `empty_content` (MinCfg, KomMag) и `empty_value` (BGU2, BP3 — пустые
+      `DefaultForm`/`AuxiliaryForm`) различимы состоянием, а не нулём (M5);
+    * словари блока `<Type>` (`counts_by_type_state`, `types_multiplicity`, `types_by_class`,
+      `types_by_container`) — форма контейнера (`Type` | `TypeSet`) является ответом разбора
+      (Q6): без отдельного счётчика `TypeSet` KomMag читался бы разобранным как все
+      остальные, а потерянного значения этого видно не было бы;
+    * `counts_by_target_resolve_state` и `targets_by_object_type` — «цель разрешена / нет» и
+      состав целей по видам метаданных являются ответом о круге, а не потерянной строкой
+      (Q4): 1 219 целей из 1 219 `exact` — это замер, а не предположение, и нули обязаны
+      быть названы;
+    * расхождения трёх ног круга — файлов регистрации с индексом состава
+      (`index_only`/`file_only`/`uuid_mismatch`), детей с индексом (`child_mismatches`,
+      `index_pseudo_entries`) и объявления вида с его каталогом (`declaration_mismatches`):
+      четыре выгрузки дают нули, и нули — это ответ, а не молчание;
+    * дескрипторы файлов модулей (`module_files_total`, `module_files_by_kind`) — тела
+      пишет узел V47 (Q8), и «файлов нет» от «файлы не читали» отличает именно этот
+      перечень;
+    * `content_item_attributes` — распределение атрибутов элемента `<Item>` (замер П2:
+      `xsi:type="xr:MDObjectRef"` на всех 1 219 записях): колонки под атрибут схема не
+      заводит, поэтому факт держит ответ стадии и проверка П6.
+    """
+    return {
+        "status": STATUS_NOT_RUN,
+        "success": False,
+        "error": None,
+        "reason": None,
+        "stage": STAGE_FILTER_CRITERIA,
+        "configuration_id": None,
+        "configuration_uuid": None,
+        "configuration_name": None,
+        "tables": list(FILTER_CRITERIA_TABLES),
+        "directory": FILTER_CRITERIA_DIR,
+        "files_found": 0,
+        "files_read": 0,
+        "files_failed": [],
+        "observations": [],
+        "rows_written": 0,
+        "filter_criteria_written": 0,
+        "content_written": 0,
+        "forms_written": 0,
+        "form_ext_written": 0,
+        "commands_written": 0,
+        "removed_previous": 0,
+        "removed_by_table": {table: 0 for table in FILTER_CRITERIA_TABLES},
+        "written_by_table": {table: 0 for table in FILTER_CRITERIA_TABLES},
+        "index_available": False,
+        "index_kind_records": 0,
+        "index_only": [],
+        "file_only": [],
+        "uuid_mismatch": [],
+        "child_mismatch_total": 0,
+        "child_mismatches": [],
+        "counts_by_child_mismatch_state": {
+            state: 0 for state in FILTER_CRITERIA_CIRCLE_DISCREPANCIES},
+        "index_pseudo_entries_total": 0,
+        "index_pseudo_entries": [],
+        "declaration_mismatch_total": 0,
+        "declaration_mismatches": [],
+        "counts_by_properties_state": {
+            state: 0 for state in FILTER_CRITERIA_PROPERTIES_STATES},
+        "counts_by_content_state": {state: 0 for state in FILTER_CRITERIA_CONTENT_STATES},
+        "counts_by_children_state": {state: 0 for state in FILTER_CRITERIA_CHILD_STATES},
+        "counts_by_form_ref_state": {
+            column: {state: 0 for state in FILTER_CRITERIA_FORM_REF_STATES}
+            for column in ("default_form_state", "auxiliary_form_state")},
+        "counts_by_type_state": {state: 0 for state in FILTER_CRITERIA_TYPE_STATES},
+        "types_multiplicity": {mult: 0 for mult in FILTER_CRITERIA_MULTIPLICITY_VALUES},
+        "types_by_class": {kind: 0 for kind in FILTER_CRITERIA_TYPE_CLASS_VALUES},
+        "types_by_container": {name: 0 for name in FILTER_CRITERIA_TYPE_CONTAINERS},
+        "types_total": 0,
+        "types_object_ref_resolved": 0,
+        "types_object_ref_view_wide": 0,
+        "types_unresolved_total": 0,
+        "types_unresolved": [],
+        "counts_by_target_resolve_state": {
+            state: 0 for state in FILTER_CRITERIA_TARGET_STATES},
+        "targets_total": 0,
+        "targets_distinct": 0,
+        "targets_by_object_type": {},
+        "max_targets_per_file": 0,
+        "content_item_attributes": {},
+        "duplicate_targets": [],
+        "unresolved_targets": [],
+        "content_unresolved_total": 0,
+        "commands_total": 0,
+        "forms_total": 0,
+        "form_ext_total": 0,
+        "form_ext_formats": {},
+        "module_files_total": 0,
+        "module_files_by_kind": {},
+        "ext_observations_total": 0,
+        "counts_by_ext_observation": {},
+        "ext_observations": {},
+        "unknown_properties": {},
+        "unknown_value_properties": {},
+        "unexpected_child_tags": {},
+        "unexpected_type_tags": {},
+        "unexpected_content_tags": {},
+        "namespace_prefixes": [],
+        "statistics_refreshed": 0,
+        "warnings": [],
+    }
+
 

@@ -42,6 +42,9 @@ from configuration_load_contract import (
     EXCHANGE_PLAN_META_TAG,
     EXCHANGE_PLAN_SECTION_HEADER,
     EXCHANGE_PLAN_TABLES,
+    FILTER_CRITERIA_META_TAG,
+    FILTER_CRITERIA_SECTION_HEADER,
+    FILTER_CRITERIA_TABLES,
     OBJECT_MODULES_SECTION_HEADER,
     ROLES_SECTION_HEADER,
     ROLE_META_TAG,
@@ -54,6 +57,7 @@ from configuration_load_contract import (
     format_child_object_lines,
     format_common_attributes_lines,
     format_exchange_plans_lines,
+    format_filter_criteria_lines,
     format_object_module_lines,
     format_roles_lines,
     format_root_modules_lines,
@@ -475,6 +479,18 @@ def _stage_section_lines(result):
     if exchange_plans_part:
         lines.append(f"{EXCHANGE_PLAN_SECTION_HEADER}:")
         lines.extend(format_exchange_plans_lines(exchange_plans_part, indent="   "))
+    # Узел V52 (стадия S4g, позиция 2.7 списка): свойства критериев отбора.
+    # Раздел печатается и при отказе стадии, и при `not_run` — по той же причине, что у
+    # S3/S4/S4c–S4f: «загружено» без него читалось бы как «состав конфигурации в БД есть
+    # весь». Ответ стадии лежит в собственном ключе, а не внутри `child_objects`, `roles`,
+    # `common_attributes` или `exchange_plans` (правило C3); текст даёт общий форматёр
+    # контракта — тот же, что отдаёт отдельный инструмент `load_filter_criteria_tool`
+    # (шаг П5). Блока «группы круга не запрашивались» у форматёра нет: групп `kinds` у вида
+    # нет по решению Q5 (вариант A), и обещать их значило бы обещать вход, которого нет.
+    filter_criteria_part = result.get("filter_criteria") or {}
+    if filter_criteria_part:
+        lines.append(f"{FILTER_CRITERIA_SECTION_HEADER}:")
+        lines.extend(format_filter_criteria_lines(filter_criteria_part, indent="   "))
     # Узел V47 (стадия S4b): модули объектов конфигурации — вторая транзакция загрузки
     # (Q6, граница D7). Раздел печатается и при отказе стадии, и при `not_run` (индекс
     # состава не разобран — круг не определён): «конфигурация загружена» без него
@@ -675,6 +691,15 @@ def format_load_result(result):
                 # <ChildObjects> трёх содержательных выгрузок).
                 loaded_tags[COMMON_ATTRIBUTE_META_TAG] = COMMON_ATTRIBUTES_TABLES
                 loaded_tags[EXCHANGE_PLAN_META_TAG] = EXCHANGE_PLAN_TABLES
+                # Узел V52 (стадия S4g, позиция 2.7 списка): FilterCriterion — вид, содержимое
+                # которого сохраняется своей стадией в свои таблицы вида и в общие таблицы его
+                # детей. Без строки карточка относила бы критерии отбора к «остальных объектов
+                # … в БД не раскладываются», противореча собственному разделу СВОЙСТВА
+                # КРИТЕРИЕВ ОТБОРА (тот же дефект, который чинила строка V50/V51). Круг
+                # называют таблицы вида (`filter_criteria`, `filter_criterion_content`); детей
+                # вид пишет в общие таблицы `forms`/`form_ext`/`commands`, и их в словаре нет
+                # осознанно: предикат их снятия и записи — uuid родителей круга, а не тег.
+                loaded_tags[FILTER_CRITERIA_META_TAG] = FILTER_CRITERIA_TABLES
                 loaded = {tag: count for tag, count in child_counts.items()
                           if tag in loaded_tags}
                 rest = {tag: count for tag, count in child_counts.items()
@@ -688,14 +713,15 @@ def format_load_result(result):
                 lines.append(
                     f"Состав из <ChildObjects> Configuration.xml: объектов "
                     f"{sum(child_counts.values())}"
-                    + (f"; видов с загруженным содержимым (узлы V46, V48, V49, V50 и V51): "
-                       f"{loaded_detail} — "
-                       "их свойства и ссылки лежат в таблицах стадий S4, S4c, S4d, S4e и "
-                       "S4f, разделы «"
+                    + (f"; видов с загруженным содержимым (узлы V46, V48, V49, V50, V51 "
+                       f"и V52): {loaded_detail} — "
+                       "их свойства и ссылки лежат в таблицах стадий S4, S4c, S4d, S4e, S4f "
+                       "и S4g, разделы «"
                        + CHILD_SECTION_HEADER + "», «" + SESSION_PARAMETERS_SECTION_HEADER
                        + "», «" + ROLES_SECTION_HEADER + "», «"
-                       + COMMON_ATTRIBUTES_SECTION_HEADER + "» и «"
-                       + EXCHANGE_PLAN_SECTION_HEADER + "» ниже"
+                       + COMMON_ATTRIBUTES_SECTION_HEADER + "», «"
+                       + EXCHANGE_PLAN_SECTION_HEADER + "» и «"
+                       + FILTER_CRITERIA_SECTION_HEADER + "» ниже"
                        if loaded_detail else "")
                     + (f"; остальных объектов {sum(rest.values())} — по типам: {by_type}; "
                        "эти записи в БД не раскладываются (таблиц объектов метаданных по ним "

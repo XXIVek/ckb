@@ -163,8 +163,16 @@ def check_registry():
     check("словарь писателей покрывает круг версионных таблиц плюс именованное исключение",
           sorted(CONFIGURATION_OBJECT_WRITERS) == expected,
           ", ".join(sorted(CONFIGURATION_OBJECT_WRITERS)))
-    check("исключение названо и совпадает с кругом узла без своей цепи",
-          sorted(CONFIGURATION_UNVERSIONED_TABLES) == sorted(NODE_UNVERSIONED),
+    # Круг таблиц без своей цепи задают три узла: V49 (`role_rights`), V50
+    # (`common_attribute_targets`) и V52 (`filter_criterion_content`). Сравнение с кругом
+    # одного узла было бы неверно с того момента, как появился второй узел с таким же
+    # основанием (Q2, вариант A), и проба это пропустила: эталон правится тем же шагом, что
+    # и регистрация новой таблицы, иначе добавление читалось бы молчанием.
+    full_unversioned = NODE_UNVERSIONED + ("common_attribute_targets",
+                                          "filter_criterion_content")
+    check("исключение названо и совпадает с полным кругом таблиц без своей цепи "
+          "(V49+V50+V52)",
+          sorted(CONFIGURATION_UNVERSIONED_TABLES) == sorted(full_unversioned),
           ", ".join(CONFIGURATION_UNVERSIONED_TABLES))
     for table in TABLES:
         writer = CONFIGURATION_OBJECT_WRITERS.get(table)

@@ -88,7 +88,10 @@ from configuration_exchange_plans import (  # noqa: E402
     GROUP_TABLES as EXCHANGE_PLAN_GROUP_TABLES,
     LOAD_GROUPS as EXCHANGE_PLAN_LOAD_GROUPS,
 )
-from configuration_exchange_plans_loader import REMOVE_ORDER as CIRCLE_REMOVE_ORDER  # noqa: E402
+from configuration_exchange_plans_loader import (  # noqa: E402
+    REMOVE_ORDER as CIRCLE_REMOVE_ORDER,
+    count_circle_child_rows,
+)
 
 from configuration_load_contract import (  # noqa: E402
     CHILD_NOT_IMPLEMENTED,
@@ -99,6 +102,7 @@ from configuration_load_contract import (  # noqa: E402
     EXCHANGE_PLAN_REPEAT_HINT,
     EXCHANGE_PLAN_SECTION_HEADER,
     EXCHANGE_PLAN_TABLES,
+    FILTER_CRITERIA_SECTION_HEADER,
     FOREIGN_STAGE_TABLES,
     OBJECT_MODULES_RELOAD_HINT,
     OBJECT_MODULES_SECTION_HEADER,
@@ -109,6 +113,7 @@ from configuration_load_contract import (  # noqa: E402
     STAGE_CHILD_OBJECTS,
     STAGE_COMMON_ATTRIBUTES,
     STAGE_EXCHANGE_PLANS,
+    STAGE_FILTER_CRITERIA,
     STAGE_FULL_RELOAD_ONLY,
     STAGE_INCOMPLETE_GROUPS,
     STAGE_OBJECT_MODULES,
@@ -124,6 +129,7 @@ from configuration_load_contract import (  # noqa: E402
     child_objects_defaults,
     common_attributes_defaults,
     exchange_plans_defaults,
+    filter_criteria_defaults,
     format_exchange_plans_lines,
     format_stopped_stage_lines,
     root_modules_defaults,
@@ -150,13 +156,15 @@ ROUTER = ROOT / "src" / "config_load_router.py"
 PLANS_LOADER = ROOT / "src" / "configuration_exchange_plans_loader.py"
 
 # Стадии детей конвейера в порядке `STAGES` — тот же порядок, что у нормативного списка
-# (2.1–2.2, 2.3, 2.4, 2.5, 2.6, модули Ext/). Перебор намеренно полный: решение Q8 узла V48
-# принято «ко всем стадиям», и проверка одной стадии таким ответом не является. Узел V51
-# добавляет в перечень седьмую стадию — S4f; её отсутствие и было бы пропущенным входом
-# вида в останов конвейера.
+# (2.1–2.2, 2.3, 2.4, 2.5, 2.6, 2.7, модули Ext/). Перебор намеренно полный: решение Q8
+# узла V48 принято «ко всем стадиям», и проверка одной стадии таким ответом не является.
+# Узел V51 добавлял в перечень седьмую стадию — S4f; узел V52 добавляет восьмую — S4g
+# (позиция 2.7). Отсутствие любой из них и было бы пропущенным входом вида в останов
+# конвейера; собственных проверок S4g эта проба не заводит — они в пробах узла V52.
 CHILD_STAGES = (
     STAGE_ROOT_MODULES, STAGE_CHILD_OBJECTS, STAGE_SESSION_PARAMETERS, STAGE_ROLES,
-    STAGE_COMMON_ATTRIBUTES, STAGE_EXCHANGE_PLANS, STAGE_OBJECT_MODULES,
+    STAGE_COMMON_ATTRIBUTES, STAGE_EXCHANGE_PLANS, STAGE_FILTER_CRITERIA,
+    STAGE_OBJECT_MODULES,
 )
 STAGE_KEYS = {
     STAGE_ROOT_MODULES: "root_modules",
@@ -165,6 +173,7 @@ STAGE_KEYS = {
     STAGE_ROLES: "roles",
     STAGE_COMMON_ATTRIBUTES: "common_attributes",
     STAGE_EXCHANGE_PLANS: "exchange_plans",
+    STAGE_FILTER_CRITERIA: "filter_criteria",
     STAGE_OBJECT_MODULES: "object_modules",
 }
 SECTION_HEADERS = {
@@ -174,6 +183,7 @@ SECTION_HEADERS = {
     STAGE_ROLES: ROLES_SECTION_HEADER,
     STAGE_COMMON_ATTRIBUTES: COMMON_ATTRIBUTES_SECTION_HEADER,
     STAGE_EXCHANGE_PLANS: EXCHANGE_PLAN_SECTION_HEADER,
+    STAGE_FILTER_CRITERIA: FILTER_CRITERIA_SECTION_HEADER,
     STAGE_OBJECT_MODULES: OBJECT_MODULES_SECTION_HEADER,
 }
 DEFAULTS = {
@@ -183,6 +193,7 @@ DEFAULTS = {
     STAGE_ROLES: roles_defaults,
     STAGE_COMMON_ATTRIBUTES: common_attributes_defaults,
     STAGE_EXCHANGE_PLANS: exchange_plans_defaults,
+    STAGE_FILTER_CRITERIA: filter_criteria_defaults,
     STAGE_OBJECT_MODULES: object_modules_defaults,
 }
 # Функция стадии — имя в модуле загрузчика: `register_configuration` обращается к имени
@@ -194,6 +205,7 @@ STAGE_FUNCTIONS = {
     STAGE_ROLES: "load_roles",
     STAGE_COMMON_ATTRIBUTES: "load_common_attributes",
     STAGE_EXCHANGE_PLANS: "load_exchange_plans",
+    STAGE_FILTER_CRITERIA: "load_filter_criteria",
     STAGE_OBJECT_MODULES: "load_object_modules",
 }
 # Чем продолжение допустимо (подстрока подсказки): у стадии с отдельным входом — имя его
@@ -205,6 +217,7 @@ RESUME_MARKS = {
     STAGE_ROLES: "load_roles_tool",
     STAGE_COMMON_ATTRIBUTES: "load_common_attributes_tool",
     STAGE_EXCHANGE_PLANS: "load_exchange_plans_tool",
+    STAGE_FILTER_CRITERIA: "load_filter_criteria_tool",
     STAGE_OBJECT_MODULES: "load_1c_catalog_tool",
 }
 # Слова, которыми форматёр называет состояние стадии (правило C2): «не удалась» — круг
@@ -319,22 +332,25 @@ check("1.3 форматёр на «не останавливался» разд�
 
 ORDER = [stage for stage, _ in STAGES]
 # Критерий П8 для узла V51: перечень пропущенных считается из `STAGES`, поэтому вход вида
-# в останов виден именно здесь — у S4e пропущенными оказываются S4f и S4b, у S4f — S4b.
-# Явный перечень ниже называет, какой именно порядок ожидается; вывод из `STAGES` проверяет
-# следующий пункт.
-check("1.4 `stages_after` даёт порядок `STAGES`: S4e → S4f → S4b (критерий П8)",
+# в останов виден именно здесь — у S4e пропущенными оказываются S4f, S4g и S4b, у S4f — S4g
+# и S4b, у S4g (узел V52) — S4b. Явный перечень ниже называет, какой именно порядок
+# ожидается; вывод из `STAGES` проверяет следующий пункт.
+check("1.4 `stages_after` даёт порядок `STAGES`: S4e → S4f → S4g → S4b (критерий П8)",
       stages_after(STAGE_COMMON_ATTRIBUTES) == [STAGE_EXCHANGE_PLANS,
-                                               STAGE_OBJECT_MODULES]
-      and stages_after(STAGE_EXCHANGE_PLANS) == [STAGE_OBJECT_MODULES]
+                                               STAGE_FILTER_CRITERIA, STAGE_OBJECT_MODULES]
+      and stages_after(STAGE_EXCHANGE_PLANS) == [STAGE_FILTER_CRITERIA,
+                                                 STAGE_OBJECT_MODULES]
+      and stages_after(STAGE_FILTER_CRITERIA) == [STAGE_OBJECT_MODULES]
       and stages_after(STAGE_OBJECT_MODULES) == []
       and all(stages_after(stage) == ORDER[ORDER.index(stage) + 1:]
               for stage in CHILD_STAGES),
       [stages_after(stage) for stage in CHILD_STAGES])
-check("1.4а порядок `STAGES` повторяет нормативный список: 2.4 → 2.5 → 2.6 → модули Ext/ "
-      "(критерий П8)",
+check("1.4а порядок `STAGES` повторяет нормативный список: 2.4 → 2.5 → 2.6 → 2.7 → "
+      "модули Ext/ (критерий П8, узлы V51 и V52)",
       ORDER.index(STAGE_ROLES) + 1 == ORDER.index(STAGE_COMMON_ATTRIBUTES)
       and ORDER.index(STAGE_COMMON_ATTRIBUTES) + 1 == ORDER.index(STAGE_EXCHANGE_PLANS)
-      and ORDER.index(STAGE_EXCHANGE_PLANS) + 1 == ORDER.index(STAGE_OBJECT_MODULES),
+      and ORDER.index(STAGE_EXCHANGE_PLANS) + 1 == ORDER.index(STAGE_FILTER_CRITERIA)
+      and ORDER.index(STAGE_FILTER_CRITERIA) + 1 == ORDER.index(STAGE_OBJECT_MODULES),
       " → ".join(ORDER))
 check("1.4б стадия S4f названа позицией 2.6 и каталогом вида, а не «дополнением S4e»",
       "2.6" in stage_title(STAGE_EXCHANGE_PLANS)
@@ -393,14 +409,17 @@ check("1.12а `s4f_exchange_plans`: незакрытая часть называ
       "2.6" in str(s4f_stopped["incomplete_group"])
       and "планов обмена" in str(s4f_stopped["incomplete_group"]),
       s4f_stopped["incomplete_group"])
-check("1.12б `s4f_exchange_plans`: пропущенной после отказа названа только S4b",
-      [item["stage"] for item in s4f_stopped["not_run_stages"]] == [STAGE_OBJECT_MODULES],
+check("1.12б `s4f_exchange_plans`: пропущенными после отказа названы S4g и S4b — вход вида "
+      "V52 в останов предыдущей стадии (критерий П8, узел V52)",
+      [item["stage"] for item in s4f_stopped["not_run_stages"]] == [STAGE_FILTER_CRITERIA,
+                                                                    STAGE_OBJECT_MODULES],
       [item["stage"] for item in s4f_stopped["not_run_stages"]])
 check("1.12в словарь незакрытых групп содержит её ключ (прецедент записи S4e)",
       STAGE_EXCHANGE_PLANS in STAGE_INCOMPLETE_GROUPS, sorted(STAGE_INCOMPLETE_GROUPS))
-check("1.12г `s4e_common_attributes`: после её отказа пропущенными названы S4f и S4b — вход "
-      "новой стадии в останов предыдущей (критерий П8)",
-      stages_after(STAGE_COMMON_ATTRIBUTES) == [STAGE_EXCHANGE_PLANS, STAGE_OBJECT_MODULES],
+check("1.12г `s4e_common_attributes`: после её отказа пропущенными названы S4f, S4g и S4b — "
+      "вход новых стадий в останов предыдущей (критерий П8, узлы V51 и V52)",
+      stages_after(STAGE_COMMON_ATTRIBUTES) == [STAGE_EXCHANGE_PLANS,
+                                               STAGE_FILTER_CRITERIA, STAGE_OBJECT_MODULES],
       stages_after(STAGE_COMMON_ATTRIBUTES))
 
 
@@ -536,14 +555,26 @@ check("1.31 граница круга названа самим текстом �
 
 CIRCLE_TABLES = tuple(CIRCLE_REMOVE_ORDER)
 
+# Подсчёт общих таблиц детей (атрибуты, табличные части, формы, содержимое форм, макеты,
+# команды) ведёт НЕ нога `configuration_uuid`, а круг родителей вида: те же таблицы пишут
+# внешние объекты (V13/V14), модули (V47) и критерии отбора (V52). Узел V52 это и показал
+# (наблюдение П8 этого прогона): на MinCfg в `commands` появилась строка команды критерия
+# отбора, и проба прочла бы её как «круг стадии S4f снят не полностью», хотя стадия S4f её
+# ни снимала, ни писала. Тот же приём, который V51 требует от предиката снятия
+# (`parent_type` + `parent_uuid = ANY(…)`), применяется к подсчёту: проверка обязана мерить
+# тот же круг, что и загрузчик. Условие живёт не в пробе, а рядом со снятием —
+# `count_circle_child_rows` модуля `configuration_exchange_plans_loader`, иначе четыре пробы
+# (`_v48_p8_stop_probe.py`, `_v49_p8_stop_probe.py`, `_v50_p8_stop_probe.py` и эта) держали
+# бы по копии предиката, и расхождение между снятием и проверкой нечем было бы заметить.
+
 
 def scope_counts(cur, cfg_uuid):
     """Что лежит в базе по этой конфигурации: заголовок, индекс состава, восемь таблиц круга.
 
     Перечень таблиц берётся из перечня снятия писателя (`REMOVE_ORDER`), а не переписывается:
-    проба обязана считать те же таблицы, которые снимает и пишет загрузчик. У `form_ext` ноги
-    `configuration_uuid` нет — область видимости задаёт строка формы (наблюдение П6), поэтому
-    она считается связкой по `forms`.
+    проба обязана считать те же таблицы, которые снимает и пишет загрузчик. Общий круг детей
+    считается функцией загрузчика (`count_circle_child_rows`) — тем же предикатом, что и
+    снятие (наблюдение П8 узла V52).
     """
     counts = {}
     counts["header"] = int(one(
@@ -555,14 +586,7 @@ def scope_counts(cur, cfg_uuid):
         cur, f"SELECT count(*) FROM {CL.OBJECTS_TABLE} WHERE configuration_id = %s",
         [cfg_id]) or 0) if cfg_id else 0
     for table in CIRCLE_TABLES:
-        if table == "form_ext":
-            counts["s4f:" + table] = int(one(
-                cur, "SELECT count(*) FROM form_ext fe JOIN forms f ON f.id = fe.form_id "
-                     "WHERE f.configuration_uuid = %s::uuid", [str(cfg_uuid)]) or 0)
-        else:
-            counts["s4f:" + table] = int(one(
-                cur, f"SELECT count(*) FROM {table} WHERE configuration_uuid = %s::uuid",
-                [str(cfg_uuid)]) or 0)
+        counts["s4f:" + table] = count_circle_child_rows(cur, cfg_uuid, table)
     return counts
 
 
@@ -572,19 +596,16 @@ def other_circle_counts(cur, cfg_uuid):
     Отличие узла V51 от V48/V49/V50: таблицы детей общие, и снимая круг своей конфигурации,
     писатель не имеет права тронуть строки детей чужих конфигураций. Доказывается числом до и
     после каждого прогона с остановкой, а не ссылкой на предикат.
+
+    Подсчёт держит тот же круг родителей, что и `scope_counts` (`other_configurations=True`):
+    сравнение «до/после» теряет смысл, если до считает один круг, а после — другой (и
+    наоборот, чужие строки детей других видов менялись бы от прогонов соседних узлов, что
+    проба приписала бы стадии S4f).
     """
     counts = {}
     for table in CIRCLE_TABLES:
-        if table == "form_ext":
-            counts["other:" + table] = int(one(
-                cur, "SELECT count(*) FROM form_ext fe JOIN forms f ON f.id = fe.form_id "
-                     "WHERE f.configuration_uuid IS NOT NULL "
-                     "AND f.configuration_uuid <> %s::uuid", [str(cfg_uuid)]) or 0)
-        else:
-            counts["other:" + table] = int(one(
-                cur, f"SELECT count(*) FROM {table} "
-                     "WHERE configuration_uuid IS NOT NULL "
-                     "AND configuration_uuid <> %s::uuid", [str(cfg_uuid)]) or 0)
+        counts["other:" + table] = count_circle_child_rows(
+            cur, cfg_uuid, table, other_configurations=True)
     return counts
 
 
