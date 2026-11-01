@@ -1,0 +1,1 @@
+SELECT 'E. различных имён вида '||count(DISTINCT name)||' | строк '||count(*) FROM configuration_objects WHERE object_type='FilterCriterion' AND depth=0; SELECT 'F. '||c.name||' | '||co.name FROM configuration_objects co JOIN configurations c ON c.id=co.configuration_id WHERE co.object_type='FilterCriterion' AND co.depth=0 ORDER BY co.name, c.name;
