@@ -360,9 +360,12 @@ V48/V50/V51, и он не зависит от того, что uuid вида п�
 
 ## 7. План реализации (П1…П8)
 
-**П1. Схемная пара и версионность.** `create_1c_configurations_db.sql` + миграция
-`migrate_v52_filter_criteria.sql` (ряд `migrate_v50_common_attributes.sql`,
-`migrate_v51_exchange_plans.sql` лежат в корне репозитория) + `src/ddl_configuration_tables.sql`:
+**П1. Схемная пара и версионность.** шаг 2 `create_1c_configurations_db.sql` + аддитивная
+миграция `migrate_v52_filter_criteria.sql` (ряд `migrate_v50_common_attributes.sql`,
+`migrate_v51_exchange_plans.sql` лежат в корне репозитория). Третьего файла DDL по видам
+конфигурации в репозитории нет: `src/ddl_configuration_tables.sql`, названный текстом П1 узла V51,
+отсутствует — сам V51 назвал это в своём разделе 17. Пара «шаг 2 + миграция» сверяется
+`python _cmp_ddl.py`, порождённые файлы руками не правятся:
 
 - таблица `filter_criteria` по 11 тегам раздела 2 в порядке тегов файла: свойства, закрытые
   словари состояний (`properties_state`, `unknown_property_names`, `content_state`,
@@ -375,7 +378,13 @@ V48/V50/V51, и он не зависит от того, что uuid вида п�
   вида, каскад), `target_ref_text`, `target_object_type`, `target_full_name`,
   `target_resolve_state`, `ordinal`, состояние разбора;
 - витрины `v_current_filter_criteria` и `v_current_filter_criterion_content` — той же связкой, что
-  `v_current_exchange_plans`/`v_current_exchange_plan_content`;
+  `v_current_exchange_plans`/`v_current_exchange_plan_content`. Имя витрины задаёт не файл DDL, а
+  `current_view()` по реестру `CONFIGURATION_VERSIONED_TABLES` (`src/current_revision.py`),
+  расхождение имени ловит `tools/check_v19_revisions.py`; `filter_criterion_content` своей цепи
+  ревизий не имеет (Q2, вариант A), поэтому вносится в `CONFIGURATION_UNVERSIONED_TABLES`
+  (`src/external_table_writer.py`, где он и определён) по
+  прецеденту `role_rights` (V49) и `common_attribute_targets` (V50), а её витрина строится связкой
+  по `filter_criterion_id`;
 - **схему детей (Q3 вариант A) миграция не трогает** — в отличие от V51: ноги
   `configuration_uuid`/`parent_type` в `forms`/`form_ext`/`commands` уже есть, новых колонок
   свойств не требуется;
@@ -478,10 +487,12 @@ H про XSD по разделу 1.5), карточка журнала `rules:co
 5. строки чужих конфигураций в общих таблицах детей не затронуты (замер изоляции по предикатам
    `configuration_uuid` + uuid родителя — приём V51), коллизия `СвязанныеДокументы` не сливается:
    четыре конфигурации дают четыре строки вида;
-6. регрессионный контур прежних узлов зелёный: `check_v51` (334/0), `check_v50` (212/0),
-   `check_v49` (373/0), `check_v48` (152/0), `check_v47` (119/0), `check_v19` (95/0),
-   `check_v20` (34/0) — контур правок внешних объектов обязателен, потому что узел пишет в те же
-   таблицы детей;
+6. регрессионный контур прежних узлов зелёный: `tools/check_v51_exchange_plans.py` (334/0),
+   `tools/check_v50_common_attributes.py` (212/0), `tools/check_v49_roles.py` (373/0),
+   `tools/check_v48_session_parameters.py` (152/0),
+   `tools/check_v47_configuration_object_modules.py` (119/0), `tools/check_v19_revisions.py` (95/0),
+   `tools/check_v20_config_link.py` (34/0) — контур правок внешних объектов обязателен, потому что
+   узел пишет в те же таблицы детей;
 7. `check_rules_layer.py`, `_layer_tree_check.py`, `check_search_rules_sync.py`,
    `_journal_code_history.py`, `check_mcp_tool_wiring.py` — ноль ошибок; `===TOOLS===` матрица
    содержит десять имён; карточка слоя и `goal-and-stages` называют позицию 2.7 закрытой;
