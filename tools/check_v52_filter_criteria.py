@@ -149,8 +149,9 @@ from configuration_filter_criteria_loader import (  # noqa: E402
 )
 from configuration_load_contract import (  # noqa: E402
     FILTER_CRITERIA_REMOVE_ORDER, FILTER_CRITERIA_REPEAT_HINT, FILTER_CRITERIA_TABLES,
-    FOREIGN_STAGE_TABLES, STAGE_EXCHANGE_PLANS, STAGE_FILTER_CRITERIA, STAGE_FULL_RELOAD_ONLY,
-    STAGE_OBJECT_MODULES, STAGES, filter_criteria_defaults, stage_resume_hint,
+    FOREIGN_STAGE_TABLES, STAGE_EVENT_SUBSCRIPTIONS, STAGE_EXCHANGE_PLANS,
+    STAGE_FILTER_CRITERIA, STAGE_FULL_RELOAD_ONLY, STAGE_OBJECT_MODULES, STAGES,
+    filter_criteria_defaults, stage_resume_hint,
 )
 from configuration_module_slots import resolve_dump_dir  # noqa: E402
 from external_db import transaction  # noqa: E402
@@ -2138,9 +2139,12 @@ def check_contract():
     section("Контур 12 — контракт стадии и реестр инструментов")
     order = [stage for stage, _title in STAGES]
     check(f"`{STAGE_FILTER_CRITERIA}` стоит сразу за `{STAGE_EXCHANGE_PLANS}` и перед "
-          f"`{STAGE_OBJECT_MODULES}` (порядок позиций 2.6 → 2.7, модули — вторая транзакция)",
+          f"`{STAGE_EVENT_SUBSCRIPTIONS}` (порядок позиций 2.6 → 2.7 → 2.8, узлы V52 и V53; "
+          "`модули Ext/` — вторая транзакция, она идёт последней среди стадий детей)",
           order.index(STAGE_FILTER_CRITERIA) == order.index(STAGE_EXCHANGE_PLANS) + 1
-          and order.index(STAGE_OBJECT_MODULES) == order.index(STAGE_FILTER_CRITERIA) + 1,
+          and order.index(STAGE_EVENT_SUBSCRIPTIONS)
+          == order.index(STAGE_FILTER_CRITERIA) + 1
+          and order.index(STAGE_OBJECT_MODULES) == len(order) - 1,
           f"порядок стадий: {names(order)}")
     outside = [table for table in FILTER_CRITERIA_TABLES
                if table not in FOREIGN_STAGE_TABLES]
@@ -2188,8 +2192,8 @@ def check_contract():
     core_tools = registry.get("server_configurations_core.py", [])
     check("вход группы `load_filter_criteria_tool` назван в реестре `EXPECTED_TOOLS` ядра",
           "load_filter_criteria_tool" in core_tools, _brief(sorted(core_tools)))
-    check(f"число инструментов ядра — {len(core_tools)} (после узла V52 — 10)",
-          len(core_tools) == 10, f"в реестре {len(core_tools)}")
+    check(f"число инструментов ядра — {len(core_tools)} (после узлов V52 и V53 — 11)",
+          len(core_tools) == 11, f"в реестре {len(core_tools)}")
 
 
 # ═══ контур 11 (продолжение): неприкосновенность чужих кругов ═════════════════════════
