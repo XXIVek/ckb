@@ -81,6 +81,15 @@ r"""tools/check_v52_filter_criteria.py — узел V52: критерии отб
      `FOREIGN_STAGE_TABLES`, подсказка продолжения стадии названа, а десятый инструмент
      реестра (`load_filter_criteria_tool`) присутствует в `EXPECTED_TOOLS` — иначе проверка
      молчала бы о стадии, в которую конвейер уже не заходит, и о входе, которым её повторяют.
+ 13. ССЫЛКИ ДРУГИХ СЛОЁВ НА ВИД (позиция O1, закрыта замером 02.11.2026). Сами ссылки живут в
+     кругах V46 (`subsystem_content`) и V49 (`role_rights`), узел V52 их не пишет. Сторожится
+     свойство, а не число: каждая ссылка с uuid обязана иметь запись индекса состава той же
+     конфигурации (иначе состояние `resolved`/`exact` врёт), и ни одна «разрешённая» ссылка не
+     должна оставаться без строки вида. Числа замера (14 и 17 на четырёх выгрузках) в
+     ожидания НЕ переносятся — правило `rules:core-rules:functional:answer-and-evidence`,
+     п. 3: числа датированы и друг друга не подменяют. Проверяется и выводность связки: снятие
+     круга вида в SAVEPOINT не меняет состояний ссылок, но оставляет их без строки вида; после
+     отката точки сохранения круг восстановлен, прогон остаётся читающим.
 
 Запуск:
     [Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $env:PYTHONIOENCODING='utf-8'
@@ -1919,6 +1928,157 @@ def check_name_collision(cur):
         info("коллизия имени названа и сохранена раздельно: "
              + names([str(row["object_name"]) for row in rows]))
 
+# ═══ контур 13: ссылки других слоёв на вид — свойство, а не число (позиция O1) ═════════
+# Позиция O1 плана (Q9, вариант A) закрыта замером `_v52_o1_link_semantics.py` (02.11.2026):
+# ссылки перечней подсистем (узел V46) и прав ролей (узел V49) на вид разрешаются индексом
+# состава той же конфигурации и связываются со строкой вида по паре (`configuration_uuid`,
+# `object_uuid`), но самой связи нет ни в выгрузке, ни в схеме. Числа замера (14 и 17 ссылок
+# на четырёх выгрузках) в ожидания контура НЕ переносятся: правило
+# `rules:core-rules:functional:answer-and-evidence`, пункт 3 — числа в правилах датированы и
+# друг друга не подменяют; живое число, записанное ожиданием, перестало бы быть живым, а при
+# расширении корпуса стало бы ложным провалом. Здесь сторожатся только инварианты.
+CROSS_LAYER_LINKS_CTE = f"""
+WITH links AS (
+    SELECT 'subsystem_content' AS source, sc.configuration_uuid,
+           sc.target_object_uuid AS target_uuid,
+           CASE WHEN sc.resolved THEN 'resolved=true' ELSE 'resolved=false' END AS link_state
+    FROM subsystem_content sc
+    WHERE sc.target_object_type = '{INDEX_OBJECT_TYPE}'
+    UNION ALL
+    SELECT 'role_rights', rr.configuration_uuid, rr.target_object_uuid,
+           'target_resolve_state=' || rr.target_resolve_state
+    FROM role_rights rr
+    WHERE rr.target_kind = '{INDEX_OBJECT_TYPE}'
+)"""
+# Состояния, которые утверждают «разрешено»: `resolved` ноги подсистем (V46) и `exact` ноги
+# прав (V49). Словари разные, потому что таблицы пишут разные узлы; объединяет их то, что оба
+# означают разрешение по индексу состава, а не наличие строки вида.
+LINK_RESOLVED_STATES = ("resolved=true", "target_resolve_state=exact")
+CROSS_LAYER_LINK_TABLES = ("subsystem_content", "role_rights")
+
+
+def check_link_state_independence(cur):
+    """Состояние ссылки не зависит от наличия строки вида: снятие круга в SAVEPOINT и откат.
+
+    Единственный способ наблюдать выводность связки в живой базе — снять строки вида и
+    посмотреть, изменятся ли состояния ссылок. Не изменятся (позиция O1 закрыта этим фактом),
+    но связка пропадёт: «разрешено, а строки вида нет» становится ненулевым. Запись делается
+    внутри SAVEPOINT и откатывается, поэтому прогон остаётся читающим и `check_untouched` не
+    видит изменений ни в круге вида, ни в чужих кругах.
+    """
+    target = one(cur, f"""
+        SELECT c.uuid, c.name,
+               (SELECT count(*) FROM {CURRENT_VIEWS[TABLE_NAME]} fc
+                 WHERE fc.configuration_uuid = c.uuid) AS view_rows
+        FROM configurations c
+        WHERE EXISTS (SELECT 1 FROM {CURRENT_VIEWS[TABLE_NAME]} fc
+                       WHERE fc.configuration_uuid = c.uuid)
+          AND (EXISTS (SELECT 1 FROM subsystem_content sc
+                        WHERE sc.target_object_type = '{INDEX_OBJECT_TYPE}'
+                          AND sc.configuration_uuid = c.uuid)
+               OR EXISTS (SELECT 1 FROM role_rights rr
+                           WHERE rr.target_kind = '{INDEX_OBJECT_TYPE}'
+                             AND rr.configuration_uuid = c.uuid))
+        ORDER BY c.name LIMIT 1""")
+    if not target:
+        skip("состояние ссылки против наличия строки вида",
+             "нет конфигурации, где есть и строки вида, и ссылки на него: круг вида или круг "
+             "ссылок в этой базе не загружен — это состояние базы, а не пропуск проверки")
+        return
+    cfg_uuid = str(target["uuid"])
+    info(f"эксперимент на конфигурации {target['name']}: строк вида {target['view_rows']}")
+
+    def states():
+        return sorted((str(row["source"]), int(row["links"]), int(row["resolved"]))
+                      for row in q(cur, CROSS_LAYER_LINKS_CTE + f"""
+            SELECT l.source, count(*) AS links,
+                   count(*) FILTER (WHERE l.link_state IN {LINK_RESOLVED_STATES}) AS resolved
+            FROM links l
+            WHERE l.configuration_uuid = %s
+            GROUP BY 1""", [cfg_uuid]))
+
+    def without_row():
+        return int(one(cur, CROSS_LAYER_LINKS_CTE + f"""
+            SELECT count(*) AS c FROM links l
+            LEFT JOIN {CURRENT_VIEWS[TABLE_NAME]} fc
+                   ON fc.configuration_uuid = l.configuration_uuid
+                  AND fc.object_uuid = l.target_uuid
+            WHERE l.configuration_uuid = %s AND fc.object_uuid IS NULL""",
+            [cfg_uuid]).get("c") or 0)
+
+    def view_rows():
+        return int(one(cur, f"SELECT count(*) AS c FROM {CURRENT_VIEWS[TABLE_NAME]} "
+                            "WHERE configuration_uuid = %s", [cfg_uuid]).get("c") or 0)
+
+    before = states()
+    cur.execute("SAVEPOINT v52_cross_layer_probe")
+    try:
+        cur.execute(f"DELETE FROM {TABLE_NAME} WHERE configuration_uuid = %s", [cfg_uuid])
+        during = states()
+        lost = without_row()
+    finally:
+        cur.execute("ROLLBACK TO SAVEPOINT v52_cross_layer_probe")
+    after, restored = states(), view_rows()
+    check("эксперимент откатан точкой сохранения: круг вида восстановлен, прогон читающий",
+          restored == int(target["view_rows"]) and before == after,
+          f"строк вида было {target['view_rows']}, после отката {restored}")
+    check("состояния ссылок после снятия строк вида НЕ изменились, а связка пропала: "
+          "`resolved`/`exact` описывают разрешение индексом состава, а не наличие строки вида",
+          before == during and lost > 0,
+          f"состояний до {before}, в эксперименте {during}; без строки вида осталось {lost}")
+
+
+def check_cross_layer_links(cur):
+    """Ссылки кругов V46 и V49 на вид: разрешимость индексом и отсутствие висящих ссылок.
+
+    Инвариант держит связку, а не её размер: ссылок может быть сколько угодно (KomMag даёт
+    ноль при одной строке вида), но ни одна «разрешённая» ссылка не обязана оставаться без
+    строки вида. Это то, что ломает регрессия — например снятие круга вида без снятия ссылок.
+    """
+    section("Контур 13 — ссылки других слоёв на вид (позиция O1)")
+    missing = [table for table in CROSS_LAYER_LINK_TABLES
+               if not one(cur, "SELECT count(*) AS c FROM information_schema.tables "
+                               "WHERE table_name = %s", [table]).get("c")]
+    if missing:
+        skip("контур 13 целиком",
+             f"таблиц чужих кругов в живой базе нет: {names(missing)} — круги узлов V46 и V49 "
+             "в этой базе не загружались, сравнивать не с чем")
+        return
+    per_leg = q(cur, CROSS_LAYER_LINKS_CTE + """
+        SELECT source, count(*) AS links,
+               count(*) FILTER (WHERE target_uuid IS NOT NULL) AS with_uuid
+        FROM links GROUP BY 1 ORDER BY 1""")
+    total = sum(int(row["links"]) for row in per_leg)
+    for row in per_leg:
+        info(f"{row['source']}: ссылок на вид {row['links']}, uuid заполнен у {row['with_uuid']}")
+    info("числа контура — живой замер и эталоном не являются; закрытие позиции и числа "
+         "замера держат `_v52_o1_link_semantics.py` (02.11.2026) и раздел 6 Q9 плана")
+    if total == 0:
+        skip("сверки контура 13",
+             "ссылок на вид в базе нет — это состояние выгрузки (у конфигурации без включений "
+             "вида в подсистемы и без прав на вид их действительно нет), а не потеря строк")
+        return
+    broken_index = int(one(cur, CROSS_LAYER_LINKS_CTE + """
+        SELECT count(*) AS c FROM links l
+        JOIN configurations c ON c.uuid = l.configuration_uuid
+        LEFT JOIN configuration_objects co
+               ON co.configuration_id = c.id AND co.uuid = l.target_uuid
+        WHERE l.target_uuid IS NOT NULL AND co.uuid IS NULL""").get("c") or 0)
+    check("ссылка на вид с uuid имеет запись индекса состава той же конфигурации "
+          "(иначе состояние `resolved`/`exact` врёт)", broken_index == 0,
+          f"без записи индекса: {broken_index}")
+    dangling = int(one(cur, CROSS_LAYER_LINKS_CTE + f"""
+        SELECT count(*) AS c FROM links l
+        LEFT JOIN {CURRENT_VIEWS[TABLE_NAME]} fc
+               ON fc.configuration_uuid = l.configuration_uuid
+              AND fc.object_uuid = l.target_uuid
+        WHERE l.link_state IN {LINK_RESOLVED_STATES} AND fc.object_uuid IS NULL""").get("c") or 0)
+    check("висящих ссылок на вид нет: каждая разрешённая цель имеет строку вида текущего "
+          "состояния по паре configuration_uuid + object_uuid", dangling == 0,
+          f"висящих: {dangling}")
+    check_link_state_independence(cur)
+
+
 # ═══ контур 10: пустой круг — ответ о выгрузке, а не отказ стадии (Q9) ════════════════
 def check_empty_circle():
     """Каталога `FilterCriteria/` нет — разбор отвечает успешно и называет это наблюдением.
@@ -2123,6 +2283,7 @@ def run(cur, scope):
         add_totals(totals, circle)
         run_tags.append(tag)
 
+    check_cross_layer_links(cur)
     after = foreign_state(cur)
     section("Итог узла V52")
     check_empty_circle()
