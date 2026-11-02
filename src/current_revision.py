@@ -221,6 +221,23 @@ OBJECT_VERSIONED_TABLES = (
 # `v_current_filter_criterion_content` строится связкой по этому id. Таблицы детей вида
 # (формы, команды) в круг не добавляются повторно: они уже в круге V51 (`forms`,
 # `form_ext`, `commands`), и V52 пишет в них теми же писателями, не меняя ключей (Q3).
+# Узел V53 (02.11.2026, позиция 2.8 нормативного списка — подписки на события,
+# `event_subscriptions`, миграция `migrate_v53_event_subscriptions.sql`) добавляет в круг
+# ОДНУ таблицу. Ключ цепочки — (configuration_uuid, object_name), как у V48/V50/V51/V52:
+# имя вида уникально в конфигурации, а uuid вида повторяется между конфигурациями — замер
+# `_v53_m1_probe.py` (раздел 1.3 плана docs/CONFIGURATION_EVENT_SUBSCRIPTIONS_PLAN.md)
+# даёт 162 общих uuid и 192 общих имён у BGU2 и BP3; 772 верхние строки вида дают 610
+# различных uuid и 580 различных имён — граница конфигурации в ключе обязательна.
+# `event_subscription_sources` в круг НЕ вносится осознанно и это названо, а не обойено:
+# своей цепи ревизий у строк источника нет (Q4, вариант A по прецедентам
+# `filter_criterion_content` V52 и `common_attribute_targets` V50) — их ключ начинается с
+# `event_subscription_id`, то есть со ссылки на конкретную ревизию строки вида; запись в
+# этом реестре означала бы цепь, которой у таблицы нет. Безцепочечная таблица названа
+# исключением `CONFIGURATION_UNVERSIONED_TABLES` (src/external_table_writer.py), а её
+# витрина `v_current_event_subscription_sources` строится связкой по этому id. Таблиц детей
+# у вида нет (замер 1.2 плана: каталогов содержимого и вложенных записей индекса состава
+# во всех четырёх выгрузках ноль), поэтому круг стадии S4h не расширяется общими таблицами
+# `forms`/`form_ext`/`commands` — в отличие от V51 и V52.
 CONFIGURATION_VERSIONED_TABLES = (
     "subsystems", "subsystem_content", "common_modules", "common_module_sources",
     "session_parameters",
@@ -228,6 +245,7 @@ CONFIGURATION_VERSIONED_TABLES = (
     "common_attributes",
     "exchange_plans", "exchange_plan_content", "commands",
     "filter_criteria",
+    "event_subscriptions",
 )
 
 VERSIONED_TABLES = OBJECT_VERSIONED_TABLES + CONFIGURATION_VERSIONED_TABLES

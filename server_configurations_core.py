@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""MCP-сервер 1c-configurations-core — РОВНО восемь инструментов контракта загрузки.
+"""MCP-сервер 1c-configurations-core — РОВНО одиннадцать инструментов контракта загрузки.
 
 Норматив поведения: docs/config-scenarios/FLOWCHART_1c-configurations-core.md.
 
@@ -38,6 +38,30 @@
                                         (CommonAttribute.<Имя>); две таблицы круга
                                         (common_attributes, common_attribute_targets),
                                         групп запроса у вида нет (решение Q10, вариант A).
+   9. load_exchange_plans_tool(source_path, configuration_uuid=None, kinds=None)
+                                       - свойства планов обмена (узел V51, стадия S4f,
+                                         позиция 2.6 нормативного списка): файл регистрации
+                                         вида ExchangePlans/<Имя>.xml с подкаталогами детей и
+                                         записями индекса состава того же вида; таблицы вида
+                                         и его детей (attributes, tabular_sections, forms,
+                                         form_ext, templates, commands), группы запроса kinds.
+  10. load_filter_criteria_tool(source_path, configuration_uuid=None)
+                                       - свойства критериев отбора (узел V52, стадия S4g,
+                                         позиция 2.7 нормативного списка): файл регистрации
+                                         вида FilterCriteria/<Имя>.xml с подкаталогами детей и
+                                         записями индекса состава того же вида; две таблицы
+                                         вида и общие таблицы его детей, групп запроса у вида
+                                         нет (решение Q5 узла V52, вариант A).
+  11. load_event_subscriptions_tool(source_path, configuration_uuid=None)
+                                       - свойства подписок на события (узел V53, стадия S4h,
+                                         позиция 2.8 нормативного списка): файлы регистрации
+                                         вида из каталога EventSubscriptions/ с подтверждением
+                                         каждой строки записью индекса состава
+                                         (EventSubscription.<Имя>); две таблицы круга
+                                         (event_subscriptions, event_subscription_sources),
+                                         групп запроса у вида нет (решение Q8 узла V53,
+                                         вариант A).
+
                                         Шапка файла обязана называть все инструменты
                                         регистра: расхождение шапки и регистра ловит
                                         tools/check_mcp_tool_wiring.py по коду, а по шапке
@@ -154,10 +178,23 @@ from configuration_exchange_plans_loader import load_exchange_plans
 # вида (Q1), а порога цены, при котором круг стоило бы резать, замер 1.4 не дал (1 219 целей
 # на весь круг, максимум 727 в одном файле) — вход дозагружает весь круг сразу.
 from configuration_filter_criteria_loader import load_filter_criteria
+# Узел V53 (02.11.2026, шаг П5) — свойства подписок на события, позиция 2.8 нормативного
+# списка (docs/CONFIGURATION_EVENT_SUBSCRIPTIONS_PLAN.md): одиннадцатый инструмент реестра.
+# Порядок тот же, что у V44/V46/V48/V49/V50/V51/V52: одна и та же функция слоя стоит за
+# стадией конвейера S4h (src/configuration_loader.py) и за этим инструментом; закрытый
+# контракт и словари состояний живут в src (configuration_event_subscriptions*,
+# configuration_load_contract), а текст раздела даёт общий форматёр — карточка загрузки и
+# инструмент описывают слой одинаково (прецедент V45). Отличие от входа V51 — групп `kinds`
+# НЕТ (решение Q8 узла V53, вариант A), то же, что у входов V50 и V52: строка источника
+# существует только через id строки вида (Q1), а порога цены, при котором круг стоило бы
+# резать, замер 2.2 не дал (25 100 строк `<Source>` на четыре выгрузки, максимум 789 в одном
+# файле) — вход дозагружает весь круг сразу.
+from configuration_event_subscriptions_loader import load_event_subscriptions
 from configuration_load_contract import (
     CHILD_SECTION_HEADER,
     COMMON_ATTRIBUTES_SECTION_HEADER,
     EXCHANGE_PLAN_SECTION_HEADER,
+    EVENT_SUBSCRIPTIONS_SECTION_HEADER,
     FILTER_CRITERIA_SECTION_HEADER,
     ROLES_SECTION_HEADER,
     ROOT_MODULES_SECTION_HEADER,
@@ -165,6 +202,7 @@ from configuration_load_contract import (
     format_child_object_lines,
     format_common_attributes_lines,
     format_exchange_plans_lines,
+    format_event_subscriptions_lines,
     format_filter_criteria_lines,
     format_roles_lines,
     format_root_modules_lines,
@@ -1071,6 +1109,130 @@ def load_filter_criteria_tool(source_path: str, configuration_uuid: str = None):
             load_filter_criteria(source_path, configuration_uuid))
     except Exception as e:
         return ("❌ Не могу загрузить свойства критериев отбора: внутренняя ошибка "
+                f"загрузчика: {str(e)}")
+
+
+def _format_event_subscriptions_result(result: dict) -> str:
+    """Карточка стадии S4h (узел V53, позиция 2.8); текст даёт общий форматёр контракта.
+
+    Тот же приём, что у V44/V45/V46/V48/V49/V50/V51/V52: ключи ответа — закрытый словарь
+    `configuration_load_contract.event_subscriptions_defaults()`, его возвращает слой
+    `load_event_subscriptions`, его же печатает раздел карточки `load_1c_catalog_tool`. Свой
+    список ключей здесь не заводится, а строку причины печатает форматёр («Стадия не
+    выполнена: …» / «Стадия не удалась: …») — повторить её здесь значило бы дать два текста
+    об одном отказе.
+    """
+    if not result.get("success"):
+        lines = ["❌ Не могу загрузить свойства подписок на события."]
+        lines.extend(format_event_subscriptions_lines(result))
+        if result.get("configuration_id") is not None:
+            lines.append(
+                "Строка заголовка конфигурации при этом существует: причину называет сам "
+                "слой загрузки — нет Configuration.xml, каталог выгрузки не читается, файл "
+                "регистрации вида не разобран (в файле нет элемента <EventSubscription>, "
+                "атрибут uuid элемента пуст или не является uuid, нет обёртки <Properties>), "
+                "имя подписки повторяется внутри выгрузки или строка блока <Source> осталась "
+                "без строки подписки."
+            )
+        lines.append(
+            "Подсказка: таблицы слоя создаёт шаг 2 установки "
+            "(create_1c_configurations_db.sql) либо migrate_v53_event_subscriptions.sql."
+        )
+        return "\n".join(lines)
+    lines = ["✅ Свойства подписок на события загружены (узел V53, стадия S4h, позиция 2.8)."]
+    lines.append(f"{EVENT_SUBSCRIPTIONS_SECTION_HEADER}:")
+    lines.extend(format_event_subscriptions_lines(result, indent="   "))
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def load_event_subscriptions_tool(source_path: str, configuration_uuid: str = None):
+    """Загрузить свойства подписок на события конфигурации (узел V53, стадия S4h).
+
+    Слой тот же, что стадия S4h конвейера `load_1c_catalog_tool`: отдельная точка входа нужна
+    для случая «изменились только файлы регистрации вида» — заголовок и индекс состава при
+    этом не меняются, и заново разбирать всю выгрузку не нужно (тот же порядок, что у
+    `load_configuration_root_modules_tool` (V44), `load_configuration_object_properties_tool`
+    (V46), `load_session_parameters_tool` (V48), `load_roles_tool` (V49),
+    `load_common_attributes_tool` (V50), `load_exchange_plans_tool` (V51) и
+    `load_filter_criteria_tool` (V52); решение оператора Q5 узла V48 — свой вход на каждую
+    позицию нормативного списка).
+
+    Позиция нормативного списка — 2.8 «Подписки на события» файла «Структура
+    конфигурации.txt» (её номер называется и в заголовке раздела ответа). Круг — файл
+    регистрации вида `EventSubscriptions/<Имя>.xml` и запись индекса состава того же вида
+    (`EventSubscription.<Имя>`); подкаталогов, форм, макетов и модулей у вида нет (замер 2.1),
+    поэтому строка одна на файл. Расхождения ног называются `index_only`, `file_only` и
+    `uuid_mismatch`; нули являются ответом, а не молчанием (замеры 2.2 дают 2/1/311/458
+    файлов и 5/10/11 706/13 379 строк блока `<Source>` на четырёх выгрузках).
+
+    Записываются таблицы вида `event_subscriptions` (шесть свойств файла регистрации — имя,
+    синоним, комментарий, признак кратности источников, имя события и обработчик — плюс
+    состояния разбора) и `event_subscription_sources` (строки блока `<Source>`: класс цели,
+    вид метаданных, разрешённая ссылка индекса, форма элемента `<v8:Type>`/`<v8:TypeSet>` и
+    порядок в файле). Строка источника версионируется НЕ своей цепью (Q4, вариант A): ключ
+    начинается с `event_subscription_id` — числового id конкретной ревизии строки вида, а FK
+    `event_subscription_sources_event_subscription_id_fkey` объявлен с `ON DELETE CASCADE`,
+    поэтому порядок записи держится иерархией данных (сначала вид через `insert_ids`,
+    `RETURNING id`, затем источники) одной транзакцией, а снятие начинается с источников —
+    иначе каскад снял бы строки молча, и число в ответе было бы неправдой (M7).
+
+    Групп запроса (`kinds`) у этого входа НЕТ — это решение, а не упущение (Q8, вариант A,
+    тот же, что у входов V50 и V52): строка источника существует только через id строки вида
+    (Q1, вариант A), поэтому частичная запись круга описывала бы состав, которого в выгрузке
+    нет, а порога цены, при котором круг стоило бы резать, замер 2.2 не дал — вход дозагружает
+    весь круг сразу.
+
+    Состояния разбора различаются закрытыми словарями и называются, а не читаются нулями:
+    свойства (`all_known`/`unknown_value`/`unknown_tag`/`absent`), событие
+    (`known`/`unknown_name`/`empty_value`/`absent` — словарь из 18 имён держит разбор, а не
+    CHECK схемы, Q6 по прецеденту Q7 узла V50), обработчик
+    (`exact`/`unresolved`/`unknown_form`/`empty_value`/`absent` — форма `CommonModule.<Модуль>.<Метод>`,
+    разрешение идёт по ТЕКУЩИМ общим модулям слоя V46, поэтому порядок стадии после S4 не
+    случайен), блок `<Source>` (`with_sources`/`empty_sources`), форма элемента
+    (`Type`/`TypeSet` — 24 729 против 371 на четырёх выгрузках), форма цели
+    (`named`/`bare`/`empty`/`unknown_form`) и разрешение цели
+    (`exact`/`type_present`/`type_absent`/`unresolved`/`unknown_class`/`empty_value`/
+    `unknown_form`) — `type_absent` даёт 23 строки на корпус: это цель, которой нет в индексе
+    состава данной выгрузки (Q3).
+
+    Отказ разбора ЛЮБОГО файла круга останавливает стадию ДО записи: половина круга читалась
+    бы как полный состав вида (приём V12/V46/V48/V49/V50/V51/V52), прежние строки при этом не
+    снимаются. Отсутствующий каталог `EventSubscriptions/` — не отказ, а ответ о выгрузке:
+    `files_found = 0` с наблюдением `directory_missing`. Недоступные индекс состава или витрина
+    общих модулей — тоже не отказ, а названные наблюдения (`index_unavailable`,
+    `common_modules_unavailable`): цели остаются `unresolved`, обработчики `unresolved`, и мера
+    названа в ответе, а не спрятана в нули.
+
+    Повтор снимает прежние строки этой конфигурации и пишет заново, снятое названо; история
+    состояний не заводится (её даёт узел правки объекта, которого в схеме ещё нет, D8).
+    Конфигурация должна быть уже загружена точкой входа `load_1c_catalog_tool`: внешнего
+    ключа в схеме нет осознанно (прецедент V20.1). Записав и зафиксировав строки, слой
+    пересобирает статистику затронутых таблиц (`ANALYZE`, мера V46); отказ этой операции —
+    предупреждение, а не отказ загрузки.
+
+    Чего инструмент НЕ делает: не загружает заголовок конфигурации и индекс состава (это
+    точка входа `load_1c_catalog_tool`), не читает тексты модулей — у вида их нет (замер 2.1),
+    а обработчик является именем метода общего модуля, тексты которого пишет слой V46/V47
+    (Q2, Q5: FK на модуль не заявлен, потому что значение не уникально — 248 уникальных
+    обработчиков при 311 подписках в BGU2); не утверждает, что цель блока `<Source>`
+    существует в базе (цель бывает `type_present`, `type_absent` или `unresolved` — Q3), не
+    загружает определённые типы (`DefinedTypes` в выгрузке вида нет, замер 2.4.4) и не трогает
+    остальные группы A–H модели V38.
+
+    Args:
+        source_path: Каталог XML-выгрузки конфигурации. Обязателен: провенанс строк
+            конфигурации в БД не ведётся (решение D-C), по строке заголовка каталог не
+            восстанавливается.
+        configuration_uuid: Необязательный uuid заголовка из БД. Если задан — сверяется с
+            uuid из Configuration.xml, и расхождение называется отказом, а не разрешается
+            молча (иначе строки свойств ушли бы чужой конфигурации).
+    """
+    try:
+        return _format_event_subscriptions_result(
+            load_event_subscriptions(source_path, configuration_uuid))
+    except Exception as e:
+        return ("❌ Не могу загрузить свойства подписок на события: внутренняя ошибка "
                 f"загрузчика: {str(e)}")
 
 

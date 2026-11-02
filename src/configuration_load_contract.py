@@ -211,6 +211,26 @@ from configuration_filter_criteria import (
     TYPE_CLASS_VALUES as FILTER_CRITERIA_TYPE_CLASS_VALUES,
     TYPE_CONTAINERS as FILTER_CRITERIA_TYPE_CONTAINERS,
 )
+# Узел V53 (02.11.2026, позиция 2.8 списка): имена таблиц, каталог вида, метка метаданных и
+# закрытые словари состояний приходят импортом из разбора
+# (`src/configuration_event_subscriptions.py`) — второго перечня таблиц или состояний в проекте
+# нет (тот же порядок, что V48…V52). Разбор ничего из контракта не импортирует, цикл
+# односторонний.
+from configuration_event_subscriptions import (
+    CIRCLE_DISCREPANCIES as EVENT_SUBSCRIPTION_CIRCLE_DISCREPANCIES,
+    DIR_NAME as EVENT_SUBSCRIPTIONS_DIR,
+    EVENT_STATES as EVENT_SUBSCRIPTION_EVENT_STATES,
+    HANDLER_STATES as EVENT_SUBSCRIPTION_HANDLER_STATES,
+    OBJECT_KIND_TAG as EVENT_SUBSCRIPTION_META_TAG,
+    PROPERTIES_STATES as EVENT_SUBSCRIPTION_PROPERTIES_STATES,
+    SOURCE_CLASS_META_TYPES as EVENT_SUBSCRIPTION_SOURCE_CLASSES,
+    SOURCE_STATES as EVENT_SUBSCRIPTION_SOURCE_STATES,
+    SOURCE_TAGS as EVENT_SUBSCRIPTION_SOURCE_TAGS,
+    SOURCES_TABLE_NAME as EVENT_SUBSCRIPTION_SOURCES_TABLE,
+    TABLE_NAME as EVENT_SUBSCRIPTIONS_TABLE,
+    TARGET_FORMS as EVENT_SUBSCRIPTION_TARGET_FORMS,
+    TARGET_RESOLVE_STATES as EVENT_SUBSCRIPTION_TARGET_STATES,
+)
 from current_revision import CONFIGURATION_VERSIONED_TABLES
 
 # ── стадии конвейера: один перечень на контракт, карточку и проверку ───────────────
@@ -273,6 +293,23 @@ STAGE_EXCHANGE_PLANS = "s4f_exchange_plans"
 # порога, при котором раздельная дозагрузка была бы оправдана (замер 1.4: 1 219 целей на
 # весь круг, максимум 727 в одном файле) — отдельный вход дозагружает весь круг сразу.
 STAGE_FILTER_CRITERIA = "s4g_filter_criteria"
+# Узел V53 (02.11.2026, позиция 2.8 нормативного списка): свойства подписок на события —
+# отдельная стадия по той же причине, что S4c (V48), S4d (V49), S4e (V50), S4f (V51) и S4g
+# (V52): правило C3 требует своего ключа ответа `event_subscriptions`, а разбивать чужой ключ
+# значило бы переименовывать контракт соседнего узла. Номер S4h, а не S5: S5 остаётся за
+# планируемой стадией анализа. В `STAGES` ниже стадия вносится шагом П5 (позиция 2.8 идёт
+# сразу за 2.7, то есть между S4g и S4b — порядок нормативного списка держит `STAGES`, а не
+# порядок номеров): слой `load_event_subscriptions`
+# (src/configuration_event_subscriptions_loader.py) появляется шагом П4 этим же, а точка входа
+# `load_event_subscriptions_tool` — шагом П5. Круг таблиц стадии
+# (`EVENT_SUBSCRIPTIONS_TABLES`) объявлен уже на П4: версионная таблица без объявленного круга
+# загрузки означала бы, что чужая стадия её снимает (дефект, названный узлами V49, V50, V51,
+# V52). Групп запроса (`kinds`) у вида НЕТ — это решение, а не упущение (Q8, вариант A по
+# прецеденту Q5 узла V52): строка источника существует только через id строки вида (Q4,
+# вариант A), а цена круга не даёт порога, при котором раздельная дозагрузка была бы
+# оправдана (замер 2.2: 25 100 записей блока `<Source>` на весь круг, максимум 789 в одном
+# файле) — отдельный вход дозагружает весь круг сразу.
+STAGE_EVENT_SUBSCRIPTIONS = "s4h_event_subscriptions"
 # Узел V47 (28.10.2026): тексты модулей объектов конфигурации. Номер S4b, а не S5:
 # S5 остаётся за планируемой стадией анализа (дополнение оператора 23.10.2026), которой
 # в `STAGES` нет. Стадия идёт сразу за S4 и является второй транзакцией загрузки (Q6,
@@ -299,6 +336,11 @@ STAGES: Tuple[Tuple[str, str], ...] = (
     # потому что является второй транзакцией загрузки (Q6 узла V46), а не позицией списка.
     (STAGE_FILTER_CRITERIA,
      "Свойства критериев отбора (FilterCriteria, позиция 2.7)"),
+    # Узел V53 (позиция 2.8 списка, решение Q8 вариант A): 2.8 идёт сразу за 2.7, литера
+    # `s4h` в коде свободна — перенумерации прежних стадий нет. S4b остаётся последней,
+    # потому что является второй транзакцией загрузки (Q6 узла V46), а не позицией списка.
+    (STAGE_EVENT_SUBSCRIPTIONS,
+     "Свойства подписок на события (EventSubscriptions, позиция 2.8)"),
     (STAGE_OBJECT_MODULES, "Модули объектов конфигурации (тексты Ext/, вторая транзакция)"),
 )
 
@@ -446,6 +488,12 @@ STAGE_FULL_RELOAD_ONLY: Dict[str, bool] = {
     # продолжение у неё есть. Механика остановки заработает с внесением стадии в `STAGES`
     # (шаг П5), словарь обязан быть её зеркалом уже сейчас.
     STAGE_FILTER_CRITERIA: False,
+    # Узел V53 (позиция 2.8, шаг П4 — урок П8 узлов V51 и V52): ключ и ветка
+    # `stage_resume_hint` вносятся ОДНИМ шагом. Слой `load_event_subscriptions` появляется
+    # этим же шагом П4, точка входа группы — шагом П5; отсутствие ключа маскировалось бы
+    # значением по умолчанию в `build_stopped_stage`: стадия без ключа читается стадией без
+    # отдельного входа, хотя продолжение у неё есть.
+    STAGE_EVENT_SUBSCRIPTIONS: False,
     STAGE_OBJECT_MODULES: True,
 }
 
@@ -474,6 +522,12 @@ STAGE_INCOMPLETE_GROUPS: Dict[str, str] = {
     # строится из этого словаря (`_stage_stop` в загрузчике), а не из текста стадии.
     STAGE_FILTER_CRITERIA: "свойства критериев отбора (позиция 2.7 нормативного списка, "
                            "его формы и команды и перечень <Content>)",
+    # Узел V53 (шаг П4): группа называется позицией нормативного списка — по образцу записей
+    # S4c…S4g. У подписки на события детей нет (замер 1.2), поэтому группа названа её
+    # свойствами и кругом блока `<Source>`: без записи остановка на S4h оставила бы ответ без
+    # машиночитаемого признака неполноты.
+    STAGE_EVENT_SUBSCRIPTIONS: "свойства подписок на события (позиция 2.8 нормативного "
+                               "списка и круг целей срабатывания блока <Source>)",
     STAGE_OBJECT_MODULES: "модули объектов конфигурации (группа C модели V38, Ext/)",
 }
 
@@ -552,6 +606,8 @@ def stage_resume_hint(stage_id: str) -> str:
         return EXCHANGE_PLAN_REPEAT_HINT
     if stage_id == STAGE_FILTER_CRITERIA:
         return FILTER_CRITERIA_REPEAT_HINT
+    if stage_id == STAGE_EVENT_SUBSCRIPTIONS:
+        return EVENT_SUBSCRIPTIONS_REPEAT_HINT
     if stage_id == STAGE_OBJECT_MODULES:
         return OBJECT_MODULES_RELOAD_HINT
     return "полная перезагрузка load_1c_catalog_tool(source_path=…, force=True)"
@@ -1121,6 +1177,93 @@ FILTER_CRITERIA_CIRCLE_BOUNDARY = (
     "(замер 2.4.4), узла для них нет"
 )
 
+# ── контракт стадии S4h (узел V53, шаг П4, позиция 2.8 списка) ───────────────────────
+# Круг таблиц стадии и тексты контракта объявлены одним местом — по той же причине, что у
+# V48, V49, V50, V51 и V52: текст незакрытой части ссылается на раздел, где читается отказ
+# стадии, а держать два написания одного заголовка нельзя. Имена таблиц, каталог вида, метка
+# метаданных и словари состояний приходят импортом из разбора
+# (`src/configuration_event_subscriptions.py`) — второго перечня таблиц или состояний в проекте
+# нет.
+#
+# Дефект, который закрывает эта константа, — тот же, что называли узлы V49, V50, V51 и V52:
+# регистрация `event_subscriptions` в круге версионности (шаг П1) молча добавила бы её к кругу
+# стадии S4, потому что `CHILD_TABLES` строится из `CONFIGURATION_VERSIONED_TABLES` минус
+# `FOREIGN_STAGE_TABLES`, а стадия S4 снимала и анализировала бы чужие строки (замеры П0:
+# 772 файла регистрации и 25 100 записей блока `<Source>` на четыре выгрузки).
+#
+# Групп `kinds` нет, поэтому константа называет только круг стадии — без `*_TABLES_BY_KIND`,
+# которых у V51 восемь: строка источника неотделима от строки вида (Q4, вариант A), а таблиц
+# детей у вида нет вовсе (замер 1.2: ни `Forms/`, ни `Templates/`, ни `Commands/`, ни `Ext/`
+# ни в одной выгрузке), поэтому второй перечень тех же таблиц появился бы только ради того,
+# чтобы разойтись с первым (прецедент V52).
+EVENT_SUBSCRIPTIONS_TABLES: Tuple[str, ...] = (
+    EVENT_SUBSCRIPTIONS_TABLE,
+    EVENT_SUBSCRIPTION_SOURCES_TABLE,
+)
+
+# Круг снятия и перечень чисел ответа — ДВЕ таблицы. Отличия от V51 и V52 названы прямо: у
+# плана обмена и критериев отбора круг снятия шире круга версионности, потому что строки детей
+# (`forms`, `form_ext`, `commands`) снимает и пишет та же стадия предикатом по uuid родителей;
+# у подписки на события детей нет (замер 1.2), поэтому два перечня совпадают, и нулевой ответ
+# обещает ровно те же два ключа, что и ответ прогона.
+#
+# Порядок — порядок снятия, а не порядок версионности: `event_subscription_sources` первой,
+# потому что её FK `event_subscription_sources_event_subscription_id_fkey` объявлен с
+# `ON DELETE CASCADE` и каскад по строке вида снял бы записи молча, без точного счётчика (M7);
+# строки вида последними, потому что на числовые id последних опираются строки блока
+# `<Source>` (Q4, вариант A). Тот же приём, что `REMOVE_ORDER` узлов V49, V50, V51, V52.
+EVENT_SUBSCRIPTIONS_REMOVE_ORDER: Tuple[str, ...] = (
+    EVENT_SUBSCRIPTION_SOURCES_TABLE,
+    EVENT_SUBSCRIPTIONS_TABLE,
+)
+
+EVENT_SUBSCRIPTIONS_SECTION_HEADER = "СВОЙСТВА ПОДПИСОК НА СОБЫТИЯ (узел V53, позиция 2.8)"
+
+# Что обязан сказать ответ о повторе стадии. Отдельная точка входа группы —
+# `load_event_subscriptions_tool` (шаг П5 узла, внесена в реестр сервера этим же шагом —
+# `tools/check_mcp_tool_wiring.py` сторожит состав). П4 держит формулировку про слой
+# `load_event_subscriptions`, потому что обещать инструмент, которого в реестре нет, — значит
+# дать обещание, которое сервер не выполняет (прецеденты V48…V52).
+EVENT_SUBSCRIPTIONS_REPEAT_HINT = (
+    "Повторить стадию можно отдельным входом группы "
+    "load_event_subscriptions_tool(source_path=…) без перезагрузки конфигурации "
+    "(узел V53, шаг П5) либо полной перезагрузкой "
+    "load_1c_catalog_tool(source_path=…, force=True)"
+)
+
+# Граница круга называется и при успехе: «строки записаны» не равно «о подписках на события
+# сохранено всё». Формулировка держится замеров разделов 1–2 плана V53 и решений Q1…Q8: без
+# неё голую ссылку `cfg:CatalogObject` читали бы как потерянное имя, пустой блок `<Source>` —
+# как «целей нет», а состояние `unresolved` обработчика — как «модуля нет в конфигурации».
+EVENT_SUBSCRIPTIONS_CIRCLE_BOUNDARY = (
+    f"круг узла — файлы регистрации вида {EVENT_SUBSCRIPTION_META_TAG} из каталога "
+    f"{EVENT_SUBSCRIPTIONS_DIR}/ (позиция 2.8 списка), подтверждённые записями индекса состава "
+    "(две ноги, расхождения `index_only`/`file_only`/`uuid_mismatch` называются ответом); "
+    f"в `event_subscriptions` идут 6 свойств файла регистрации (замер 2.0: ровно один набор "
+    f"тегов на всех 772 файлах четырёх выгрузок), имя события с состоянием его известности "
+    f"(словарь 18 имён замкнут корпусом и держит константа разбора, а не CHECK — Q6), "
+    f"обработчик текстом и разложенным на модуль и метод с состоянием разрешения по общим "
+    f"модулям текущей ревизии (Q2, решение оператора) и состояние блока <Source> с его "
+    f"счётчиком; в `event_subscription_sources` — строки блока <Source> (25 100 записей на "
+    f"четыре выгрузки: BGU2 11 706, BP3 13 379, KomMag 10, MinCfg 5; тег элемента — форма "
+    f"перечня: Type 24 729 и TypeSet 371), где именованная цель `cfg:<Класс>.<Имя>` "
+    f"(24 835) разрешается точным совпадением с индексом состава данной конфигурации, а голая "
+    f"цель `cfg:<Класс>` (265) — присутствием вида метаданных: `type_present` 242 и "
+    f"`type_absent` 23 называются прямо (M5, Q3 вариант A). Строка источника версионируется НЕ "
+    f"своей цепью (Q4, вариант A): ключ начинается с `event_subscription_id` — числового id "
+    f"конкретной ревизии строки вида, текущность читается витриной связкой по этому id, а "
+    f"каскад `event_subscription_sources_event_subscription_id_fkey` снимает её вместе с "
+    f"ревизией. Детей у вида НЕТ вовсе (замер 1.2: запись вида в `ConfigDumpInfo.xml` — "
+    f"самозакрывающийся элемент, каталогов содержимого ноль), поэтому колонок "
+    f"`children_state`/`form_names`/`command_uuids` в схеме нет осознанно (M2), а ровность "
+    f"круга сторожит обход подкаталогов проверкой узла П6. Модулей вида узел НЕ читает: "
+    f"тексты принадлежат узлу V47, а обработчик является ссылкой на общий модуль, чьи тексты "
+    f"уже загружены (Q8); определённых типов (`DefinedTypes`) в выгрузке вида нет "
+    f"(замер 2.4.4), узла для них нет; колонок слотов `Help`/`Interface` нет: соответствующих "
+    f"тегов `Properties` в 772 файлах круга ноль (замер 2.0 — негативный факт держит "
+    f"проверка П6, а не константная колонка)"
+)
+
 # Что из содержимого дочерних объектов стадия S4 НЕ загружает — определение перенесено
 # в это место узлом V50 (шаг П8): текст ссылается на заголовок раздела S4e, объявленного
 # рядом с кругом таблиц вида, поэтому заголовок обязан идти раньше текста (прецедент
@@ -1130,7 +1273,10 @@ FILTER_CRITERIA_CIRCLE_BOUNDARY = (
 # вида 2.6 они загружены (наблюдение П8, исправлено этим же шагом). Узел V52 (шаг П4)
 # закрывает позицию 2.7 — критерии отбора: без строки текст обещал бы то же самое про вид,
 # для которого закрыты его свойства, блок `<Type>`, перечень `<Content>`, его формы и его
-# команды. Обоснование того,
+# команды. Узел V53 (шаг П4) закрывает позицию 2.8 — подписки на события: без строки текст
+# обещал бы то же самое про вид, для которого закрыты его свойства и круг целей срабатывания
+# блока `<Source>`; детей у этого вида нет ни в одной выгрузке (замер 1.2), поэтому фраза про
+# формы, макеты и модулей детей к нему не относится. Обоснование того,
 # почему часть групп модели V38 остаётся незакрытой, держится у стадии S4 — см. комментарий
 # перед местом, откуда сделан перенос.
 CHILD_NOT_IMPLEMENTED = (
@@ -1151,7 +1297,11 @@ CHILD_NOT_IMPLEMENTED = (
     "нормативного списка (узел V52, стадия S4g, раздел «" + FILTER_CRITERIA_SECTION_HEADER
     + "» ниже; для этого вида закрыты его свойства, блок <Type>, перечень <Content> как "
     "отдельная таблица состава, его формы с описаниями и его команды, а тела модулей вида "
-    "берёт тот же узел V47) и тексты модулей объектов "
+    "берёт тот же узел V47), свойства подписок на события — позиция 2.8 "
+    "нормативного списка (узел V53, стадия S4h, раздел «" + EVENT_SUBSCRIPTIONS_SECTION_HEADER
+    + "» ниже; для этого вида закрыты его свойства и круг целей срабатывания блока <Source>, "
+    "детей у вида нет ни в одной выгрузке — замер 1.2) "
+    "и тексты модулей объектов "
     "конфигурации — шесть слотов Ext/ (узел V47, стадия S4b, раздел «"
     "МОДУЛИ ОБЪЕКТОВ КОНФИГУРАЦИИ» ниже); не реализованы реквизиты и "
     "табличные части прочих видов объектов "
@@ -1167,7 +1317,7 @@ CHILD_NOT_IMPLEMENTED = (
 # (тот же дефект, что закрывали записи V48, V49, V50, V51).
 FOREIGN_STAGE_TABLES: Tuple[str, ...] = (
     SESSION_PARAMETER_TABLES + ROLE_TABLES + COMMON_ATTRIBUTES_TABLES
-    + EXCHANGE_PLAN_TABLES + FILTER_CRITERIA_TABLES
+    + EXCHANGE_PLAN_TABLES + FILTER_CRITERIA_TABLES + EVENT_SUBSCRIPTIONS_TABLES
 )
 CHILD_TABLES: Tuple[str, ...] = tuple(
     table for table in CONFIGURATION_VERSIONED_TABLES
@@ -3112,4 +3262,309 @@ def filter_criteria_defaults() -> Dict[str, Any]:
         "warnings": [],
     }
 
+
+
+
+def event_subscriptions_defaults() -> Dict[str, Any]:
+    """Закрытый контракт стадии S4h с нулями (C1, C2, C3; узел V53, шаг П4).
+
+    Словарь плоский — тот же, что возвращает слой `load_event_subscriptions`; конвейер
+    вкладывает его в свой ключ `event_subscriptions` без переименования (C3). Групп `kinds` в
+    контракте нет — это решение Q8 (вариант A), а не пропуск: строка источника существует
+    только через id строки вида (Q4, вариант A), поэтому состояния «записать вид без круга
+    целей» в модели нет, а порога цены, при котором круг стоило бы резать, замер 2.2 не дал
+    (25 100 записей на весь круг, максимум 789 в одном файле).
+
+    Отдельно обязаны быть названы (план, разделы 1–2, 5):
+
+    * числа по таблицам (`removed_by_table`/`written_by_table`) — по кругу снятия
+      (`EVENT_SUBSCRIPTIONS_REMOVE_ORDER`), который у этого узла совпадает с кругом
+      версионности: детей у вида нет (замер 1.2), поэтому нулевой ответ обещает те же два
+      ключа, что и ответ прогона (в отличие от V51/V52, где круг снятия шире);
+    * замкнутые словари состояний по всем колонкам `STATE_VOCABULARIES` разбора, включая
+      нули: `empty_sources` (граница, которой корпус не давал — M4), `type_absent` (23
+      записи — голые ссылки на отсутствующий вид метаданных, M5) и `unresolved` обработчика
+      (граница) различимы состоянием, а не нулём;
+    * `counts_by_source_tag` и `counts_by_target_form` — форма перечня (`Type`/`TypeSet`) и
+      форма цели (`named`/`bare`) являются ответом разбора (M3, M5): без отдельных счётчиков
+      TypeSet (371) и голые ссылки (265) читались бы обычными, а потерянного значения этого
+      видно не было бы;
+    * `sources_by_class` — распределение целей по измеренным классам (30 записей словаря
+      разбора): вопрос «какие подписки настроены на этот вид метаданных» отвечает данными
+      таблицы источников, и их состав обязан быть назван;
+    * `events_by_name` — распределение подписок по именам событий: словарь 18 имён замкнут
+      корпусом (замер 2.3), и `unknown_name` обязан отличаться от «имя известно, но редкое»;
+    * `handlers_total`/`handlers_distinct` — связь обработчика не один-к-одному (248
+      уникальных обработчиков при 311 подписках в BGU2, замер 2.3): это основание отсутствия
+      внешнего ключа (Q2), и числа держат ответ стадии, а не комментарий;
+    * расхождения двух ног круга (`index_only`/`file_only`/`uuid_mismatch`) и дубли имён
+      внутри выгрузки (`duplicate_names`): четыре выгрузки дают нули, и нули — это ответ, а
+      не молчание (замер 1.3 даёт уникальность имён внутри выгрузки).
+    """
+    return {
+        "status": STATUS_NOT_RUN,
+        "success": False,
+        "error": None,
+        "reason": None,
+        "stage": STAGE_EVENT_SUBSCRIPTIONS,
+        "configuration_id": None,
+        "configuration_uuid": None,
+        "configuration_name": None,
+        "tables": list(EVENT_SUBSCRIPTIONS_TABLES),
+        "directory": EVENT_SUBSCRIPTIONS_DIR,
+        "files_found": 0,
+        "files_read": 0,
+        "files_failed": [],
+        "observations": [],
+        "counts_by_observation": {},
+        "rows_written": 0,
+        "event_subscriptions_written": 0,
+        "sources_written": 0,
+        "removed_previous": 0,
+        "removed_by_table": {table: 0 for table in EVENT_SUBSCRIPTIONS_REMOVE_ORDER},
+        "written_by_table": {table: 0 for table in EVENT_SUBSCRIPTIONS_REMOVE_ORDER},
+        "index_available": False,
+        "index_kind_records": 0,
+        "index_only": [],
+        "file_only": [],
+        "uuid_mismatch": [],
+        "counts_by_circle_discrepancy": {
+            state: 0 for state in EVENT_SUBSCRIPTION_CIRCLE_DISCREPANCIES},
+        "duplicate_names": [],
+        "counts_by_properties_state": {
+            state: 0 for state in EVENT_SUBSCRIPTION_PROPERTIES_STATES},
+        "counts_by_event_state": {state: 0 for state in EVENT_SUBSCRIPTION_EVENT_STATES},
+        "counts_by_handler_state": {state: 0 for state in EVENT_SUBSCRIPTION_HANDLER_STATES},
+        "counts_by_source_state": {state: 0 for state in EVENT_SUBSCRIPTION_SOURCE_STATES},
+        "counts_by_source_tag": {tag: 0 for tag in EVENT_SUBSCRIPTION_SOURCE_TAGS},
+        "counts_by_target_form": {form: 0 for form in EVENT_SUBSCRIPTION_TARGET_FORMS},
+        "counts_by_target_resolve_state": {
+            state: 0 for state in EVENT_SUBSCRIPTION_TARGET_STATES},
+        "sources_total": 0,
+        "sources_distinct": 0,
+        "sources_by_class": {},
+        "max_sources_per_subscription": 0,
+        "events_by_name": {},
+        "unknown_event_names": {},
+        "unknown_properties": {},
+        "handlers_total": 0,
+        "handlers_distinct": 0,
+        "handlers_unresolved_total": 0,
+        "handlers_unresolved": [],
+        "targets_unresolved_total": 0,
+        "targets_unresolved": [],
+        "common_modules_available": False,
+        "namespace_prefixes": [],
+        "statistics_refreshed": 0,
+        "warnings": [],
+    }
+
+
+def format_event_subscriptions_lines(result: Dict[str, Any], indent: str = "") -> List[str]:
+    """Текст стадии S4h по закрытому контракту `event_subscriptions_defaults()` (C1, C3).
+
+    Формат один для двух контуров: раздела карточки `load_1c_catalog_tool` и ответа
+    отдельного входа `load_event_subscriptions_tool` (шаг П5) — прецеденты
+    V45/V46/V48/V49/V50/V51/V52. Отказ форматёр называет сам, вызывающий причину не
+    повторяет. Групп `kinds` у вида нет (решение Q8, вариант A), поэтому блока «группы круга
+    не запрашивались» здесь нет: он обещал бы раздельный вход дозагрузки, которого у стадии
+    нет (в отличие от V51). Блок детей тоже отсутствует осознанно — у подписки на события
+    детей нет (замер 1.2, M2), и печатать нули по формам и командам значило бы утверждать то,
+    чего вид не имеет. Граница круга печатается и при успехе: «строки записаны» не равно «о
+    подписках на события сохранено всё». Неперечисленные ключи читаются нулями (C1). Имя —
+    `format_event_subscriptions_lines`: форматёры стадий слоя называются по одному образцу.
+    """
+    lines: List[str] = []
+    if not result:
+        return lines
+
+    if not result.get("success"):
+        reason = result.get("error") or result.get("reason") or "загрузчик не назвал причину"
+        prefix = ("Стадия не выполнена" if result.get("status") in (None, STATUS_NOT_RUN)
+                  else "Стадия не удалась")
+        lines.append(f"{indent}{prefix}: {reason}")
+        lines.append(f"{indent}{EVENT_SUBSCRIPTIONS_REPEAT_HINT}")
+        for warning in result.get("warnings") or []:
+            lines.append(f"{indent}⚠️ {warning}")
+        return lines
+
+    written_by_table = result.get("written_by_table") or {}
+    removed_by_table = result.get("removed_by_table") or {}
+    lines.append(
+        f"{indent}Записано строк по таблицам: "
+        + ", ".join(f"{table}={int(written_by_table.get(table) or 0)}"
+                    for table in sorted(written_by_table))
+        + f"; всего {int(result.get('rows_written') or 0)} (подписок "
+          f"{int(result.get('event_subscriptions_written') or 0)}, записей блока <Source> "
+          f"{int(result.get('sources_written') or 0)})"
+    )
+    lines.append(
+        f"{indent}Файлов регистрации вида: {int(result.get('files_found') or 0)} "
+        f"(разобрано {int(result.get('files_read') or 0)}, каталог "
+        f"{result.get('directory') or EVENT_SUBSCRIPTIONS_DIR}/, записей индекса состава вида "
+        f"{int(result.get('index_kind_records') or 0)})"
+    )
+    if int(result.get("removed_previous") or 0):
+        lines.append(
+            f"{indent}Снято прежних строк этой конфигурации: "
+            + ", ".join(f"{table}={int(removed_by_table.get(table) or 0)}"
+                        for table in sorted(removed_by_table))
+        )
+    return _append_event_subscriptions_detail(lines, result, indent)
+
+
+def _append_event_subscriptions_detail(lines: List[str], result: Dict[str, Any],
+                                      indent: str) -> List[str]:
+    """Второй блок текста стадии S4h: состояния строк вида, блок `<Source>`, круг целей,
+    обработчики, ноги круга.
+
+    Разделение формата на две функции — только длина текста: форматёр обязан называть все
+    замкнутые словари состояний контракта (M4, M5), иначе `empty_sources` (граница, которой
+    корпус не давал) и `type_absent` (23 записи — голые ссылки на отсутствующий вид
+    метаданных) остались бы неразличимы, а нули счётчиков читались бы как «подписок нет».
+    """
+    prop_counts = result.get("counts_by_properties_state") or {}
+    event_counts = result.get("counts_by_event_state") or {}
+    handler_counts = result.get("counts_by_handler_state") or {}
+    source_counts = result.get("counts_by_source_state") or {}
+    lines.append(
+        f"{indent}Свойства подписок: состояний — "
+        + ", ".join(f"{state}={int(prop_counts.get(state) or 0)}"
+                    for state in EVENT_SUBSCRIPTION_PROPERTIES_STATES)
+        + "; состояний имени события — "
+        + ", ".join(f"{state}={int(event_counts.get(state) or 0)}"
+                    for state in EVENT_SUBSCRIPTION_EVENT_STATES)
+        + "; состояний блока <Source> — "
+        + ", ".join(f"{state}={int(source_counts.get(state) or 0)}"
+                    for state in EVENT_SUBSCRIPTION_SOURCE_STATES)
+        + " — пустой блок называется состоянием `empty_sources` со счётчиком 0, а не "
+          "отсутствием строк (M4); корпус пустых блоков не давал, поэтому это граница, а не "
+          "ожидаемое значение"
+    )
+
+    lines.append(
+        f"{indent}Обработчики: состояний — "
+        + ", ".join(f"{state}={int(handler_counts.get(state) or 0)}"
+                    for state in EVENT_SUBSCRIPTION_HANDLER_STATES)
+        + f"; всего {int(result.get('handlers_total') or 0)}, уникальных "
+          f"{int(result.get('handlers_distinct') or 0)}, неразрешённых "
+          f"{int(result.get('handlers_unresolved_total') or 0)} (перечислено "
+          f"{len(result.get('handlers_unresolved') or [])}) — связь не один-к-одному "
+          "(248 уникальных обработчиков при 311 подписках в BGU2, замер 2.3), поэтому "
+          "внешнего ключа на общие модули нет (Q2, решение оператора); разрешение идёт по "
+          "витрине общих модулей текущей ревизии"
+    )
+    if not result.get("common_modules_available"):
+        lines.append(
+            f"{indent}Перечень общих модулей текущей ревизии не прочитан — состояние "
+            "`unresolved` обработчика при этом означает «нечем разрешить», а не «модуля нет в "
+            "конфигурации» (правило C2)"
+        )
+
+    tag_counts = result.get("counts_by_source_tag") or {}
+    form_counts = result.get("counts_by_target_form") or {}
+    resolve_counts = result.get("counts_by_target_resolve_state") or {}
+    lines.append(
+        f"{indent}Блок <Source>: тегов — "
+        + ", ".join(f"{tag}={int(tag_counts.get(tag) or 0)}"
+                    for tag in EVENT_SUBSCRIPTION_SOURCE_TAGS)
+        + "; форм цели — "
+        + ", ".join(f"{form}={int(form_counts.get(form) or 0)}"
+                    for form in EVENT_SUBSCRIPTION_TARGET_FORMS)
+        + "; разрешение цели — "
+        + ", ".join(f"{state}={int(resolve_counts.get(state) or 0)}"
+                    for state in EVENT_SUBSCRIPTION_TARGET_STATES)
+        + f"; записей {int(result.get('sources_total') or 0)}, уникальных целей "
+          f"{int(result.get('sources_distinct') or 0)}, максимум в одной подписке "
+          f"{int(result.get('max_sources_per_subscription') or 0)}, неразрешённых "
+          f"{int(result.get('targets_unresolved_total') or 0)} (перечислено "
+          f"{len(result.get('targets_unresolved') or [])}) — голая ссылка `cfg:<Класс>` "
+          "разрешается присутствием вида метаданных и называется состояниями "
+          "`type_present`/`type_absent` прямо (M5, Q3 вариант A), а не потерянным именем"
+    )
+
+    by_class = result.get("sources_by_class") or {}
+    if by_class:
+        lines.append(
+            f"{indent}Цели блока <Source> по классам ссылки: "
+            + ", ".join(f"{name}={int(count)}" for name, count in sorted(by_class.items()))
+            + " — вид цели выводится из класса ссылки разбором (Q3, вариант A); словарь "
+              "классов (30 записей замера 2.2) замкнут измерением и держит константа "
+              "разбора, а не CHECK (Q6, вариант A)"
+        )
+
+    events_by_name = result.get("events_by_name") or {}
+    if events_by_name:
+        lines.append(
+            f"{indent}Подписки по именам событий: "
+            + ", ".join(f"{name}={int(count)}"
+                        for name, count in sorted(events_by_name.items(),
+                                                 key=lambda pair: (-int(pair[1]), pair[0])))
+            + " — словарь имён замкнут корпусом (замер 2.3 даёт 18 имён), значение вне него "
+              "остаётся записанным с состоянием `unknown_name` (Q6, вариант A)"
+        )
+
+    if not result.get("index_available"):
+        lines.append(
+            f"{indent}Индекс состава не читается — сверка файлов регистрации с перечнем и "
+            "разрешение целей блока <Source> невозможны, и «объекта нет в перечне» от "
+            "«перечень этой конфигурации не загружен» этим не отличить"
+        )
+    mismatch_counts = result.get("counts_by_circle_discrepancy") or {}
+    lines.append(
+        f"{indent}Расхождения файлов и индекса состава: "
+        + ", ".join(f"{state}={int(mismatch_counts.get(state) or 0)}"
+                    for state in EVENT_SUBSCRIPTION_CIRCLE_DISCREPANCIES)
+        + f" (перечислено `index_only` {len(result.get('index_only') or [])}, `file_only` "
+          f"{len(result.get('file_only') or [])}, `uuid_mismatch` "
+          f"{len(result.get('uuid_mismatch') or [])}); дублей имён внутри выгрузки "
+          f"{len(result.get('duplicate_names') or [])} — нули являются ответом, а не "
+          "подразумеванием (замер 1.3 даёт уникальность имён внутри каждой выгрузки)"
+    )
+
+    unknown = result.get("unknown_properties") or {}
+    unknown_events = result.get("unknown_event_names") or {}
+    if unknown or unknown_events:
+        lines.append(
+            f"{indent}Неизвестное в тегах вида: имена свойств — "
+            + (", ".join(f"{name}={int(count)}"
+                         for name, count in sorted(unknown.items())) or "нет")
+            + "; имена событий — "
+            + (", ".join(f"{name}={int(count)}"
+                         for name, count in sorted(unknown_events.items())) or "нет")
+            + " — незнакомое имя или значение остаётся значением с состоянием "
+              "`unknown_value`/`unknown_tag`/`unknown_name`, а не отказом записи "
+              "(Q6, вариант A по прецеденту Q7 узла V50)"
+        )
+    obs_counts = result.get("counts_by_observation") or {}
+    if obs_counts or result.get("observations"):
+        lines.append(
+            f"{indent}Наблюдения круга: "
+            + ", ".join(f"{kind}={count}" for kind, count in sorted(obs_counts.items()))
+            + "; всего "
+            + ", ".join(str(kind) for kind, _ in (result.get("observations") or [])[:20])
+            + " — примитивность вида (отсутствие подкаталогов содержимого) является фактом "
+              "замера 1.2: каталог или файл вне перечня называется наблюдением, потому что "
+              "колонок под них в схеме нет, а «детей нет» и «круг шире разбора» — разные "
+              "ответы (M2)"
+        )
+    prefixes = result.get("namespace_prefixes") or []
+    if prefixes:
+        lines.append(f"{indent}Префиксы пространств имён файлов круга: "
+                     + ", ".join(str(name) for name in prefixes))
+    for failure in (result.get("files_failed") or [])[:10]:
+        lines.append(f"{indent}  ⚠️ файл не разобран: {failure.get('source_path')} — "
+                     f"{failure.get('reason')}")
+
+    refreshed = int(result.get("statistics_refreshed") or 0)
+    if refreshed:
+        lines.append(
+            f"{indent}Статистика таблиц {', '.join(EVENT_SUBSCRIPTIONS_TABLES)} пересобрана "
+            f"(ANALYZE): {refreshed} — без неё читатели витрин текущего состояния платят "
+            "минутами (мера V46)"
+        )
+    for warning in result.get("warnings") or []:
+        lines.append(f"{indent}⚠️ {warning}")
+    lines.append(f"{indent}Граница: {EVENT_SUBSCRIPTIONS_CIRCLE_BOUNDARY}")
+    return lines
 

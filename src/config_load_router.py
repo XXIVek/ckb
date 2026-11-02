@@ -42,6 +42,9 @@ from configuration_load_contract import (
     EXCHANGE_PLAN_META_TAG,
     EXCHANGE_PLAN_SECTION_HEADER,
     EXCHANGE_PLAN_TABLES,
+    EVENT_SUBSCRIPTION_META_TAG,
+    EVENT_SUBSCRIPTIONS_SECTION_HEADER,
+    EVENT_SUBSCRIPTIONS_TABLES,
     FILTER_CRITERIA_META_TAG,
     FILTER_CRITERIA_SECTION_HEADER,
     FILTER_CRITERIA_TABLES,
@@ -57,6 +60,7 @@ from configuration_load_contract import (
     format_child_object_lines,
     format_common_attributes_lines,
     format_exchange_plans_lines,
+    format_event_subscriptions_lines,
     format_filter_criteria_lines,
     format_object_module_lines,
     format_roles_lines,
@@ -491,6 +495,18 @@ def _stage_section_lines(result):
     if filter_criteria_part:
         lines.append(f"{FILTER_CRITERIA_SECTION_HEADER}:")
         lines.extend(format_filter_criteria_lines(filter_criteria_part, indent="   "))
+    # Узел V53 (стадия S4h, позиция 2.8 списка): свойства подписок на события.
+    # Раздел печатается и при отказе стадии, и при `not_run` — по той же причине, что у
+    # S3/S4/S4c–S4g: «загружено» без него читалось бы как «состав конфигурации в БД есть
+    # весь». Ответ стадии лежит в собственном ключе, а не внутри `filter_criteria` или
+    # `exchange_plans` (правило C3); текст даёт общий форматёр контракта — тот же, что отдаёт
+    # отдельный инструмент `load_event_subscriptions_tool` (шаг П5). Блока «группы круга не
+    # запрашивались» у форматёра нет: групп `kinds` у вида нет по решению Q8 (вариант A), и
+    # обещать их значило бы обещать вход, которого нет.
+    event_subscriptions_part = result.get("event_subscriptions") or {}
+    if event_subscriptions_part:
+        lines.append(f"{EVENT_SUBSCRIPTIONS_SECTION_HEADER}:")
+        lines.extend(format_event_subscriptions_lines(event_subscriptions_part, indent="   "))
     # Узел V47 (стадия S4b): модули объектов конфигурации — вторая транзакция загрузки
     # (Q6, граница D7). Раздел печатается и при отказе стадии, и при `not_run` (индекс
     # состава не разобран — круг не определён): «конфигурация загружена» без него
@@ -700,6 +716,13 @@ def format_load_result(result):
                 # вид пишет в общие таблицы `forms`/`form_ext`/`commands`, и их в словаре нет
                 # осознанно: предикат их снятия и записи — uuid родителей круга, а не тег.
                 loaded_tags[FILTER_CRITERIA_META_TAG] = FILTER_CRITERIA_TABLES
+                # Узел V53 (стадия S4h, позиция 2.8 списка): EventSubscription — вид,
+                # содержимое которого сохраняется своей стадией в свои таблицы вида. Без строки
+                # карточка относила бы подписки к «остальных объектов … в БД не раскладываются»,
+                # противореча собственному разделу СВОЙСТВА ПОДПИСОК НА СОБЫТИЯ (тот же дефект,
+                # который чинили строки V50/V51/V52). Тег встречается в <ChildObjects>
+                # Configuration.xml (замер П0: BP3 даёт 458 элементов `<EventSubscription>`).
+                loaded_tags[EVENT_SUBSCRIPTION_META_TAG] = EVENT_SUBSCRIPTIONS_TABLES
                 loaded = {tag: count for tag, count in child_counts.items()
                           if tag in loaded_tags}
                 rest = {tag: count for tag, count in child_counts.items()

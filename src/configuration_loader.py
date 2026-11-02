@@ -229,6 +229,37 @@
   * тела модулей вида узел НЕ читает: файлы названы дескрипторами, тексты принадлежат V47
     (Q8) — двух чтений одного файла два узла не делают.
 
+Узел V53 (02.11.2026, шаг П5) — свойства подписок на события, позиция 2.8 нормативного списка
+(`docs/CONFIGURATION_EVENT_SUBSCRIPTIONS_PLAN.md`):
+
+    src/configuration_event_subscriptions_loader.py :: load_event_subscriptions(source_path,
+    configuration_uuid=None, changed_at=None)  →  таблицы вида `event_subscriptions`,
+    `event_subscription_sources`
+
+Порядок вызова повторяет S3/S4/S4c/S4d/S4e/S4f/S4g: стадия идёт ПОСЛЕ фиксации заголовка и
+индекса состава, потому что цели блока `<Source>` разрешаются записями `configuration_objects`,
+а имена обработчиков — текущими общими модулями стадии S4 (Q6). Дальнейшее отличает её от
+соседних стадий:
+
+  * стадия `s4h_event_subscriptions` стоит между `s4g_filter_criteria` и `s4b_object_modules` —
+    порядок `STAGES` повторяет порядок нормативного списка (2.8 идёт сразу за 2.7, Q1);
+    перенумерации нет, S5 по-прежнему зарезервирован за анализом;
+  * ответ лежит в собственном ключе `event_subscriptions` (правило C3);
+  * групп `kinds` у стадии и у отдельного входа `load_event_subscriptions_tool` НЕТ — это
+    решение Q8 (вариант A), тот же, что у V50 и V52: строка источника существует только через
+    id строки вида (Q1), а порога цены, при котором круг стоило бы резать, замер 2.2 не дал
+    (25 100 строк `<Source>` на весь круг четырёх выгрузок, максимум 789 в одном файле);
+  * круг пишется ОДНОЙ транзакцией, порядок записи держится иерархией данных: строки вида
+    (`insert_ids`, `RETURNING id`) → строки блока `<Source>` (ссылка на числовой
+    `event_subscription_id` конкретной ревизии — своей цепи у строки источника нет, Q4
+    вариант A);
+  * строки вида снимаются вместе с заголовком явным `DELETE` (`remove_event_subscriptions` в
+    `_remove_rows`), начиная с `event_subscription_sources` (порядок держит `REMOVE_ORDER`
+    слоя): FK строки источника объявлен с `ON DELETE CASCADE`, и каскад снял бы строки молча —
+    число в ответе было бы неправдой (M7);
+  * тел модулей у вида нет (замер 2.1): файлов `.bsl` в круге не читается, обработчик — только
+    имя метода общего модуля, тексты принадлежат V46/V47.
+
 
 Чтения идут через psycopg2 (`src/external_db.py`), а не psql-подпроцессом: `_run_psql` /
 `_psql_fields` унаследованы от прежнего загрузчика, многоколоночные выборки разбирают
@@ -323,6 +354,20 @@ from configuration_filter_criteria_loader import (
     load_filter_criteria,
     remove_filter_criteria,
 )
+# Узел V53 (стадия S4h, позиция 2.8 нормативного списка): свойства подписок на события — тот
+# же слой, что и отдельный инструмент `load_event_subscriptions_tool` (шаг П5); контракт стадии
+# и форматёр — в configuration_load_contract. Строки круга снимаются вместе с заголовком явным
+# DELETE (внешнего ключа на `configurations` в схеме нет осознанно — прецедент V20.1), поэтому
+# `_remove_rows` обязан вызвать его явно: без этого force=True оставил бы в базе прежний состав
+# вида (для BP3 это 458 строк подписок и 13 379 строк блока `<Source>` — замер 2.2). Снятие
+# начинается с `event_subscription_sources`: FK строки источника держит `ON DELETE CASCADE`, и
+# каскад снял бы строки молча, а число в ответе стало бы неправдой (M7). Родителей по uuid
+# строк вида при этом искать не нужно — строка источника несёт `configuration_uuid` своей
+# колонкой (тот же приём, что `role_restriction_templates` V49 и `common_attribute_targets` V50).
+from configuration_event_subscriptions_loader import (
+    load_event_subscriptions,
+    remove_event_subscriptions,
+)
 # Узел V47 (стадия S4b): модули объектов конфигурации — вторая транзакция после фиксации
 # содержимого (Q6, граница D7). Точка входа стадии одна и отдельного инструмента у неё нет
 # (Q4.1), поэтому здесь импортируется и ответ «стадия не выполнялась» (`mark_index_unavailable`):
@@ -340,6 +385,8 @@ from configuration_load_contract import (
     COMMON_ATTRIBUTES_SECTION_HEADER,
     EXCHANGE_PLAN_REPEAT_HINT,
     EXCHANGE_PLAN_SECTION_HEADER,
+    EVENT_SUBSCRIPTIONS_REPEAT_HINT,
+    EVENT_SUBSCRIPTIONS_SECTION_HEADER,
     FILTER_CRITERIA_REPEAT_HINT,
     FILTER_CRITERIA_SECTION_HEADER,
     NOT_RUN_STOPPED_REASON,
@@ -354,6 +401,7 @@ from configuration_load_contract import (
     STAGE_CHILD_OBJECTS,
     STAGE_COMMON_ATTRIBUTES,
     STAGE_EXCHANGE_PLANS,
+    STAGE_EVENT_SUBSCRIPTIONS,
     STAGE_FILTER_CRITERIA,
     STAGE_INCOMPLETE_GROUPS,
     STAGE_OBJECT_MODULES,
@@ -366,6 +414,7 @@ from configuration_load_contract import (
     child_objects_defaults,
     common_attributes_defaults,
     exchange_plans_defaults,
+    event_subscriptions_defaults,
     filter_criteria_defaults,
     roles_defaults,
     root_modules_defaults,
@@ -695,6 +744,14 @@ def _remove_rows(cur, cfg_id, configuration_uuid=None):
         children.update(remove_filter_criteria(
             cur, configuration_uuid, sorted(existing_criterion_uuids(cur,
                                                                     configuration_uuid))))
+    # Узел V53 (стадия S4h): строки подписок на события тоже адресуются uuid заголовка, а
+    # внешнего ключа и каскада по нему в схеме нет осознанно (прецеденты V20.1…V52). Родителей
+    # по uuid строк вида искать не нужно: строка источника несёт `configuration_uuid` своей
+    # колонкой, поэтому снятие идёт по одной ноге с таблицей вида. Порядок держит
+    # `REMOVE_ORDER` слоя — сначала `event_subscription_sources`, иначе FK строки источника с
+    # `ON DELETE CASCADE` снял бы строки молча и число в ответе было бы неправдой (M7).
+    if configuration_uuid:
+        children.update(remove_event_subscriptions(cur, configuration_uuid))
     cur.execute("DELETE FROM configurations WHERE id = %s", [cfg_id])
     children["configurations"] = cur.rowcount
     return children
@@ -794,7 +851,7 @@ def _objects_table_available():
 def _written_before_stop_note(new_id, objects_written, header_arrays_filled,
                               root_modules, child_objects, session_parameters,
                               roles=None, common_attributes=None, exchange_plans=None,
-                              filter_criteria=None):
+                              filter_criteria=None, event_subscriptions=None):
     """Что реально лежит в базе на момент остановки конвейера (узел V48, шаг П8).
 
     Строка обязана быть: остановка стадии откатом не является (стадии S3+ идут после коммита
@@ -859,6 +916,16 @@ def _written_before_stop_note(new_id, objects_written, header_arrays_filled,
                 f"{table}={int((filter_criteria.get('written_by_table') or {}).get(table) or 0)}"
                 for table in ("filter_criteria", "filter_criterion_content", "forms",
                               "form_ext", "commands"))
+        )
+    # Узел V53 (стадия S4h): круг называется обеими таблицами — «подписки записаны» без числа
+    # строк блока `<Source>` читалось бы как полный состав вида, хотя одной подписке в BGU2 и
+    # BP3 соответствуют сотни целей (замер 2.2: максимум 760 и 789 строк на подписку).
+    if event_subscriptions and event_subscriptions.get("success"):
+        parts.append(
+            "свойства подписок на события: "
+            + ", ".join(
+                f"{table}={int((event_subscriptions.get('written_by_table') or {}).get(table) or 0)}"
+                for table in ("event_subscriptions", "event_subscription_sources"))
         )
     return "; ".join(parts)
 
@@ -1171,6 +1238,11 @@ def register_configuration(source_path, force=False, xml_path=None):
     # (Q1), поэтому конвейер обязан записать весь круг целиком, а раздельной дозагрузки
     # группами у вида нет ни у стадии, ни у отдельного входа.
     filter_criteria = filter_criteria_defaults()
+    # Узел V53 (стадия S4h, позиция 2.8 списка): свойства подписок на события — ответ в
+    # собственном ключе `event_subscriptions` (правило C3). Групп `kinds` у стадии нет — это
+    # решение Q8 узла V53 (вариант A), тот же, что у V50 и V52: строка источника существует
+    # только через id строки вида (Q1), поэтому конвейер обязан записать весь круг целиком.
+    event_subscriptions = event_subscriptions_defaults()
     object_modules = object_modules_defaults()
     # Узел V48 (шаг П8, правило C2): пропущенная стадия называет причину пропуска. Без неё
     # форматёр стадии печатает «загрузчик не назвал причину», и читатель карточки видит
@@ -1180,7 +1252,7 @@ def register_configuration(source_path, force=False, xml_path=None):
     # (тот же приём, что `mark_index_unavailable` узла V47). Причина — в `reason`, а не в
     # `error`: «не выполнялась» и «отказала после начала работы» различаются именно так.
     for _empty_stage in (child_objects, session_parameters, roles, common_attributes,
-                         exchange_plans, filter_criteria, object_modules):
+                         exchange_plans, filter_criteria, event_subscriptions, object_modules):
         _empty_stage["reason"] = NOT_RUN_STOPPED_REASON
     object_modules["status"] = STATUS_NOT_RUN
     stopped_stage = stopped_stage_defaults()
@@ -1200,7 +1272,7 @@ def register_configuration(source_path, force=False, xml_path=None):
             _written_before_stop_note(new_id, objects_written, header_arrays_filled,
                                       root_modules, child_objects, session_parameters,
                                       roles, common_attributes, exchange_plans,
-                                      filter_criteria),
+                                      filter_criteria, event_subscriptions),
             warnings, incomplete_groups)
 
     if not stopped:
@@ -1500,6 +1572,56 @@ def register_configuration(source_path, force=False, xml_path=None):
             stopped = True
             load_incomplete = True
 
+    # ── узел V53 (стадия S4h, позиция 2.8 списка): свойства подписок на события ─────────
+    # Порядок вызова повторяет S3/S4/S4c–S4g: ПОСЛЕ коммита транзакции заголовка (своим
+    # соединением стадия не увидела бы ни незакоммиченного заголовка, ни строк индекса
+    # состава, по которым разрешаются цели блока `<Source>`, Q4), ключ — uuid, каталог тот же
+    # `root_source`. Стадия отдельная, а не расширение S4g (прецедент Q5 узлов V48–V52):
+    # правило C3 требует своего ключа ответа `event_subscriptions`; порядок `STAGES` повторяет
+    # порядок нормативного списка (2.8 идёт сразу за 2.7, Q1). Отказ стадии, как у S3/S4 и
+    # S4c–S4g, записанный заголовок не отменяет (C5) — но останавливает конвейер (решение Q8
+    # узла V48, вариант A): S4b после отказа S4h не выполняется и читается `not_run`.
+    #
+    # Конвейер просит ВЕСЬ круг: групп `kinds` у вида нет (Q8 узла V53, вариант A), потому что
+    # строка источника неотделима от строки вида (Q1). Отсутствие каталога `EventSubscriptions/`
+    # — не отказ, а ответ о выгрузке: `files_found = 0` с наблюдением `directory_missing`.
+    # Индекс состава или витрина общих модулей могут быть недоступны — это не отказ стадии, а
+    # названные наблюдения (`index_unavailable`, `common_modules_unavailable`): цели остаются
+    # `unresolved`, обработчики `unresolved`, и мера названа в ответе.
+    #
+    # Штамп времени общий с остальными стадиями этой загрузки (M2) — `load_moment` задан
+    # выше, где начинается событие детей заголовка.
+    if not stopped:
+        try:
+            event_subscriptions = load_event_subscriptions(
+                root_source, configuration_uuid=row["uuid"], changed_at=load_moment)
+        except Exception as exc:  # noqa: BLE001 — отказ стадии называется, а не бросается
+            event_subscriptions = event_subscriptions_defaults()
+            event_subscriptions["configuration_id"] = new_id
+            event_subscriptions["configuration_uuid"] = row["uuid"]
+            event_subscriptions["configuration_name"] = row["name"]
+            event_subscriptions["status"] = STATUS_ERROR
+            event_subscriptions["error"] = (
+                f"исключение слоя свойств подписок на события: {exc}")
+            event_subscriptions["reason"] = event_subscriptions["error"]
+        for subscription_warning in event_subscriptions.get("warnings") or []:
+            warnings.append(f"подписки на события: {subscription_warning}")
+        if not event_subscriptions.get("success"):
+            # Заголовок, индекс состава, модули корня, свойства подсистем с общими модулями,
+            # параметры сеанса, роли, общие реквизиты, планы обмена и критерии отбора уже
+            # записаны, и отказ этой стадии их не отменяет (C5). Молчать нельзя по той же
+            # причине, что у V44/V46 и V48–V52: после force=True прежние строки сняты, и
+            # «загружено» без этой строки читалось бы как полный состав конфигурации.
+            warnings.append(
+                "Свойства подписок на события не загружены — причина названа строкой "
+                "«Стадия не выполнена» в разделе «" + EVENT_SUBSCRIPTIONS_SECTION_HEADER
+                + "» карточки. Чем продолжить: "
+                + f"{EVENT_SUBSCRIPTIONS_REPEAT_HINT} (configuration_uuid={row['uuid']})."
+            )
+            stopped_stage = _stop_here(STAGE_EVENT_SUBSCRIPTIONS, event_subscriptions)
+            stopped = True
+            load_incomplete = True
+
     # ── узел V47 (стадия S4b): модули объектов конфигурации ────────────────────────────
     # Вторая транзакция ПОСЛЕ фиксации содержимого конфигурации (решение Q6, граница D7
     # узла V46): отказ стадии не откатывает заголовок, индекс состава, модули корня и
@@ -1625,6 +1747,12 @@ def register_configuration(source_path, force=False, xml_path=None):
         # же, что отдаёт отдельный инструмент `load_filter_criteria_tool` (шаг П5). Групп
         # `kinds` в ответе нет — это решение Q5 узла V52 (вариант A), а не пропуск.
         "filter_criteria": filter_criteria,
+        # узел V53: машинная часть стадии S4h (позиция 2.8 списка) — полная; ответ лежит в
+        # собственном ключе, а не внутри `filter_criteria` или `exchange_plans` (правило C3).
+        # Текст раздела даёт общий форматёр контракта — тот же, что отдаёт отдельный
+        # инструмент `load_event_subscriptions_tool` (шаг П5). Групп `kinds` в ответе нет —
+        # это решение Q8 узла V53 (вариант A), а не пропуск.
+        "event_subscriptions": event_subscriptions,
         # узел V47: машинная часть стадии S4b — полная (тот же закрытый контракт, который
         # читают проба П4 и проверка П5); текст раздела даёт общий форматёр контракта.
         # `load_incomplete`/`incomplete_groups` — признак того, что состав в БД неполный

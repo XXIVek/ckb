@@ -129,12 +129,24 @@ DEFAULT_TARGETS = [
 # вариант A): строка условия существует только через числовой id строки вида (Q1, вариант A),
 # поэтому частичная запись круга описывала бы состав, которого в выгрузке нет, а порога цены,
 # при котором круг стоило бы резать, замер 1.4 не дал (1 219 целей на весь круг).
+# Узел V53 (П5, 02.11.2026) добавил load_event_subscriptions_tool: core 10 → 11. Причина та же
+# (решение оператора Q5 узла V48 — свой вход на каждую позицию нормативного списка): файлы
+# регистрации вида `EventSubscriptions/` (позиция 2.8) меняются, а заголовок и индекс состава —
+# нет. Стадия S4h конвейера и инструмент вызывают одну и ту же функцию слоя
+# (src/configuration_event_subscriptions_loader.load_event_subscriptions); отдельного контракта у
+# инструмента нет — закрытый словарь event_subscriptions_defaults() и текст раздела даёт
+# configuration_load_contract. Отличие от входа V51 — групп `kinds` НЕТ (решение Q8 узла V53,
+# вариант A), тот же, что у V50 и V52: строка источника существует только через числовой id
+# строки вида (Q1, вариант A), поэтому частичная запись круга описывала бы состав, которого в
+# выгрузке нет, а порога цены, при котором круг стоило бы резать, замер 2.2 не дал (25 100
+# строк `<Source>` на четыре выгрузки, максимум 789 в одном файле).
 EXPECTED_TOOLS = {
     "server_configurations_core.py": [
         "delete_external_report_tool", "load_1c_catalog_tool",
         "load_common_attributes_tool",
         "load_configuration_object_properties_tool",
         "load_configuration_root_modules_tool", "load_external_object_file_tool",
+        "load_event_subscriptions_tool",
         "load_exchange_plans_tool",
         "load_filter_criteria_tool",
         "load_roles_tool", "load_session_parameters_tool",

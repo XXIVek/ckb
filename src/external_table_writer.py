@@ -101,6 +101,15 @@ from configuration_filter_criteria import (
     CONTENT_TABLE_NAME as FILTER_CRITERIA_CONTENT_TABLE,
     TABLE_NAME as FILTER_CRITERIA_TABLE,
 )
+# Узел V53 (подписка на событие, шаг П3, 02.11.2026): имена двух таблиц вида задаёт разбор
+# (`src/configuration_event_subscriptions.py`), а не писатель — тот же порядок, что у V51 и
+# V52. Второй перечень имён разъехался бы с первым при первой же правке, а проверка узла
+# сверяет с живой схемой именно эти имена. Цикла импортов нет: разбор вида не импортирует
+# писателей.
+from configuration_event_subscriptions import (
+    SOURCES_TABLE_NAME as EVENT_SUBSCRIPTION_SOURCES_TABLE,
+    TABLE_NAME as EVENT_SUBSCRIPTIONS_TABLE,
+)
 
 # Ревизионные колонки в спецификациях версионированных писателей (M1). Порядок -
 # тот же, что в DDL (шаг 1 src/generate_ddl.py): integer / timestamp / text / boolean.
@@ -2284,6 +2293,158 @@ class FilterCriterionContentRowWriter(TableRowWriter):
     }
 
 
+# ─── узел V53 (подписка на событие, позиция 2.8), шаг П3 ─────────────────────
+# Норматив — docs/CONFIGURATION_EVENT_SUBSCRIPTIONS_PLAN.md (раздел 2 — словарь свойств и
+# формы целей, раздел 5 — M1…M7, раздел 6 — решения Q1…Q8, раздел 7 — шаг П3). Писателей у
+# узла ДВА, и это весь круг:
+#
+# * строка вида `event_subscriptions` — версионируемая цепью (`configuration_uuid`,
+#   `object_name`, `revision_no`) (M1 плана: 162 uuid и 192 имён подписок стоят одновременно
+#   в BGU2 и BP3, а 772 строки круга дают 610 различных uuid — ключ без границы конфигурации
+#   слил бы выгрузки в одну строку);
+# * строки блока `<Source>` `event_subscription_sources` — без своей цепи (Q4, вариант A):
+#   ключ начинается с числового `event_subscription_id`, то есть с ссылки на КОНКРЕТНУЮ
+#   ревизию строки вида, а каскад
+#   `event_subscription_sources_event_subscription_id_fkey` снимает их вместе с ревизией.
+#   Таблица названа исключением `CONFIGURATION_UNVERSIONED_TABLES` (прецеденты `role_rights`
+#   V49, `common_attribute_targets` V50, `filter_criterion_content` V52), поэтому
+#   спецификация здесь WITHOUT `versioned_columns()` — вызов добавил бы колонки, которых в
+#   DDL нет.
+#
+# Писателей детей у V53 СВОИХ НЕТ и общих таблиц детей не используется: у подписки на событие
+# детей нет вовсе (замер раздела 1.2: запись вида в `ConfigDumpInfo.xml` — самозакрывающийся
+# элемент, каталогов `Forms/`, `Templates/`, `Commands/`, `Ext/` во всех четырёх выгрузках
+# ноль). Колонок `children_state`/`form_names`/`command_uuids` в спецификации нет осознанно
+# (M2): состояние «детей нет» описывало бы то, чего вид не имеет.
+#
+# Имена колонок совпадают с полями контракта разбора
+# (`src/configuration_event_subscriptions.py::read_registration_file`) намеренно — чтобы
+# маппинг читался текстом, а не по памяти (приём узлов V33, V48, V50, V51, V52).
+#
+# Колонки строки вида, смысл которых не выводится из имени:
+#
+#   * `event`/`event_state` — имя события как в выгрузке плюс состояние его известности:
+#     словарь 18 имён замкнут замером и держит константа слоя `EVENT_NAME_DICTIONARY`, а не
+#     CHECK (Q6, вариант A по прецеденту Q7 узла V50) — незнакомое имя остаётся значением с
+#     состоянием `unknown_name`, а не отказом записи;
+#   * `handler`/`handler_module`/`handler_method`/`handler_state` — обработчик текстом и
+#     разложенным (Q2, решение оператора): вопрос «какие подписки вызывает этот общий модуль»
+#     читается индексом по `handler_module` без разбора текста. Внешнего ключа на
+#     `common_modules` нет: связь не один-к-одному (248 уникальных обработчиков при 311
+#     подписках в BGU2, замер 2.3);
+#   * `source_state`/`source_count` — состояние и размер блока `<Source>`: сам круг разбирает
+#     вторая таблица, а его состояние называется строкой вида, потому что «целей нет»
+#     (`empty_sources`) и «круг не читали» — разные ответы (прецедент `content_state` V52).
+#     Пустых блоков корпус не давал ни разу (замер 1.4), поэтому значение остаётся границей,
+#     а не ожидаемым (M4);
+#   * `full_name` совпадает с `object_name`: иерархии раскладки у вида нет (замер 1.2);
+#     колонка заведена для единой формы чтения детей конфигурации, а не для дублирования
+#     (прецедент V50);
+#   * `source_path` — путь относительно КОРНЯ выгрузки (`EventSubscriptions/<Имя>.xml`), а не
+#     каталога вида (поправка V46).
+
+
+class EventSubscriptionsRowWriter(TableRowWriter):
+    """Строка подписки на событие конфигурации (таблица `event_subscriptions`, узел V53,
+    позиция 2.8).
+
+    Обязательных колонок без значения у разбора нет: файл без `<Name>` нечем ключить, а файл
+    без атрибута `uuid` не является ссылкой на объект метаданных (правило R3) — оба называются
+    отказом разбора файла, а не NULL-колонкой. Именно поэтому писатель не подставляет
+    значений: пустое значение здесь означало бы потерянный факт, а не состояние выгрузки.
+
+    `synonym` — `jsonb_nullable`, а не `jsonb_object`: «свойства в выгрузке нет» и «свойство
+    есть, но пустое» — разные состояния (тот же контракт, что V48 и V50). Пустой `Comment`
+    кладётся NULL: отдельного состояния у пустого комментария нет (Q7, вариант A; замер — 297
+    пустых комментариев в BGU2 и 1 в KomMag, это отсутствие текста, а не свойство).
+    """
+
+    TABLE = EVENT_SUBSCRIPTIONS_TABLE
+    COLUMNS = versioned_columns({
+        "configuration_uuid": "uuid",
+        "object_uuid": "uuid",
+        "object_name": "text",
+        "full_name": "text",
+        "synonym": "jsonb_nullable",
+        "comment": "text",
+        "event": "text",
+        "event_state": "text",
+        "handler": "text",
+        "handler_module": "text",
+        "handler_method": "text",
+        "handler_state": "text",
+        "source_state": "text",
+        "source_count": "int",
+        "properties_state": "text",
+        "unknown_property_names": "text_array_nullable",
+        "source_path": "text",
+    })
+
+
+class EventSubscriptionSourcesRowWriter(TableRowWriter):
+    """Строка блока `<Source>` подписки (таблица `event_subscription_sources`, Q1).
+
+    Спецификация НЕ оборачивается в `versioned_columns()`: своей цепи ревизий у строки нет
+    (Q4, вариант A), её текущность читается витриной `v_current_event_subscription_sources`
+    связкой по `event_subscription_id`, а снимается она каскадом вместе с ревизией вида.
+
+    Колонки, смысл которых не выводится из имени:
+
+      * `event_subscription_id` подставляет вызывающий слой (стадия П4) из id, полученного
+        `EventSubscriptionsRowWriter.insert_ids`; в контракте разбора для этой связи служит
+        `subscription_full_name`, и колонкой строки вида он не становится намеренно — иначе
+        строка источника могла бы ссылаться на имя вместо ревизии (прецедент
+        `attribute_full_name` V50, `criterion_full_name` V52, `role_name` V49);
+      * `configuration_uuid` повторяет значение строки вида осознанно: запрос «какие подписки
+        настроены на этот вид метаданных» идёт по строкам источника, и без колонки он требовал
+        бы связки с таблицей вида и с её витриной на каждом шаге;
+      * `ordinal` — позиция записи в файле; порядок писатель не меняет (прецедент `ordinal`
+        V50/V51/V52): ни uuid, ни имени у элемента блока нет (замер 2.2), идентичность
+        строки даёт только порядок;
+      * `source_tag` — измеренный тег элемента (`Type` 24 729, `TypeSet` 371): форма перечня
+        является свойством выгрузки, а не обещанием разбора. Отличие от V52 названо: у
+        элемента нет атрибута `xsi:type` — формой элемента является сам тег (замер 2.2);
+      * `target_raw` — значение элемента как в выгрузке: по нему проверка П6 сверяет меру, а
+        не пересказывает разбор;
+      * `target_class`/`target_meta_type`/`target_object_name`/`target_full_name`/
+        `target_form` — разбор значения `cfg:<Класс>[.<Имя>]`: голые ссылки (265 записей
+        корпуса) цели не называют, и это форма цели, а не потерянное имя (M5); вид метаданных
+        NULL тогда, когда класс вне измеренного словаря (`unknown_class`), а не тогда, когда
+        его «не заполнили»;
+      * `target_object_id`/`target_object_uuid`/`target_unresolved_path` — ссылка на СТРОКУ
+        индекса состава: внешнего ключа нет осознанно, потому что цель бывает неразрешённой,
+        а разрешённая ссылка ведёт к строке, которую снимает перезагрузка индекса.
+        `target_object_id` — текст, а не uuid: идентификаторы индекса состава бывают
+        составными (замер V33 D2).
+
+    Размер страницы вставки назван (приём V33/V47/V51/V52): 25 100 строк на четыре выгрузки
+    (BGU2 11 706, BP3 13 379 — замер 2.2), максимум 789 строк в одном файле; одна
+    `execute_values` на весь список держала бы весь SQL-текст в памяти и не давала бы ничего
+    наблюдать.
+    """
+
+    PAGE_SIZE = 200
+    TABLE = EVENT_SUBSCRIPTION_SOURCES_TABLE
+    COLUMNS = {
+        "event_subscription_id": "int",
+        "configuration_uuid": "uuid",
+        "subscription_object_uuid": "uuid",
+        "subscription_full_name": "text",
+        "ordinal": "int",
+        "source_tag": "text",
+        "target_raw": "text",
+        "target_class": "text",
+        "target_meta_type": "text",
+        "target_object_name": "text",
+        "target_full_name": "text",
+        "target_form": "text",
+        "target_object_id": "text",
+        "target_object_uuid": "uuid",
+        "target_resolve_state": "text",
+        "target_unresolved_path": "text",
+    }
+
+
 # Контракт разбора → писатель: выбор по словарю, а не по имени таблицы (приём
 # ROOT_MODULE_WRITERS: ошибка выбора превращается в запись не в ту таблицу).
 # Узел V49 (роли): писатели группы свои, реестр — общий механизм
@@ -2340,6 +2501,12 @@ CONFIGURATION_OBJECT_WRITERS = {
     # `CONFIGURATION_UNVERSIONED_TABLES` (Q2, вариант A).
     FILTER_CRITERIA_TABLE: FilterCriteriaRowWriter,
     FILTER_CRITERIA_CONTENT_TABLE: FilterCriterionContentRowWriter,
+    # Узел V53 (подписка на событие, шаг П3): строка вида версионируется своей цепью
+    # (`configuration_uuid`, `object_name`, `revision_no` — M1: 162 uuid и 192 имени стоят
+    # одновременно в BGU2 и BP3), строки блока `<Source>` — исключение
+    # `CONFIGURATION_UNVERSIONED_TABLES` (Q4, вариант A).
+    EVENT_SUBSCRIPTIONS_TABLE: EventSubscriptionsRowWriter,
+    EVENT_SUBSCRIPTION_SOURCES_TABLE: EventSubscriptionSourcesRowWriter,
 }
 
 # Таблицы, чей писатель зарегистрирован общим реестром, но своей ЦЕПИ РЕВИЗИЙ у таблицы
@@ -2363,8 +2530,17 @@ CONFIGURATION_OBJECT_WRITERS = {
 # docs/CONFIGURATION_FILTER_CRITERIA_PLAN.md: 1 219 целей на круг — цена, при которой
 # дублирование состояния читалось бы расхождением); каскад `ON DELETE CASCADE` остаётся
 # средством снятия строк условия вместе с ревизией вида.
+# Узел V53 добавляет в список `event_subscription_sources` по тому же основанию (Q4,
+# вариант A): ключ строки источника начинается с `event_subscription_id` — ссылки на
+# конкретную ревизию строки подписки на событие (замер 2.2 плана
+# docs/CONFIGURATION_EVENT_SUBSCRIPTIONS_PLAN.md: 25 100 записей блока `<Source>` на круг,
+# максимум 789 в одном файле — при такой цене собственная цепь ревизий дала бы две
+# «текущие» строки об одной и той же цели). Каскад `ON DELETE CASCADE` остаётся средством
+# снятия строк источника вместе с ревизией вида, а текущность читается витриной
+# `v_current_event_subscription_sources` связкой по числовому id родителя.
 CONFIGURATION_UNVERSIONED_TABLES = ("role_rights", "common_attribute_targets",
-                                    "filter_criterion_content")
+                                    "filter_criterion_content",
+                                    "event_subscription_sources")
 
 
 class ConfigCrossReferenceRowWriter(TableRowWriter):
