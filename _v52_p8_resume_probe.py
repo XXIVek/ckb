@@ -78,6 +78,7 @@ from configuration_load_contract import (  # noqa: E402
     FILTER_CRITERIA_DIR,
     FILTER_CRITERIA_REPEAT_HINT,
     FILTER_CRITERIA_SECTION_HEADER,
+    FILTER_CRITERIA_TABLES,
     OBJECT_MODULES_SECTION_HEADER,
     STAGE_CHILD_OBJECTS,
     STAGE_COMMON_ATTRIBUTES,
@@ -140,10 +141,13 @@ DEFAULTS = {
 # обязана считать те же пять таблиц, которые загрузчик снимает и пишет. Числа по всем пяти
 # таблицам ответ держит в словарях пар `written_by_table` / `removed_by_table` (проверка 3.6
 # читает их и сверяет с отдельными счётчиками `*_written` — одно число в двух местах обязано
-# совпадать). Урок первого прогона этой пробы двоякий: `FILTER_CRITERIA_TABLES` — две
-# таблицы самого вида, а не пять (брать их за круг было бы правкой круга), а нулевой словарь
-# контракта `filter_criteria_defaults()` засеивает парами только эти две таблицы — ответ о
-# прогоне заполняет словарь пятью таблицами, и проба называет это наблюдением, а не молчит.
+# совпадать). Урок первого прогона этой пробы был двоякий, и он закрыт тем же узлом, что её
+# строил: `FILTER_CRITERIA_TABLES` — две таблицы самого вида, а не пять (брать их за круг было
+# бы правкой круга), а нулевой словарь контракта засеивал парами только эти две. С 02.11.2026
+# контракт различает два перечня — версионности (`FILTER_CRITERIA_TABLES`, ключ `tables`) и
+# снятия (`FILTER_CRITERIA_REMOVE_ORDER`, словари пар), а загрузчик держит второй алиасом.
+# Поэтому форма payload'а пропущенной стадии совпадает с формой успешного ответа, и ниже это
+# держится проверкой 1.0, а не наблюдением о расхождении.
 CIRCLE_TABLES = tuple(CIRCLE_REMOVE_ORDER)
 # Отдельные счётчики записанных детей (дублируют числа словаря пар — совпадение проверяется).
 CHILD_COUNTERS = {"forms": "forms_written", "form_ext": "form_ext_written",
@@ -313,15 +317,20 @@ def main() -> int:
         return 2
 
     print(f"\n=== 1. Базовая загрузка каталога ({chosen}, force=True) ===")
-    seeded_pairs = sorted((filter_criteria_defaults().get("written_by_table") or {}))
-    if seeded_pairs != sorted(CIRCLE_TABLES):
-        note("наблюдение П8: нулевой словарь контракта `filter_criteria_defaults()` засеивает "
-             f"словари пар `written_by_table`/`removed_by_table` таблицами {seeded_pairs} — "
-             "двумя таблицами самого вида, тогда как ответ прогона заполняет их пятью "
-             "таблицами круга. Состоянием это не является (неперечисленные ключи читаются "
-             "нулями — C1), но перечень чисел в тексте пропущенной стадии отличается от "
-             "перечня успешной; засеивать ли пятью — правка контракта, а не П8, поэтому "
-             "позиция называется, а не правится молча")
+    zero = filter_criteria_defaults()
+    seeded_written = list(zero.get("written_by_table") or {})
+    seeded_removed = list(zero.get("removed_by_table") or {})
+    check("1.0 форма нулевого ответа совпадает с формой ответа прогона: словари пар "
+          "`written_by_table`/`removed_by_table` засеяны кругом снятия (пять таблиц круга), а "
+          "ключ `tables` остаётся кругом версионности (две таблицы самого вида) — расхождение, "
+          "которое первый прогон этой пробы назвал наблюдением, закрыто разведением перечней в "
+          "контракте (`FILTER_CRITERIA_TABLES` против `FILTER_CRITERIA_REMOVE_ORDER`), а не "
+          "молчаливой правкой круга",
+          seeded_written == list(CIRCLE_REMOVE_ORDER)
+          and seeded_removed == list(CIRCLE_REMOVE_ORDER)
+          and list(zero.get("tables") or []) == list(FILTER_CRITERIA_TABLES),
+          f"written: {seeded_written}; removed: {seeded_removed}; "
+          f"tables: {list(zero.get('tables') or [])}")
     base = load_catalog(str(dump_dir), force=True)
     check("1.1 базовая загрузка успешна", base.get("success") is True, base.get("error"))
     base_stage = base.get("filter_criteria") or {}

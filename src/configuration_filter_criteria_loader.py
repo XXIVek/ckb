@@ -106,6 +106,7 @@ from configuration_filter_criteria import (
 # разъезжается при первой же правке (прецедент импорта узла V51).
 from configuration_exchange_plans import PARENT_TYPE_CONFIGURATION
 from configuration_load_contract import (
+    FILTER_CRITERIA_REMOVE_ORDER,
     FILTER_CRITERIA_REPEAT_HINT,
     STATUS_ERROR,
     STATUS_OK,
@@ -163,9 +164,14 @@ TABLE_WRITERS: Dict[str, Any] = {
 # последних опираются строки `<Content>`, и снятие вида раньше оставило бы в базе перечень
 # без строки вида хотя бы на время внутри транзакции. Тот же приём, что `REMOVE_ORDER` узлов
 # V49, V50, V51.
-REMOVE_ORDER: Tuple[str, ...] = (
-    FORM_EXT_TABLE, FORMS_TABLE, COMMANDS_TABLE_NAME, CONTENT_TABLE_NAME, TABLE_NAME,
-)
+#
+# Сам перечень живёт НЕ здесь, а в контракте (`FILTER_CRITERIA_REMOVE_ORDER`), и здесь он
+# только алиас — второго перечня тех же таблиц проект не заводит (это прямо сказано в
+# комментарии к `FILTER_CRITERIA_TABLES`), а нулевой ответ стадии обязан называть те же пять
+# таблиц, что и ответ прогона: детей снимает и пишет эта же стадия. Совпадение литералов
+# контракта с константами этого слоя сторожит контур 12 `tools/check_v52_filter_criteria.py`
+# (позиция, названная прогоном П8 02.11.2026 и закрытая этим разведением перечней).
+REMOVE_ORDER: Tuple[str, ...] = FILTER_CRITERIA_REMOVE_ORDER
 
 # Колонки индекса состава, которые нужны разбору вида: `name`/`object_name` — ключ сверки
 # (`FilterCriterion.<Имя>`, `FilterCriterion.<Имя>.Form.<ИмяФормы>`, `…Command.<Имя>`),

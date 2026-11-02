@@ -142,11 +142,15 @@ from configuration_filter_criteria import (  # noqa: E402
     index_row_key, index_rows_by_name, property_columns, property_records, resolve_target,
     state_vocabulary,
 )
-from configuration_filter_criteria_loader import read_index_records  # noqa: E402
+from configuration_filter_criteria_loader import (  # noqa: E402
+    COMMANDS_TABLE_NAME as LAYER_COMMANDS_TABLE, FORMS_TABLE as LAYER_FORMS_TABLE,
+    FORM_EXT_TABLE as LAYER_FORM_EXT_TABLE, REMOVE_ORDER as LAYER_REMOVE_ORDER,
+    SHARED_CHILD_TABLES, read_index_records,
+)
 from configuration_load_contract import (  # noqa: E402
-    FILTER_CRITERIA_REPEAT_HINT, FILTER_CRITERIA_TABLES, FOREIGN_STAGE_TABLES,
-    STAGE_EXCHANGE_PLANS, STAGE_FILTER_CRITERIA, STAGE_FULL_RELOAD_ONLY,
-    STAGE_OBJECT_MODULES, STAGES, stage_resume_hint,
+    FILTER_CRITERIA_REMOVE_ORDER, FILTER_CRITERIA_REPEAT_HINT, FILTER_CRITERIA_TABLES,
+    FOREIGN_STAGE_TABLES, STAGE_EXCHANGE_PLANS, STAGE_FILTER_CRITERIA, STAGE_FULL_RELOAD_ONLY,
+    STAGE_OBJECT_MODULES, STAGES, filter_criteria_defaults, stage_resume_hint,
 )
 from configuration_module_slots import resolve_dump_dir  # noqa: E402
 from external_db import transaction  # noqa: E402
@@ -2141,7 +2145,38 @@ def check_contract():
     outside = [table for table in FILTER_CRITERIA_TABLES
                if table not in FOREIGN_STAGE_TABLES]
     check(f"круг снятия стадии назван закрытым: {names(list(FILTER_CRITERIA_TABLES))} входят в "
-          "`FOREIGN_STAGE_TABLES`", not outside, f"вне круга: {names(outside)}")
+          f"`FOREIGN_STAGE_TABLES`", not outside, f"вне круга: {names(outside)}")
+    # ── форма нулевого ответа: перечень чисел совпадает с перечнем ответа прогона ─────────
+    # Позиция, названная прогоном П8 (02.11.2026): нулевой словарь контракта засеивал словари
+    # пар `removed_by_table`/`written_by_table` двумя таблицами вида, тогда как ответ загрузчика
+    # заполняет их пятью. Состоянием это не было (неперечисленные ключи читаются нулями — C1),
+    # но форма payload'а пропущенной стадии отличалась от формы успешного ответа. Разведение
+    # держится двумя разными перечнями: `tables` — круг версионности (две таблицы вида),
+    # словари пар — круг снятия (пять), потому что детей снимает и пишет эта же стадия.
+    zero = filter_criteria_defaults()
+    seeded_written = list(zero.get("written_by_table") or {})
+    seeded_removed = list(zero.get("removed_by_table") or {})
+    check("нулевой ответ называет те же таблицы и в том же порядке, что и ответ прогона: "
+          "словари пар засеяны кругом снятия, а не кругом версионности",
+          seeded_written == list(FILTER_CRITERIA_REMOVE_ORDER)
+          and seeded_removed == list(FILTER_CRITERIA_REMOVE_ORDER)
+          and list(FILTER_CRITERIA_REMOVE_ORDER) == list(LAYER_REMOVE_ORDER),
+          f"written: {names(seeded_written)}; removed: {names(seeded_removed)}; "
+          f"слой: {names(list(LAYER_REMOVE_ORDER))}")
+    check("ключ `tables` остаётся кругом версионности — двумя таблицами вида (что версионируется "
+          "и по каким таблицам ответ даёт числа — разные утверждения)",
+          list(zero.get("tables") or []) == list(FILTER_CRITERIA_TABLES),
+          names(list(zero.get("tables") or [])))
+    check("литералы круга снятия в контракте совпадают с константами таблиц слоя "
+          "(разойдутся — проверка назовёт имена, а не молча сравнит два разных круга)",
+          tuple(FILTER_CRITERIA_REMOVE_ORDER) == (
+              LAYER_FORM_EXT_TABLE, LAYER_FORMS_TABLE, LAYER_COMMANDS_TABLE,
+              CONTENT_TABLE_NAME, TABLE_NAME),
+          names(list(FILTER_CRITERIA_REMOVE_ORDER)))
+    wider = sorted(set(FILTER_CRITERIA_REMOVE_ORDER) - set(FILTER_CRITERIA_TABLES))
+    check("разность круга снятия и круга версионности — ровно общие таблицы детей "
+          "(`form_ext`, `forms`, `commands`), других таблиц в круге стадии нет",
+          wider == sorted(SHARED_CHILD_TABLES), names(wider))
     hint = stage_resume_hint(STAGE_FILTER_CRITERIA)
     check("подсказка продолжения стадии названа и совпадает с контрактом",
           hint == FILTER_CRITERIA_REPEAT_HINT and bool(str(hint).strip()), _brief(hint))
