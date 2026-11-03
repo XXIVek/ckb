@@ -238,6 +238,28 @@ OBJECT_VERSIONED_TABLES = (
 # у вида нет (замер 1.2 плана: каталогов содержимого и вложенных записей индекса состава
 # во всех четырёх выгрузках ноль), поэтому круг стадии S4h не расширяется общими таблицами
 # `forms`/`form_ext`/`commands` — в отличие от V51 и V52.
+# Узел V54 (03.11.2026, позиция 2.9 нормативного списка — регламентные задания,
+# `scheduled_jobs`, миграция `migrate_v54_scheduled_jobs.sql`) добавляет в круг ОДНУ
+# таблицу. Ключ цепочки — (configuration_uuid, object_name), как у V48…V53: имя вида
+# уникально в конфигурации, а uuid вида повторяется между конфигурациями — замер
+# `_v54_m1_probe.py` (раздел 1.3 плана docs/CONFIGURATION_SCHEDULED_JOBS_PLAN.md) даёт 134
+# общих uuid и 134 общих имени у BGU2 и BP3; 346 строк круга дают 212 различных uuid и 212
+# различных имени — граница конфигурации в ключе обязательна. Имя вида уникально и внутри
+# выгрузки (346 файлов, 346 различных имён — замер 1.2), но цепь всё равно ведётся по
+# имени вместе с uuid конфигурации: тот же ключ читают витрины остальных видов.
+# `scheduled_job_schedules` в круг НЕ вносится осознанно и это названо, а не обойено:
+# своей цепи ревизий у записей расписания нет (Q2, вариант A по прецедентам
+# `event_subscription_sources` V53, `filter_criterion_content` V52 и
+# `common_attribute_targets` V50) — их ключ начинается с `scheduled_job_id`, то есть со
+# ссылки на конкретную ревизию строки вида; запись в этом реестре означала бы цепь, которой
+# у таблицы нет. Безцепочечная таблица названа исключением
+# `CONFIGURATION_UNVERSIONED_TABLES` (src/external_table_writer.py), а её витрина
+# `v_current_scheduled_job_schedules` строится связкой по этому id (прецедент V50/V52/V53 —
+# имя не порождается этим реестром). Таблиц детей у вида нет: форм, макетов и команд у него
+# нет ни файлами, ни строками индекса состава (замер 2.1 плана), поэтому круг стадии S4i не
+# расширяется общими таблицами `forms`/`form_ext`/`commands` — как у V53. Вложенная запись
+# расписания `<ent:DetailedDailySchedules>` отдельной таблицы не имеет (Q1, вариант A): она
+# держится колонкой `parent_id` той же таблицы и снимается тем же каскадом.
 CONFIGURATION_VERSIONED_TABLES = (
     "subsystems", "subsystem_content", "common_modules", "common_module_sources",
     "session_parameters",
@@ -246,6 +268,7 @@ CONFIGURATION_VERSIONED_TABLES = (
     "exchange_plans", "exchange_plan_content", "commands",
     "filter_criteria",
     "event_subscriptions",
+    "scheduled_jobs",
 )
 
 VERSIONED_TABLES = OBJECT_VERSIONED_TABLES + CONFIGURATION_VERSIONED_TABLES

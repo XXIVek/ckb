@@ -231,6 +231,30 @@ from configuration_event_subscriptions import (
     TARGET_FORMS as EVENT_SUBSCRIPTION_TARGET_FORMS,
     TARGET_RESOLVE_STATES as EVENT_SUBSCRIPTION_TARGET_STATES,
 )
+# Узел V54 (03.11.2026, позиция 2.9 списка): имена двух таблиц, каталог вида, метка
+# метаданных и закрытые словари состояний приходят импортом из разбора
+# (`src/configuration_scheduled_jobs.py`) — второго перечня таблиц или состояний в проекте нет
+# (тот же порядок, что V48…V53). Разбор ничего из контракта не импортирует, цикл
+# односторонний. Словарей значений свойств здесь нет намеренно: значения свойств вида CHECK
+# схемы не замыкаются (Q6, вариант A по прецеденту Q7 узла V50), поэтому контракт называет
+# состояния, а не допустимые значения.
+from configuration_scheduled_jobs import (
+    ATTRIBUTE_VALUE_STATES as SCHEDULE_ATTRIBUTE_VALUE_STATES,
+    CIRCLE_DISCREPANCIES as SCHEDULED_JOB_CIRCLE_DISCREPANCIES,
+    DIR_NAME as SCHEDULED_JOBS_DIR,
+    METHOD_DECLARED_STATES as SCHEDULED_JOB_METHOD_DECLARED_STATES,
+    METHOD_STATES as SCHEDULED_JOB_METHOD_STATES,
+    OBJECT_KIND_TAG as SCHEDULED_JOB_META_TAG,
+    OBSERVATION_KINDS as SCHEDULED_JOB_OBSERVATION_KINDS,
+    PROPERTIES_STATES as SCHEDULED_JOB_PROPERTIES_STATES,
+    SCHEDULE_FILE_STATES as SCHEDULED_JOB_FILE_STATES,
+    SCHEDULE_KINDS as SCHEDULE_RECORD_KINDS,
+    SCHEDULE_STATES as SCHEDULED_JOB_STATES,
+    SCHEDULES_TABLE_NAME as SCHEDULED_JOB_SCHEDULES_TABLE,
+    SET_STATES as SCHEDULE_SET_STATES,
+    TABLE_NAME as SCHEDULED_JOBS_TABLE,
+    XML_PROPERTY_NAMES as XML_PROPERTY_NAMES_OF_JOB,
+)
 from current_revision import CONFIGURATION_VERSIONED_TABLES
 
 # ── стадии конвейера: один перечень на контракт, карточку и проверку ───────────────
@@ -310,6 +334,23 @@ STAGE_FILTER_CRITERIA = "s4g_filter_criteria"
 # оправдана (замер 2.2: 25 100 записей блока `<Source>` на весь круг, максимум 789 в одном
 # файле) — отдельный вход дозагружает весь круг сразу.
 STAGE_EVENT_SUBSCRIPTIONS = "s4h_event_subscriptions"
+# Узел V54 (03.11.2026, позиция 2.9 нормативного списка): свойства регламентных заданий —
+# отдельная стадия по той же причине, что S4c (V48), S4d (V49), S4e (V50), S4f (V51), S4g
+# (V52) и S4h (V53): правило C3 требует своего ключа ответа `scheduled_jobs`, а разбивать
+# чужой ключ значило бы переименовывать контракт соседнего узла. Номер S4i, а не S5: S5
+# остаётся за планируемой стадией анализа. В `STAGES` ниже стадия вносится шагом П5 (позиция
+# 2.9 идёт сразу за 2.8, то есть между S4h и S4b — порядок нормативного списка держает
+# `STAGES`, а не порядок номеров): слой `load_scheduled_jobs`
+# (src/configuration_scheduled_jobs_loader.py) появляется шагом П4 этим же, а точка входа
+# `load_scheduled_jobs_tool` — шагом П5. Круг таблиц стадии (`SCHEDULED_JOBS_TABLES`) и его
+# включение в `FOREIGN_STAGE_TABLES` объявлены уже на П4: версионная таблица без объявленного
+# круга загрузки означала бы, что чужая стадия S4 её снимает (дефект, названный узлами
+# V49…V53). Групп запроса (`kinds`) у вида НЕТ — это решение, а не упущение (Q5, вариант A по
+# прецеденту Q8 узла V53 и Q10 узла V50): запись расписания существует только через id
+# строки вида (Q2, вариант A), а порога цены, при котором круг стоило бы резать, замер 1.1/2.2
+# не дал (346 файлов регистрации и 313 записей расписания на весь круг, максимум 3 записи в
+# одном файле) — отдельный вход дозагружает весь круг сразу.
+STAGE_SCHEDULED_JOBS = "s4i_scheduled_jobs"
 # Узел V47 (28.10.2026): тексты модулей объектов конфигурации. Номер S4b, а не S5:
 # S5 остаётся за планируемой стадией анализа (дополнение оператора 23.10.2026), которой
 # в `STAGES` нет. Стадия идёт сразу за S4 и является второй транзакцией загрузки (Q6,
@@ -494,6 +535,12 @@ STAGE_FULL_RELOAD_ONLY: Dict[str, bool] = {
     # значением по умолчанию в `build_stopped_stage`: стадия без ключа читается стадией без
     # отдельного входа, хотя продолжение у неё есть.
     STAGE_EVENT_SUBSCRIPTIONS: False,
+    # Узел V54 (позиция 2.9, шаг П4 — урок П8 узлов V51–V53): ключ и ветка
+    # `stage_resume_hint` вносятся ОДНИМ шагом. Слой `load_scheduled_jobs` появляется этим же
+    # шагом П4, точка входа группы `load_scheduled_jobs_tool` — шагом П5; отсутствие ключа
+    # маскировалось бы значением по умолчанию в `build_stopped_stage`: стадия без ключа
+    # читается стадией без отдельного входа, хотя продолжение у неё есть.
+    STAGE_SCHEDULED_JOBS: False,
     STAGE_OBJECT_MODULES: True,
 }
 
@@ -528,6 +575,14 @@ STAGE_INCOMPLETE_GROUPS: Dict[str, str] = {
     # машиночитаемого признака неполноты.
     STAGE_EVENT_SUBSCRIPTIONS: "свойства подписок на события (позиция 2.8 нормативного "
                                "списка и круг целей срабатывания блока <Source>)",
+    # Узел V54 (шаг П4): группа называется позицией нормативного списка и её содержимым — по
+    # образцу записей S4c…S4h. У регламентного задания нет форм, макетов, команд и модулей
+    # (замер 1.2 плана), но есть содержимое — `Ext/Schedule.xml` (303 файла из 346), поэтому
+    # группа названа и свойствами, и записями расписания: без записи остановка на S4i оставила
+    # бы ответ без машиночитаемого признака неполноты.
+    STAGE_SCHEDULED_JOBS: "свойства регламентных заданий (позиция 2.9 нормативного списка, "
+                          "её свойства и записи расписания <Schedule> и "
+                          "<DetailedDailySchedules> файла Ext/Schedule.xml)",
     STAGE_OBJECT_MODULES: "модули объектов конфигурации (группа C модели V38, Ext/)",
 }
 
@@ -585,6 +640,8 @@ def stage_resume_hint(stage_id: str) -> str:
     групп (узлы V45, V46), S4c — свой вход (шаг П5 того же узла), S4d — свой вход (шаг П5
     узла V49), S4e — свой вход (шаг П5 узла V50), S4f — свой вход `load_exchange_plans_tool`
     (шаг П5 узла V51), S4g — свой вход `load_filter_criteria_tool` (шаг П5 узла V52),
+    S4h — свой вход `load_event_subscriptions_tool` (шаг П5 узла V53), S4i — свой вход
+    `load_scheduled_jobs_tool` (шаг П5 узла V54),
     S4b — не имеет (решение Q4.1). Стадия без
     подсказки была бы ошибкой
     контракта, поэтому ответ по умолчанию — полная перезагрузка, а не пустая строка. Отсутствие
@@ -608,6 +665,8 @@ def stage_resume_hint(stage_id: str) -> str:
         return FILTER_CRITERIA_REPEAT_HINT
     if stage_id == STAGE_EVENT_SUBSCRIPTIONS:
         return EVENT_SUBSCRIPTIONS_REPEAT_HINT
+    if stage_id == STAGE_SCHEDULED_JOBS:
+        return SCHEDULED_JOBS_REPEAT_HINT
     if stage_id == STAGE_OBJECT_MODULES:
         return OBJECT_MODULES_RELOAD_HINT
     return "полная перезагрузка load_1c_catalog_tool(source_path=…, force=True)"
@@ -1264,6 +1323,121 @@ EVENT_SUBSCRIPTIONS_CIRCLE_BOUNDARY = (
     f"проверка П6, а не константная колонка)"
 )
 
+# ── контракт стадии S4i (узел V54, шаг П4, позиция 2.9 списка) ───────────────────────
+# Круг таблиц стадии и тексты контракта объявлены одним местом — по той же причине, что у
+# V48…V53: текст незакрытой части ссылается на раздел, где читается отказ стадии, а держать
+# два написания одного заголовка нельзя. Имена двух таблиц, каталог вида, метка метаданных и
+# словари состояний приходят импортом из разбора
+# (`src/configuration_scheduled_jobs.py`) — второго перечня таблиц или состояний в проекте нет.
+#
+# Дефект, который закрывает эта константа, — тот же, что называли узлы V49…V53: регистрация
+# `scheduled_jobs` в круге версионности (шаг П4, `CONFIGURATION_VERSIONED_TABLES`) молча
+# добавила бы её к кругу стадии S4, потому что `CHILD_TABLES` строится из
+# `CONFIGURATION_VERSIONED_TABLES` минус `FOREIGN_STAGE_TABLES`, а стадия S4 снимала и
+# анализировала бы чужие строки (замеры П0: 346 файлов регистрации и 303 файла расписания на
+# четыре выгрузки).
+#
+# Групп `kinds` нет, поэтому константа называет только круг стадии — без `*_TABLES_BY_KIND`,
+# которых у V51 восемь: запись расписания неотделима от строки вида (Q5, вариант A по
+# прецеденту Q8 узла V53), а порога цены, при котором круг стоило бы резать, замер не дал
+# (весь круг — 346 файла регистрации и 313 записей расписания, максимум 3 записи в одном
+# файле). Форм, макетов и команд у вида нет ни в одной выгрузке (замер 1.2), поэтому второго
+# перечня общих таблиц детей здесь нет — в отличие от V51 и V52.
+SCHEDULED_JOBS_TABLES: Tuple[str, ...] = (
+    SCHEDULED_JOBS_TABLE,
+    SCHEDULED_JOB_SCHEDULES_TABLE,
+)
+
+# Круг снятия и перечень чисел ответа — ДВЕ таблицы, и у этого узла они совпадают с кругом
+# версионности: детей у вида нет (замер 1.2), поэтому нулевой ответ обещает ровно те же два
+# ключа, что и ответ прогона (в отличие от V51/V52, где круг снятия шире).
+#
+# Порядок — порядок снятия, а не порядок версионности: `scheduled_job_schedules` первой,
+# потому что её FK `scheduled_job_schedules_scheduled_job_id_fkey` объявлен с
+# `ON DELETE CASCADE` и каскад по строке вида снял бы записи молча, без точного счётчика
+# (мера M7 узла V53); строки вида последними, потому что на числовые id последних опираются
+# строки расписания (Q2, вариант A). Тот же приём, что `REMOVE_ORDER` узлов V49…V53.
+SCHEDULED_JOBS_REMOVE_ORDER: Tuple[str, ...] = (
+    SCHEDULED_JOB_SCHEDULES_TABLE,
+    SCHEDULED_JOBS_TABLE,
+)
+
+SCHEDULED_JOBS_SECTION_HEADER = "СВОЙСТВА РЕГЛАМЕНТНЫХ ЗАДАНИЙ (узел V54, позиция 2.9)"
+
+# Расхождения ноги содержимого называются ТЕМИ ЖЕ ключами перечней, что даёт разбор
+# (`schedule_index_only`/`schedule_file_only`/`schedule_uuid_mismatch` — имена списков
+# `collect_scheduled_jobs`), и замыкаются этой константой одним местом: второго перечисления
+# имён в контракте и в стадии быть не должно (прецедент `*_CIRCLE_DISCREPANCIES` разбора,
+# которые сюда приходят импортом). Отличия от ноги вида два: имя состояния несёт вид ноги
+# (у вида состояния общие для круга, у содержимого — свои, потому что файл `Ext/Schedule.xml`
+# не является объектом метаданных и в перечень заголовка не входит), и сверка идёт ДВУМЯ
+# ногами, а не тремя (замера объявления вида у содержимого нет).
+SCHEDULED_JOB_CONTENT_DISCREPANCIES: Tuple[str, ...] = (
+    "schedule_index_only",
+    "schedule_file_only",
+    "schedule_uuid_mismatch",
+)
+
+# Что обязан сказать ответ о повторе стадии. Отдельная точка входа группы —
+# `load_scheduled_jobs_tool` (шаг П5 узла, внесена в реестр сервера этим же шагом —
+# `tools/check_mcp_tool_wiring.py` сторожит состав). П4 держит формулировку про слой
+# `load_scheduled_jobs`, потому что обещать инструмент, которого в реестре нет, — значит дать
+# обещание, которое сервер не выполняет (прецеденты V48…V53).
+SCHEDULED_JOBS_REPEAT_HINT = (
+    "Повторить стадию можно отдельным входом группы "
+    "load_scheduled_jobs_tool(source_path=…) без перезагрузки конфигурации "
+    "(узел V54, шаг П5) либо полной перезагрузкой "
+    "load_1c_catalog_tool(source_path=…, force=True)"
+)
+
+# Граница круга называется и при успехе: «строки записаны» не равно «о регламентных заданиях
+# сохранено всё». Формулировка держится замеров разделов 1–2 плана V54 и решений Q1…Q8: без
+# неё задание без расписания читали бы «записей потеряно», стражу `0001-01-01` — реальной
+# датой начала, а пустой элемент `<ent:WeekDays/>` — «ни одного дня недели». Текст следует
+# за константами круга, потому что ссылается на имена таблиц и каталога, импортированные из
+# разбора (прецеденты V48…V53).
+SCHEDULED_JOBS_CIRCLE_BOUNDARY = (
+    f"круг узла — файлы регистрации вида {SCHEDULED_JOB_META_TAG} из каталога "
+    f"{SCHEDULED_JOBS_DIR}/ (позиция 2.9 списка), подтверждённые записями индекса состава "
+    "того же вида и перечнем заголовка `configurations.scheduled_jobs` (ТРИ ноги, расхождения "
+    "`index_only`/`file_only`/`uuid_mismatch` называются ответом; нога содержимого "
+    "`ScheduledJob.<Имя>.Schedule` сверяется отдельно — её расхождения "
+    "`schedule_index_only`/`schedule_file_only`/`schedule_uuid_mismatch`); "
+    f"в `{SCHEDULED_JOBS_TABLE}` идут 10 свойств файла регистрации (замер 2: ровно один "
+    "набор тегов на всех 346 файлах четырёх выгрузок — MinCfg 2, KomMag 1, BGU2 157, "
+    "BP3 186), обработчик `CommonModule.<Модуль>.<Метод>` текстом и разложенным на модуль и "
+    "метод с состоянием разрешения по общим модулям текущей ревизии (Q3, вариант A: 344 "
+    "различные пары при 346 строках — внешнего ключа нет) и состоянием объявления метода "
+    "(Q8, вариант A: `text_unavailable` является границей базы, а не свойством выгрузки), а "
+    f"также состояние содержимого с его счётчиком и состоянием двух ног; в "
+    f"`{SCHEDULED_JOB_SCHEDULES_TABLE}` — строки расписания (313 записи на четыре выгрузки: "
+    "MinCfg 5, KomMag 1, BGU2 143, BP3 164; корневая `<Schedule>` 303 и вложенная "
+    "`<ent:DetailedDailySchedules>` 10 в шести файлах, глубина ровно 2 — M6), где 12 "
+    "типизированных атрибутов держат значения колонками `date`/`time`/`integer`, а "
+    "значения-стражи платформенных типов `0001-01-01` и `00:00:00` в эти колонки НЕ "
+    "пишутся: они называются состоянием `sentinel` (замер 2.2: sentinel 1441, zero 1449, "
+    "set 866 — Q4, вариант A), и два набора целых `WeekDays` (1..7) и `Months` (1..12), "
+    "пустой элемент которых означает «все дни/все месяцы» и является состоянием "
+    "`empty_element_all`, а не пустым перечнем (по 23 таких элемента на каждый из двух "
+    "наборов: 13 корневых и 10 вложенных записей — M5). Строка расписания "
+    "версионируется НЕ своей цепью (Q2, вариант A): ключ начинается с `scheduled_job_id` — "
+    "числового id конкретной ревизии строки вида, текущность читается витриной связкой по "
+    "этому id, а каскад `scheduled_job_schedules_scheduled_job_id_fkey` снимает её вместе с "
+    "ревизией; вложенная запись отдельной таблицы не имеет (Q1, вариант A) — её родитель "
+    "адресуется колонкой `parent_id` той же таблицы, а композитная ссылка "
+    "`scheduled_job_schedules_parent_same_job` запрещает родителем запись другого задания. У "
+    "43 заданий (BGU2 19, BP3 24) расписания нет ни файлом, ни индексом — это состояние "
+    "`absent` колонки `schedule_state`, а не ноль записей (M4). Форм, макетов, команд, "
+    "модулей и каталога справки у вида НЕТ ни в одной выгрузке (замер 1.2), поэтому колонок "
+    "`children_state`/`form_names`/`command_uuids` в схеме нет осознанно, а блок "
+    "`<ChildObjects>` пуст во всех 346 файлах — его непустая форма называется наблюдением "
+    "`child_objects_block`. Элемент `DayTimes` корпусом не давался ни разу (313/313 "
+    "`absent`), колонки под него нет, а его появление называется наблюдением "
+    "`day_times_present` (граница раздела 8 плана). Тексты модулей вид не читает: у него их "
+    "нет, а метод обработчика является ссылкой на общий модуль, чьи тексты пишут узлы V46/V47; "
+    "определённых типов (`DefinedTypes`) в выгрузке нет (замер 2.4.4), узла для них нет"
+)
+
 # Что из содержимого дочерних объектов стадия S4 НЕ загружает — определение перенесено
 # в это место узлом V50 (шаг П8): текст ссылается на заголовок раздела S4e, объявленного
 # рядом с кругом таблиц вида, поэтому заголовок обязан идти раньше текста (прецедент
@@ -1315,9 +1489,14 @@ CHILD_NOT_IMPLEMENTED = (
 # Узел V52 (шаг П4) добавляет круг стадии S4g: без этой строки `CHILD_TABLES` — круг стадии
 # S4 — включил бы `filter_criteria`, и стадия S4 снимала и анализировала бы чужие строки
 # (тот же дефект, что закрывали записи V48, V49, V50, V51).
+# Узел V54 (шаг П4) добавляет круг стадии S4i тем же порядком и раньше, чем стадия входит в
+# `STAGES` (шаг П5): таблица уже зарегистрирована в круге версионности
+# (`CONFIGURATION_VERSIONED_TABLES`, `src/current_revision.py`), и без этой строки стадия S4
+# снимала и анализировала бы 346 строк чужого вида и 313 записей его расписания (замеры П0).
 FOREIGN_STAGE_TABLES: Tuple[str, ...] = (
     SESSION_PARAMETER_TABLES + ROLE_TABLES + COMMON_ATTRIBUTES_TABLES
     + EXCHANGE_PLAN_TABLES + FILTER_CRITERIA_TABLES + EVENT_SUBSCRIPTIONS_TABLES
+    + SCHEDULED_JOBS_TABLES
 )
 CHILD_TABLES: Tuple[str, ...] = tuple(
     table for table in CONFIGURATION_VERSIONED_TABLES
@@ -3567,4 +3746,394 @@ def _append_event_subscriptions_detail(lines: List[str], result: Dict[str, Any],
         lines.append(f"{indent}⚠️ {warning}")
     lines.append(f"{indent}Граница: {EVENT_SUBSCRIPTIONS_CIRCLE_BOUNDARY}")
     return lines
+
+
+# ── контракт стадии S4i (узел V54, шаг П4) ────────────────────────────────────────────
+
+
+def scheduled_jobs_defaults() -> Dict[str, Any]:
+    """Закрытый контракт стадии S4i с нулями (C1, C2, C3; узел V54, шаг П4).
+
+    Словарь плоский — тот же, что возвращает слой `load_scheduled_jobs`; конвейер
+    вкладывает его в свой ключ `scheduled_jobs` без переименования (C3). Групп `kinds` в
+    контракте нет — это решение Q5 (вариант A), а не пропуск: запись расписания существует
+    только через id строки вида (Q2, вариант A), поэтому состояния «записать задание без
+    расписания» в модели нет, а порога цены, при котором круг стоило бы резать, замер 1.1/2.2
+    не дал (346 файлов регистрации и 313 записей расписания на весь круг).
+
+    Отдельно обязаны быть названы (план, разделы 1–2, 5):
+
+    * числа по таблицам (`removed_by_table`/`written_by_table`) — по кругу снятия
+      (`SCHEDULED_JOBS_REMOVE_ORDER`), который у этого узла совпадает с кругом версионности:
+      детей у вида нет (замер 1.2), поэтому нулевой ответ обещает те же два ключа, что и
+      ответ прогона (в отличие от V51/V52, где круг снятия шире);
+    * замкнутые словари состояний по всем колонкам `STATE_VOCABULARIES` разбора, включая
+      нули: `absent` содержимого (43 задания без расписания — M4), `sentinel` атрибутов
+      (1441 стража — Q4), `empty_element_all` наборов (по 23 элемента на каждый — M5) и
+      `text_unavailable` объявления метода (граница базы, Q8) различимы состоянием, а не
+      нулём;
+    * `counts_by_property_presence` и `counts_by_value_form` — наличие тега и ФОРМА его
+      значения являются ответом разбора (замер 2: `Key` пустой 228 / числовая строка 25 /
+      текст 93, `Description` пустой 252 / текст 92 / числовая строка 2): без отдельных
+      счётчиков «свойства нет» читалось бы как «свойство пустое», а числовая строка — как
+      текст;
+    * `methods_total`/`methods_distinct`/`method_modules_distinct` — связь обработчика не
+      один-к-одному (344 различные пары модуль+метод при 346 строках — замер 2.1): это
+      основание отсутствия внешнего ключа (Q3), и числа держат ответ стадии, а не комментарий;
+    * расхождения обеих ног круга (`index_only`/`file_only`/`uuid_mismatch` ноги вида —
+      файл регистрации, индекс состава и перечень заголовка; `schedule_index_only`/
+      `schedule_file_only`/`schedule_uuid_mismatch` ноги содержимого) и
+      дубли имён внутри выгрузки (`duplicate_names`): четыре выгрузки дают нули, и нули — это
+      ответ, а не молчание (замер 1.3 даёт уникальность имён внутри выгрузки);
+    * `files_with_schedule`/`files_without_schedule` — деление 303/43 по состоянию содержимого
+      (M4): одно число без другого читалось бы как «расписаний не хватает».
+    """
+    return {
+        "status": STATUS_NOT_RUN,
+        "success": False,
+        "error": None,
+        "reason": None,
+        "stage": STAGE_SCHEDULED_JOBS,
+        "configuration_id": None,
+        "configuration_uuid": None,
+        "configuration_name": None,
+        "tables": list(SCHEDULED_JOBS_TABLES),
+        "directory": SCHEDULED_JOBS_DIR,
+        "files_found": 0,
+        "files_read": 0,
+        "files_failed": [],
+        "observations": [],
+        "counts_by_observation": {},
+        "rows_written": 0,
+        "scheduled_jobs_written": 0,
+        "schedule_records_written": 0,
+        "removed_previous": 0,
+        "removed_by_table": {table: 0 for table in SCHEDULED_JOBS_REMOVE_ORDER},
+        "written_by_table": {table: 0 for table in SCHEDULED_JOBS_REMOVE_ORDER},
+        "index_available": False,
+        "index_kind_records": 0,
+        "index_child_records": 0,
+        "index_only": [],
+        "file_only": [],
+        "uuid_mismatch": [],
+        "schedule_index_only": [],
+        "schedule_file_only": [],
+        "schedule_uuid_mismatch": [],
+        "index_child_unexpected": [],
+        "duplicate_names": [],
+        "counts_by_circle_discrepancy": {
+            state: 0 for state in SCHEDULED_JOB_CIRCLE_DISCREPANCIES},
+        "counts_by_content_discrepancy": {
+            state: 0 for state in SCHEDULED_JOB_CONTENT_DISCREPANCIES},
+        "counts_by_properties_state": {
+            state: 0 for state in SCHEDULED_JOB_PROPERTIES_STATES},
+        "counts_by_method_state": {state: 0 for state in SCHEDULED_JOB_METHOD_STATES},
+        "counts_by_method_declared_state": {
+            state: 0 for state in SCHEDULED_JOB_METHOD_DECLARED_STATES},
+        "counts_by_schedule_state": {state: 0 for state in SCHEDULED_JOB_STATES},
+        "counts_by_schedule_file_state": {
+            state: 0 for state in SCHEDULED_JOB_FILE_STATES},
+        "counts_by_property_presence": {name: 0 for name in XML_PROPERTY_NAMES_OF_JOB},
+        "counts_by_value_form": {name: {} for name in XML_PROPERTY_NAMES_OF_JOB},
+        "unknown_properties": {},
+        "methods_total": 0,
+        "methods_distinct": 0,
+        "method_modules_distinct": 0,
+        "methods_unresolved_total": 0,
+        "methods_unresolved": [],
+        "methods_not_declared_total": 0,
+        "methods_not_declared": [],
+        "common_modules_available": False,
+        "module_texts_available": False,
+        "schedules_total": 0,
+        "schedule_jobs_distinct": 0,
+        "root_records_total": 0,
+        "detailed_records_total": 0,
+        "files_with_schedule": 0,
+        "files_without_schedule": 0,
+        "files_with_detailed": 0,
+        "max_detailed_per_record": 0,
+        "max_depth_seen": 0,
+        "day_times_total": 0,
+        "counts_by_record_kind": {kind: 0 for kind in SCHEDULE_RECORD_KINDS},
+        "counts_by_attribute_state": {
+            state: 0 for state in SCHEDULE_ATTRIBUTE_VALUE_STATES},
+        "attribute_states_by_name": {},
+        "counts_by_week_days_state": {state: 0 for state in SCHEDULE_SET_STATES},
+        "counts_by_months_state": {state: 0 for state in SCHEDULE_SET_STATES},
+        "statistics_refreshed": 0,
+        "warnings": [],
+    }
+def format_scheduled_jobs_lines(result: Dict[str, Any], indent: str = "") -> List[str]:
+    """Текст стадии S4i по закрытому контракту `scheduled_jobs_defaults()` (C1, C3).
+
+    Формат один для двух контуров: раздела карточки `load_1c_catalog_tool` и ответа
+    отдельного входа `load_scheduled_jobs_tool` (шаг П5) — прецеденты
+    V45/V46/V48/V49/V50/V51/V52/V53. Отказ форматёр называет сам, вызывающий причину не
+    повторяет. Групп `kinds` у вида нет (решение Q5, вариант A), поэтому блока «группы круга
+    не запрашивались» здесь нет: он обещал бы раздельный вход дозагрузки, которого у стадии
+    нет (в отличие от V51). Блок детей тоже отсутствует осознанно — у регламентного задания
+    нет ни форм, ни макетов, ни команд, ни модулей (замер 1.2), и печатать по ним нули
+    значило бы утверждать то, чего вид не имеет. Граница круга печатается и при успехе:
+    «строки записаны» не равно «о регламентных заданиях сохранено всё». Неперечисленные ключи
+    читаются нулями (C1). Имя — `format_scheduled_jobs_lines`: форматёры стадий слоя
+    называются по одному образцу.
+    """
+    lines: List[str] = []
+    if not result:
+        return lines
+
+    if not result.get("success"):
+        reason = result.get("error") or result.get("reason") or "загрузчик не назвал причину"
+        prefix = ("Стадия не выполнена" if result.get("status") in (None, STATUS_NOT_RUN)
+                  else "Стадия не удалась")
+        lines.append(f"{indent}{prefix}: {reason}")
+        if result.get("files_failed"):
+            # Отказ разбора круга — тот же статус `error`, что и отказ записи (словарь
+            # статусов контракта замкнут: not_run/ok/skipped/error, C2), поэтому ветка
+            # различается признаком круга, а не новым статусом: перечисленные файлы-виновники
+            # есть только у остановки до записи.
+            lines.append(
+                f"{indent}Стадия остановлена ДО записи (приём V12/V46/V48/V49/V50/V51/V52"
+                f"/V53): половина круга читалась бы как полный состав вида; прежние строки "
+                f"не сняты — {SCHEDULED_JOBS_TABLE} и {SCHEDULED_JOB_SCHEDULES_TABLE} "
+                "содержат прежнее состояние")
+            for failure in (result.get("files_failed") or [])[:10]:
+                lines.append(f"{indent}  ⚠️ файл не разобран: "
+                             f"{failure.get('source_path')} — {failure.get('reason')}")
+        lines.append(f"{indent}{SCHEDULED_JOBS_REPEAT_HINT}")
+        for warning in result.get("warnings") or []:
+            lines.append(f"{indent}⚠️ {warning}")
+        return lines
+
+    written_by_table = result.get("written_by_table") or {}
+    removed_by_table = result.get("removed_by_table") or {}
+    lines.append(
+        f"{indent}Записано строк по таблицам: "
+        + ", ".join(f"{table}={int(written_by_table.get(table) or 0)}"
+                    for table in sorted(written_by_table))
+        + f"; всего {int(result.get('rows_written') or 0)} (заданий "
+          f"{int(result.get('scheduled_jobs_written') or 0)}, записей расписания "
+          f"{int(result.get('schedule_records_written') or 0)})"
+    )
+    lines.append(
+        f"{indent}Файлов регистрации вида: {int(result.get('files_found') or 0)} "
+        f"(разобрано {int(result.get('files_read') or 0)}, каталог "
+        f"{result.get('directory') or SCHEDULED_JOBS_DIR}/, записей индекса состава вида "
+        f"{int(result.get('index_kind_records') or 0)}, файлов содержимого "
+        f"Ext/Schedule.xml {int(result.get('index_child_records') or 0)})"
+    )
+    if int(result.get("removed_previous") or 0):
+        lines.append(
+            f"{indent}Снято прежних строк этой конфигурации: "
+            + ", ".join(f"{table}={int(removed_by_table.get(table) or 0)}"
+                        for table in sorted(removed_by_table))
+        )
+    return _append_scheduled_jobs_detail(lines, result, indent)
+
+
+def _append_scheduled_jobs_detail(lines: List[str], result: Dict[str, Any],
+                                 indent: str) -> List[str]:
+    """Второй блок текста стадии S4i: свойства вида и их формы, обработчик, содержимое
+    расписания, состояния атрибутов и наборов, ноги круга.
+
+    Разделение формата на две функции — только длина текста: форматёр обязан называть все
+    замкнутые словари состояний контракта (M4, M5), иначе `absent` содержимого (43 задания
+    без расписания), `sentinel` атрибутов (1441 стража) и `empty_element_all` наборов (13
+    записей) остались бы неразличимы, а нули счётчиков читались бы как «расписаний нет».
+    """
+    prop_counts = result.get("counts_by_properties_state") or {}
+    schedule_counts = result.get("counts_by_schedule_state") or {}
+    file_counts = result.get("counts_by_schedule_file_state") or {}
+    lines.append(
+        f"{indent}Свойства заданий: состояний — "
+        + ", ".join(f"{state}={int(prop_counts.get(state) or 0)}"
+                    for state in SCHEDULED_JOB_PROPERTIES_STATES)
+        + "; состояний содержимого — "
+        + ", ".join(f"{state}={int(schedule_counts.get(state) or 0)}"
+                    for state in SCHEDULED_JOB_STATES)
+        + "; состояний двух ног содержимого — "
+        + ", ".join(f"{state}={int(file_counts.get(state) or 0)}"
+                    for state in SCHEDULED_JOB_FILE_STATES)
+        + " — задание без файла `Ext/Schedule.xml` называется состоянием `absent` строки "
+          "вида, а не нулём записей расписания (M4: 43 задания из 346 — BGU2 19, BP3 24; "
+          "у тех же 43 запись содержимого отсутствует в индексе состава — `file_without_"
+          "index` даёт те же числа, замер 1.3)"
+    )
+
+    presence = result.get("counts_by_property_presence") or {}
+    value_forms = result.get("counts_by_value_form") or {}
+    lines.append(
+        f"{indent}Тегов свойств из 10 (замер 2: ровно один набор тегов на всех 346 файлах): "
+        + ", ".join(f"{name}={int(presence.get(name) or 0)}"
+                    for name in XML_PROPERTY_NAMES_OF_JOB)
+    )
+    for name in XML_PROPERTY_NAMES_OF_JOB:
+        forms = value_forms.get(name) or {}
+        if not forms:
+            continue
+        lines.append(
+            f"{indent}  формами значений {name}: "
+            + ", ".join(f"{form}={int(count)}" for form, count in sorted(forms.items()))
+        )
+    lines.append(
+        f"{indent}Форма значения является ответом разбора: `<Key/>` — пустой 228, "
+        "числовая строка 25, текст 93; `<Description/>` — пустой 252, текст 92, числовая "
+        "строка 2; `<Comment/>` — пустой 305, текст 41 (замер 2) — без счётчиков "
+        "`counts_by_value_form` «свойства нет» читалось бы как «свойство пустое», а числовая "
+        "строка описания — как текст"
+    )
+
+    method_counts = result.get("counts_by_method_state") or {}
+    declared_counts = result.get("counts_by_method_declared_state") or {}
+    lines.append(
+        f"{indent}Обработчики: состояний разрешения — "
+        + ", ".join(f"{state}={int(method_counts.get(state) or 0)}"
+                    for state in SCHEDULED_JOB_METHOD_STATES)
+        + "; состояний объявления метода — "
+        + ", ".join(f"{state}={int(declared_counts.get(state) or 0)}"
+                    for state in SCHEDULED_JOB_METHOD_DECLARED_STATES)
+        + f"; всего {int(result.get('methods_total') or 0)}, уникальных пар модуль+метод "
+          f"{int(result.get('methods_distinct') or 0)}, уникальных модулей "
+          f"{int(result.get('method_modules_distinct') or 0)}, неразрешённых "
+          f"{int(result.get('methods_unresolved_total') or 0)} (перечислено "
+          f"{len(result.get('methods_unresolved') or [])}), необъявленных методов "
+          f"{int(result.get('methods_not_declared_total') or 0)} (перечислено "
+          f"{len(result.get('methods_not_declared') or [])}) — связь не один-к-одному (344 "
+          "различные пары при 346 строках, замер 2.1), поэтому внешнего ключа на общие модули "
+          "нет (Q3, вариант A); разрешение идёт по витрине общих модулей текущей ревизии"
+    )
+    if not result.get("common_modules_available"):
+        lines.append(
+            f"{indent}Перечень общих модулей текущей ревизии не прочитан — состояние "
+            "`unresolved` обработчика при этом означает «нечем разрешить», а не «модуля нет в "
+            "конфигурации» (правило C2)"
+        )
+    if not result.get("module_texts_available"):
+        lines.append(
+            f"{indent}Тексты общих модулей в базе не загружены — состояние объявления метода "
+            "`text_unavailable` означает «нет чем проверить объявление», а не «метода нет» "
+            "(Q8, вариант A: узел V46 тексты модулей не читает)"
+        )
+
+
+    kind_counts = result.get("counts_by_record_kind") or {}
+    attr_counts = result.get("counts_by_attribute_state") or {}
+    week_counts = result.get("counts_by_week_days_state") or {}
+    month_counts = result.get("counts_by_months_state") or {}
+    lines.append(
+        f"{indent}Расписание: записей {int(result.get('schedules_total') or 0)} у "
+          f"{int(result.get('schedule_jobs_distinct') or 0)} заданий, kinds — "
+        + ", ".join(f"{kind}={int(kind_counts.get(kind) or 0)}"
+                    for kind in SCHEDULE_RECORD_KINDS)
+        + f"; файлов с расписанием {int(result.get('files_with_schedule') or 0)}, без него "
+          f"{int(result.get('files_without_schedule') or 0)}, с вложенной записью "
+          f"{int(result.get('files_with_detailed') or 0)}, максимум вложенных в одной записи "
+          f"{int(result.get('max_detailed_per_record') or 0)}, наибольшая глубина "
+          f"{int(result.get('max_depth_seen') or 0)} (замер 2.5 даёт ровно 2 — M6), "
+          f"`DayTimes` встречалось {int(result.get('day_times_total') or 0)} раз — колонки "
+          "под него нет, а его появление называется наблюдением `day_times_present` (граница "
+          "раздела 8 плана)"
+    )
+    lines.append(
+        f"{indent}Атрибуты записи расписания (12 типизированных): состояний значений — "
+        + ", ".join(f"{state}={int(attr_counts.get(state) or 0)}"
+                    for state in SCHEDULE_ATTRIBUTE_VALUE_STATES)
+        + " — страж `0001-01-01` и страж `00:00:00` в колонки `date`/`time` не пишутся: "
+          "значение называется состоянием `sentinel` (замер 2.2: sentinel 1441, zero 1449, "
+          "set 866 — Q4, вариант A), а `zero` является настоящим нулевым значением атрибута "
+          "и отличается от стража состоянием"
+    )
+    by_name = result.get("attribute_states_by_name") or {}
+    for name in sorted(by_name):
+        states = by_name.get(name) or {}
+        lines.append(
+            f"{indent}  {name}: "
+            + ", ".join(f"{state}={int(count)}" for state, count in sorted(states.items()))
+        )
+    lines.append(
+        f"{indent}Наборы целых: дней недели — "
+        + ", ".join(f"{state}={int(week_counts.get(state) or 0)}"
+                    for state in SCHEDULE_SET_STATES)
+        + "; месяцев — "
+        + ", ".join(f"{state}={int(month_counts.get(state) or 0)}"
+                    for state in SCHEDULE_SET_STATES)
+        + " — пустой элемент `<ent:WeekDays/>` означает «все дни недели» и является "
+          "состоянием `empty_element_all` с пустым перечнем значений, а не «ни одного дня» "
+          "(по 23 таких элемента на каждый набор: 13 корневых и 10 вложенных записей — M5); "
+          "значение вне диапазонов 1..7 и 1..12 прерывает разбор файла с виновником, потому "
+          "что колонка его не примет (CHECK диапазона), а текст, не разбираемый целыми, "
+          "остаётся состоянием `non_numeric` с NULL в колонке"
+    )
+
+
+    if not result.get("index_available"):
+        lines.append(
+            f"{indent}Индекс состава не читается — сверка файлов регистрации и файлов "
+            "содержимого с перечнем невозможна, и «объекта нет в перечне» от «перечень этой "
+            "конфигурации не загружен» этим не отличить"
+        )
+    mismatch_counts = result.get("counts_by_circle_discrepancy") or {}
+    content_counts = result.get("counts_by_content_discrepancy") or {}
+    lines.append(
+        f"{indent}Расхождения ноги вида (файл регистрации ↔ индекс состава ↔ перечень "
+        "заголовка): "
+        + ", ".join(f"{state}={int(mismatch_counts.get(state) or 0)}"
+                    for state in SCHEDULED_JOB_CIRCLE_DISCREPANCIES)
+        + f" (перечислено `index_only` {len(result.get('index_only') or [])}, `file_only` "
+          f"{len(result.get('file_only') or [])}, `uuid_mismatch` "
+          f"{len(result.get('uuid_mismatch') or [])}); записей индекса вне круга вида "
+          f"{len(result.get('index_child_unexpected') or [])}; дублей имён внутри выгрузки "
+          f"{len(result.get('duplicate_names') or [])}"
+    )
+    lines.append(
+        f"{indent}Расхождения ноги содержимого (файл Ext/Schedule.xml ↔ запись индекса "
+        "состава `ScheduledJob.<Имя>.Schedule`): "
+        + ", ".join(f"{state}={int(content_counts.get(state) or 0)}"
+                    for state in SCHEDULED_JOB_CONTENT_DISCREPANCIES)
+        + f" (перечислено `schedule_index_only` "
+          f"{len(result.get('schedule_index_only') or [])}, `schedule_file_only` "
+          f"{len(result.get('schedule_file_only') or [])}, `schedule_uuid_mismatch` "
+          f"{len(result.get('schedule_uuid_mismatch') or [])}) — 43 задания дают "
+          "`schedule_file_only` одновременно с состоянием содержимого `absent`: файл "
+          "расписания есть, записи в индексе состава нет (замер 1.3), и это называется "
+          "обеими ногами, а не одной; нули остальных пар являются ответом, а не "
+          "подразумеванием (замер 1.3 даёт уникальность имён внутри каждой выгрузки)"
+    )
+
+    unknown = result.get("unknown_properties") or {}
+    if unknown:
+        lines.append(
+            f"{indent}Неизвестные теги свойств вида: "
+            + ", ".join(f"{name}={int(count)}"
+                        for name, count in sorted(unknown.items()))
+            + " — незнакомый тег остаётся записанным с состоянием `unknown_tag`, а не "
+              "отказом записи (Q7, вариант A по прецеденту Q7 узла V50); корпус таких тегов "
+              "не давал ни разу (замер 2)"
+        )
+    obs_counts = result.get("counts_by_observation") or {}
+    if obs_counts or result.get("observations"):
+        lines.append(
+            f"{indent}Наблюдения круга: "
+            + ", ".join(f"{kind}={count}" for kind, count in sorted(obs_counts.items()))
+            + "; всего "
+            + ", ".join(str(kind) for kind, _ in (result.get("observations") or [])[:20])
+            + " — каталог или файл вне перечня вида (например `Forms/` или файл модуля) "
+              "является наблюдением, а не строкой круга: у вида таких каталогов в четырёх "
+              "выгрузках нет (замер 1.2), поэтому колонок под них в схеме нет, и молчать о "
+              "них нельзя (M2)"
+        )
+
+    refreshed = int(result.get("statistics_refreshed") or 0)
+    if refreshed:
+        lines.append(
+            f"{indent}Статистика таблиц {', '.join(SCHEDULED_JOBS_TABLES)} пересобрана "
+            f"(ANALYZE): {refreshed} — без неё читатели витрин текущего состояния платят "
+            "минутами (мера V46)"
+        )
+    for warning in result.get("warnings") or []:
+        lines.append(f"{indent}⚠️ {warning}")
+    lines.append(f"{indent}Граница: {SCHEDULED_JOBS_CIRCLE_BOUNDARY}")
+    return lines
+
 

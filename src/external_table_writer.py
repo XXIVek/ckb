@@ -28,6 +28,19 @@ psycopg2 (параметры запроса), поэтому экраниров�
                  тот же контракт пустоты, что у text_array_nullable. Параметру нужен явный
                  каст (`PARAM_CASTS`): psycopg2 отдаёт список Python как text[], а PostgreSQL
                  text[] к uuid[] неявно не приводит;
+   int_array_nullable - INTEGER[] либо NULL (наборы дней недели и месяцев записи расписания,
+                 узел V54): тот же контракт пустоты. Пустой элемент `<ent:WeekDays/>` означает
+                 «все дни/все месяцы» и является состоянием `empty_element_all`, а не пустым
+                 перечнем, поэтому `'{}'::integer[]` стёр бы границу между «все» и «ни одного»;
+                 порядок значений писатель не меняет (приём `ordinal` V50…V53). Значение вне
+                 целого отклоняется, а не отбрасывается: CHECK диапазона назвал бы потерянное
+                 значение позже и невнятно;
+   date         - DATE (колонки `begin_date`/`end_date` записи расписания, узел V54): принимает
+                 `datetime.date` (его даёт `parse_date_value` разбора) либо строку ГГГГ-ММ-ДД;
+                 пусто -> NULL. Значение-стражу `0001-01-01` разбор в это значение не кладёт —
+                 она называется состоянием `sentinel` (Q4, вариант A);
+   time         - TIME (колонки `*_time` записи расписания, узел V54): то же, формат ЧЧ:ММ:СС,
+                 стража `00:00:00` в значение не кладётся;
   int          - целое (размеры, счётчики, идентификаторы родителя); пусто -> NULL;
   timestamp    - метка времени строкой 'YYYY-MM-DD HH:MM:SS' (origin_recorded_at, узел V31);
                  пусто -> NULL; PostgreSQL приводит параметр без типа к колонке сам;
@@ -60,6 +73,7 @@ M8) этих колонок не объявляют, и `versioned()` для н�
 docs/CONFIGURATION_OBJECT_PROPERTIES_PLAN.md (раздел 4 модель, раздел 6 шаги П3/П4).
 
 """
+import datetime
 import json
 
 from psycopg2.extras import Json, execute_values
@@ -109,6 +123,14 @@ from configuration_filter_criteria import (
 from configuration_event_subscriptions import (
     SOURCES_TABLE_NAME as EVENT_SUBSCRIPTION_SOURCES_TABLE,
     TABLE_NAME as EVENT_SUBSCRIPTIONS_TABLE,
+)
+# Узел V54 (регламентное задание, шаг П4, 03.11.2026): имена двух таблиц вида задаёт разбор
+# (`src/configuration_scheduled_jobs.py`), а не писатель — тот же порядок, что у V51–V53.
+# Второго перечня таблиц в проекте нет: проверка узла сверяет с живой схемой эти имена.
+# Цикла импортов нет: разбор вида не импортирует писателей.
+from configuration_scheduled_jobs import (
+    SCHEDULES_TABLE_NAME as SCHEDULED_JOB_SCHEDULES_TABLE,
+    TABLE_NAME as SCHEDULED_JOBS_TABLE,
 )
 
 # Ревизионные колонки в спецификациях версионированных писателей (M1). Порядок -
@@ -175,7 +197,14 @@ COLUMN_COPY_PREFIX = "copy:"
 # словарь один раз у базового писателя: тип — свойство вида значения, а не конкретной таблицы,
 # поэтому второй перечень таких кастов по таблицам появился бы только ради того, чтобы
 # разойтись с первым.
-PARAM_CASTS: dict = {"uuid_array_nullable": "::uuid[]"}
+PARAM_CASTS: dict = {"uuid_array_nullable": "::uuid[]",
+                     # Узел V54 (Q1, вариант A): наборы `week_days`/`months` записи расписания
+                     # — колонки INTEGER[]. Пустой перечень остаётся NULL («все дни» — это
+                     # состояние `empty_element_all`, а не пустой массив), а непустой psycopg2
+                     # отдаёт как `ARRAY[...]`; явный каст держится у параметра по той же
+                     # причине, что и у `uuid_array_nullable`: тип задаёт значение, а не
+                     # имя колонки.
+                     "int_array_nullable": "::integer[]"}
 
 
 
@@ -259,6 +288,50 @@ class TableRowWriter:
                 return float(value)
             except (TypeError, ValueError):
                 return None
+        if kind == "date":
+            # Узел V54 (Q4, вариант A): колонка `date` таблицы `scheduled_job_schedules`.
+            # Значение-стражу `0001-01-01` разбор (`parse_attribute_value`) в это значение не
+            # кладёт — она называется состоянием `sentinel`: CHECK
+            # `scheduled_job_schedules_datetime_states_match_values` требует, чтобы `set` держал
+            # значение, а `sentinel`/`absent` — не держали. Значение вида, которого разбор не
+            # даёт, писатель отклоняет, а не превращает в NULL: потерянная дата при состоянии
+            # `set` была бы строкой, которая врёт о файле, и отклонил её уже CHECK схемы
+            # невнятной ошибкой (тот же порядок, что отказ разбора, а не тихий NULL).
+            if value is None or value == "":
+                return None
+            if isinstance(value, datetime.datetime):
+                return value.date()
+            if isinstance(value, datetime.date):
+                return value
+            text = str(value).strip()
+            if not text:
+                return None
+            try:
+                return datetime.datetime.strptime(text, "%Y-%m-%d").date()
+            except ValueError:
+                raise ValueError(
+                    f"колонка вида `date` не принимает значение {value!r}: ожидался "
+                    "datetime.date либо строка ГГГГ-ММ-ДД (узел V54, Q4)")
+        if kind == "time":
+            # Узел V54: колонка `time` (ЧЧ:ММ:СС — иного формата корпус не давал, замер 2.2).
+            # Стража `00:00:00` в значение не кладётся по той же причине, что стража даты:
+            # она является состоянием `sentinel`, а нулевое время как фактическое значение
+            # выразить этой колонкой нельзя (словарь состояний `zero` для дат и времени
+            # отсутствует осознанно — замер `_v54_q4_range_probe.py`).
+            if value is None or value == "":
+                return None
+            if isinstance(value, datetime.time):
+                return value
+            text = str(value).strip()
+            if not text:
+                return None
+            try:
+                parsed = datetime.datetime.strptime(text, "%H:%M:%S")
+            except ValueError:
+                raise ValueError(
+                    f"колонка вида `time` не принимает значение {value!r}: ожидался "
+                    "datetime.time либо строка ЧЧ:ММ:СС (узел V54, Q4)")
+            return parsed.time()
         if kind == "text_array":
             if not value:
                 return []
@@ -296,6 +369,31 @@ class TableRowWriter:
             else:
                 items = [str(item).strip() for item in value if str(item).strip()]
             return items or None
+        if kind == "int_array_nullable":
+            # Узел V54 (M5 плана docs/CONFIGURATION_SCHEDULED_JOBS_PLAN.md): наборы дней недели
+            # (1..7) и месяцев (1..12) записи расписания — колонки `INTEGER[]`. Пустое значение
+            # остаётся NULL по той же причине, что `text_array_nullable` V43 и
+            # `uuid_array_nullable` V51: пустой элемент `<ent:WeekDays/>` означает «все
+            # дни/все месяцы» и является состоянием `empty_element_all` (замер 2.2: 13+13
+            # записей), а не пустым перечнем, и `'{}'::integer[]` стёр бы границу между «все»
+            # и «ни одного». Порядок значений писатель не меняет — его задаёт файл (приём
+            # `ordinal` V50…V53); дубликаты снимает разбор, а не писатель.
+            # Значение, не разбираемое целым, отклоняется с виновником: CHECK
+            # `scheduled_job_schedules_week_days_range` отклонил бы его позже и без имени
+            # колонки-источника, а тихий NULL означал бы «набора нет» там, где набор был.
+            if value is None or value == "" or value == []:
+                return None
+            if isinstance(value, (str, bytes)):
+                raise ValueError(
+                    f"колонка вида `int_array_nullable` не принимает текст {value!r}: "
+                    "разбор даёт список целых (узел V54, M5)")
+            try:
+                numbers = [int(item) for item in value]
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"колонка вида `int_array_nullable` не принимает значение {value!r}: "
+                    f"{exc} (узел V54, M5)") from exc
+            return numbers or None
         if kind == "bytes":
             if value is None:
                 return None
@@ -2449,6 +2547,180 @@ class EventSubscriptionSourcesRowWriter(TableRowWriter):
 # ROOT_MODULE_WRITERS: ошибка выбора превращается в запись не в ту таблицу).
 # Узел V49 (роли): писатели группы свои, реестр — общий механизм
 # (правило rules:core-rules:functional:add-object-block, п. 6).
+# ─── узел V54 (регламентное задание, шаг П4, 03.11.2026, позиция 2.9) ──────────
+#
+# Две таблицы пары (Q1 плана docs/CONFIGURATION_SCHEDULED_JOBS_PLAN.md — решение
+# оператора, вариант A):
+#
+# * строка задания `scheduled_jobs` — версионируемая цепью `(configuration_uuid,
+#   object_name, revision_no)`. Граница конфигурации обязательна: 134 uuid и 134 имени
+#   задания стоят одновременно в BGU2 и BP3, а 346 строк круга дают 212 различных uuid и
+#   212 различных имени (замер `_v54_m1_probe.py`, M1);
+# * записи расписания `scheduled_job_schedules` — без своей цепи (Q2, вариант A): ключ
+#   начинается с числового `scheduled_job_id`, то есть со ссылки на КОНКРЕТНУЮ ревизию
+#   строки вида, а каскад `scheduled_job_schedules_scheduled_job_id_fkey` снимает их вместе
+#   с ревизией. Таблица названа исключением `CONFIGURATION_UNVERSIONED_TABLES` (прецеденты
+#   `role_rights` V49, `common_attribute_targets` V50, `filter_criterion_content` V52,
+#   `event_subscription_sources` V53), поэтому спецификация здесь WITHOUT
+#   `versioned_columns()`.
+#
+# Вложенность записей держится колонкой `parent_id` той же таблицы (Q1, вариант A):
+# отдельной таблицы для `<ent:DetailedDailySchedules>` нет, потому что она дублировала бы
+# те же двенадцать колонок ради десяти строк на корпус, а `jsonb`-массив внутри строки
+# расписания лишил бы вложенную запись собственного состояния разбора (M6). Композитная
+# ссылка `scheduled_job_schedules_parent_same_job` ведёт к паре `(id, scheduled_job_id)`,
+# поэтому родитель другой строки задания отклоняется схемой, а не разбором; две фазы
+# записи (сначала корневая запись, затем вложенные) держатся глубиной, замкнутой CHECK
+# `scheduled_job_schedules_depth_known` значениями 1..2 — глубины 3 корпус не давал
+# (замер 2.3), и разбор называет её отказом, а не значением в колонке.
+#
+# Имена колонок совпадают с полями контракта разбора
+# (`src/configuration_scheduled_jobs.py::read_registration_file`, `walk_schedule_record`)
+# намеренно — чтобы маппинг читался текстом, а не по памяти (приём V33, V48, V50–V53).
+# Диагностические ключи разбора `parent_kind`/`parent_ordinal` колонками не являются:
+# родителя связывает со строкой стадия, и связывает числовым id, а не именем.
+#
+# Колонки строки вида, смысл которых не выводится из имени:
+#
+#   * `description`/`job_key` — текст как в выгрузке: формы разные (пусто 252/строка 92/
+#     числовая строка 2 и пусто 228/`0`|`1` 25/строка 93 — замер 2), и типизировать их
+#     означало бы выбросить содержимое (прецедент `type_qualifiers` V48/V50/V52). Пустое
+#     значение отличается от отсутствующего состоянием `properties_state`, а не нулём;
+#   * `use_flag`/`predefined` — nullable по образцу флагов `common_modules` (V46): «тега
+#     нет» называется состоянием `properties_state`, а не подстановкой ложного значения;
+#     значение флага не утверждает правомочие задания (прецедент O1 узла V49);
+#   * `method_name`/`method_module`/`method_method`/`method_state` — обработчик текстом и
+#     разложенным (мера V53): вопрос «какие задания вызывает этот общий модуль» читается
+#     индексом `idx_scheduled_jobs_method_module` без разбора текста. Внешнего ключа на
+#     `common_modules` нет: значение не уникально (344 различные пары модуль+метод при 346
+#     строках — замер 2.1, Q3 вариант A по прецеденту Q2 узла V53);
+#   * `method_declared_state` — объявлен ли метод в тексте модуля (Q8, вариант A): текстов
+#     общих модулей в живой БД ноль (замер раздела 3 плана), поэтому `text_unavailable`
+#     является границей базы, а не свойством выгрузки;
+#   * `schedule_state`/`schedule_record_count`/`schedule_file_state`/`schedule_source_path`
+#     — содержимое вида и его две ноги: у 43 заданий расписания нет ни файлом, ни индексом,
+#     и состояние `absent` является состоянием круга, а не нулём (M4);
+#   * `full_name` совпадает с `object_name`: иерархии раскладки у вида нет (замер 1.2),
+#     колонка заведена для единой формы чтения детей конфигурации (прецедент V50);
+#   * `source_path` — путь относительно КОРНЯ выгрузки (`ScheduledJobs/<Имя>.xml`), а не
+#     каталога вида (поправка V46).
+
+
+class ScheduledJobsRowWriter(TableRowWriter):
+    """Строка регламентного задания конфигурации (таблица `scheduled_jobs`, узел V54,
+    позиция 2.9).
+
+    Обязательных колонок без значения у разбора нет: файл без `<Name>` нечем ключить, а
+    файл без атрибута `uuid` не является ссылкой на объект метаданных (правило R3) — оба
+    называются отказом разбора файла, а не NULL-колонкой. Писатель поэтому ничего не
+    подставляет: пустое значение здесь означало бы потерянный факт, а не состояние
+    выгрузки. `synonym` — `jsonb_nullable`, а не `jsonb_object`: «свойства в выгрузке нет»
+    и «свойство есть, но пустое» — разные состояния (тот же контракт, что V48, V50, V53).
+    """
+
+    TABLE = SCHEDULED_JOBS_TABLE
+    COLUMNS = versioned_columns({
+        "configuration_uuid": "uuid",
+        "object_uuid": "uuid",
+        "object_name": "text",
+        "full_name": "text",
+        "synonym": "jsonb_nullable",
+        "comment": "text",
+        "description": "text",
+        "job_key": "text",
+        "use_flag": "bool",
+        "predefined": "bool",
+        "restart_count_on_failure": "int",
+        "restart_interval_on_failure": "int",
+        "method_name": "text",
+        "method_module": "text",
+        "method_method": "text",
+        "method_state": "text",
+        "method_declared_state": "text",
+        "schedule_state": "text",
+        "schedule_record_count": "int",
+        "schedule_file_state": "text",
+        "schedule_source_path": "text",
+        "properties_state": "text",
+        "unknown_property_names": "text_array_nullable",
+        "source_path": "text",
+    })
+
+
+class ScheduledJobSchedulesRowWriter(TableRowWriter):
+    """Запись расписания регламентного задания (таблица `scheduled_job_schedules`, Q1).
+
+    Спецификация НЕ оборачивается в `versioned_columns()`: своей цепи ревизий у строки нет
+    (Q2, вариант A), её текущность читается витриной `v_current_scheduled_job_schedules`
+    связкой по `scheduled_job_id`, а снимается она каскадом вместе с ревизией вида.
+
+    Колонки, смысл которых не выводится из имени:
+
+      * `scheduled_job_id` и `parent_id` подставляет вызывающий слой (стадия П4) из id,
+        полученных `ScheduledJobsRowWriter.insert` и `insert` корневой записи: в контракте
+        разбора для первой связи служит `job_full_name`, для второй — пара
+        `parent_kind`/`parent_ordinal` внутри того же файла (uuid у записей расписания нет,
+        замер 2.2). Колонками строки вида эти ключи не становятся намеренно — иначе строка
+        могла бы ссылаться на имя вместо ревизии (прецеденты `attribute_full_name` V50,
+        `criterion_full_name` V52, `subscription_full_name` V53);
+      * `configuration_uuid` и `job_object_uuid` повторяют значения строки вида осознанно:
+        запрос «какие задания конфигурации работают в этот день недели» идёт по строкам
+        расписания, и без этих колонок он требовал бы связки с таблицей вида и с её
+        витриной на каждом шаге (тот же порядок, что перечисленные прецеденты);
+      * `kind`/`depth`/`ordinal` — форма вложенности является свойством выгрузки, а не
+        обещанием разбора (замер 2.3: одна корневая запись на файл, 0–2 вложенных, глубина
+        ровно 2). Позиция — идентичность записи: ни uuid, ни имени у неё нет;
+      * `file_path`/`root_tag` — обещание сохранения: по этим двум колонкам содержимое
+        собирается обратно (возражение строки группы F модели A–H «их нужно уметь собрать
+        обратно»);
+      * `attribute_states` — `jsonb_object`, а не `jsonb_nullable`: словарь состояний
+        обязателен на каждой строке и замкнут CHECK
+        `scheduled_job_schedules_attribute_states_closed` ровно теми же двенадцатью именами
+        атрибутов, что и словарь разбора;
+      * двенадцать типизированных колонок значений — `date`/`time`/`int`: значения-стражи
+        платформенных типов в них не пишутся, они называются состоянием `sentinel` и
+        воспроизводятся из него при сборке обратно (Q4, вариант A; прецедент O1 узла V49 —
+        значение не читается как возможность).
+
+    Размер страницы вставки назван (приём V33/V47/V51/V52/V53): 313 записей на четыре
+    выгрузки (BGU2 143, BP3 164 — замер 1.1), максимум 3 в одном файле; одна
+    `execute_values` на весь список держала бы весь SQL-текст в памяти и не давала бы
+    ничего наблюдать.
+    """
+
+    PAGE_SIZE = 200
+    TABLE = SCHEDULED_JOB_SCHEDULES_TABLE
+    COLUMNS = {
+        "scheduled_job_id": "int",
+        "configuration_uuid": "uuid",
+        "job_object_uuid": "uuid",
+        "job_full_name": "text",
+        "kind": "text",
+        "depth": "int",
+        "ordinal": "int",
+        "parent_id": "int",
+        "file_path": "text",
+        "root_tag": "text",
+        "begin_date": "date",
+        "begin_time": "time",
+        "completion_interval": "int",
+        "completion_time": "time",
+        "day_in_month": "int",
+        "days_repeat_period": "int",
+        "end_date": "date",
+        "end_time": "time",
+        "repeat_pause": "int",
+        "repeat_period_in_day": "int",
+        "week_day_in_month": "int",
+        "weeks_period": "int",
+        "attribute_states": "jsonb_object",
+        "week_days": "int_array_nullable",
+        "months": "int_array_nullable",
+        "week_days_state": "text",
+        "months_state": "text",
+    }
+
+
 CONFIGURATION_OBJECT_WRITERS = {
     "subsystems": SubsystemsRowWriter,
     "subsystem_content": SubsystemContentRowWriter,
@@ -2507,6 +2779,15 @@ CONFIGURATION_OBJECT_WRITERS = {
     # `CONFIGURATION_UNVERSIONED_TABLES` (Q4, вариант A).
     EVENT_SUBSCRIPTIONS_TABLE: EventSubscriptionsRowWriter,
     EVENT_SUBSCRIPTION_SOURCES_TABLE: EventSubscriptionSourcesRowWriter,
+    # Узел V54 (регламентное задание, шаг П4, 03.11.2026, позиция 2.9 нормативного
+    # списка): две таблицы вида — строка задания и записи его расписания (Q1, вариант A).
+    # Писателей общих таблиц детей в реестре нет: у вида их нет ни файлами, ни индексом
+    # (замер 2.1 плана), поэтому второй записи общей таблицы добавлять нечем. Строка
+    # расписания не имеет своей цепи ревизий и названа исключением
+    # `CONFIGURATION_UNVERSIONED_TABLES` (Q2, вариант A); вложенная запись держится
+    # колонкой `parent_id` той же таблицы, а не отдельной таблицей (Q1, вариант A).
+    SCHEDULED_JOBS_TABLE: ScheduledJobsRowWriter,
+    SCHEDULED_JOB_SCHEDULES_TABLE: ScheduledJobSchedulesRowWriter,
 }
 
 # Таблицы, чей писатель зарегистрирован общим реестром, но своей ЦЕПИ РЕВИЗИЙ у таблицы
@@ -2538,9 +2819,21 @@ CONFIGURATION_OBJECT_WRITERS = {
 # «текущие» строки об одной и той же цели). Каскад `ON DELETE CASCADE` остаётся средством
 # снятия строк источника вместе с ревизией вида, а текущность читается витриной
 # `v_current_event_subscription_sources` связкой по числовому id родителя.
+# Узел V54 добавляет в список `scheduled_job_schedules` по тому же основанию (Q2,
+# вариант A): ключ записи расписания начинается с `scheduled_job_id` — ссылки на конкретную
+# ревизию строки регламентного задания (замер 1.1 плана
+# docs/CONFIGURATION_SCHEDULED_JOBS_PLAN.md: 313 записей на круг при 346 строках вида —
+# при такой цене собственная цепь ревизий дала бы две «текущие» строки об одном и том же
+# расписании, а правка одной строки задания пересоздала бы все её расписания заново без
+# какого-либо изменения в них). Вложенная запись `<ent:DetailedDailySchedules>` держится
+# колонкой `parent_id` той же таблицы (Q1, вариант A) и снимается тем же каскадом.
+# Текущность читается витриной `v_current_scheduled_job_schedules` связкой по числовому id
+# родителя (прецеденты `v_current_role_rights`, `v_current_filter_criterion_content`,
+# `v_current_event_subscription_sources`).
 CONFIGURATION_UNVERSIONED_TABLES = ("role_rights", "common_attribute_targets",
                                     "filter_criterion_content",
-                                    "event_subscription_sources")
+                                    "event_subscription_sources",
+                                    "scheduled_job_schedules")
 
 
 class ConfigCrossReferenceRowWriter(TableRowWriter):
