@@ -17,10 +17,11 @@ r"""tools/check_v52_filter_criteria.py — узел V52: критерии отб
      `configurations.filter_criteria` и строками таблицы `filter_criteria`. Агрегатный COUNT
      индекса сверяется с построчным обходом (приём V48), множества имён сравниваются попарно
      с правилом снятия префикса вида (замер 1.1: нога заголовка хранит ГОЛЫЕ имена, индекс —
-     точные). Число объектов по выгрузкам — 1/1/7/6 (замер 1.1), всего 15.
-  2. ДЕТИ ВИДА И ПСЕВДО-ЗАПИСИ (замер 1.2). Дочерних строк индекса — 17, из них детьми
-     являются 3 (2 формы + 1 команда), а 14 — псевдо-записи (модули, пары `.Form`, `Help`);
-     правило пар формы узла V51 подтверждается и здесь: 2 строки `Form` ↔ 2 строки `.Form`.
+     точные). Число объектов по выгрузкам — 1/1/7/6 (замер 1.1), всего 15; переснято 03.11.2026
+      после пересбора фикстуры `MinCfg` (шаг П9 узла V54): 2/1/7/6, всего 16.
+  2. ДЕТИ ВИДА И ПСЕВДО-ЗАПИСИ (замер 1.2, переснят 03.11.2026). Дочерних строк индекса — 23, из
+     них детьми являются 5 (3 формы + 2 команды), а 18 — псевдо-записи (модули, пары `.Form`,
+     `Help`); правило пар формы узла V51 подтверждается и здесь: 3 строки `Form` ↔ 3 строки `.Form`.
      Видов детей, кроме `Form` и `Command`, круг не даёт ни одного — в отличие от плана
      обмена, где были реквизиты, табличные части и макеты.
   3. КЛЮЧ РАЗБОРА ↔ КОЛОНКИ СХЕМЫ. Множество ключей строки разбора и множество колонок
@@ -44,7 +45,7 @@ r"""tools/check_v52_filter_criteria.py — узел V52: критерии отб
      состава (`resolve_target`): состояние, `target_object_id` и `target_object_uuid` обязаны
      совпасть с сохранёнными. На корпусе неразрешимых целей нет (1 219 из 1 219 `exact`), и
      нули `prefix_only`/`unresolved` — проверяемое утверждение, а не предположение (Q3/Q4).
-  7. БЛОК `<Type>` ОБЕИМИ ВЕТКАМИ (Q6). Независимая мера файлов: 429 значений, из них 428 в
+  7. БЛОК `<Type>` ОБЕИМИ ВЕТКАМИ (Q6). Независимая мера файлов: 430 значений, из них 429 в
      контейнере `Type` и 1 в контейнере `TypeSet` (KomMag); классы, кратность и состояние
      строки обязаны совпасть с разбором и с колонками. Запись `types[].container` названа на
      каждой записи: без неё различие двух контейнеров пропало бы, а состояние строки осталось
@@ -57,10 +58,10 @@ r"""tools/check_v52_filter_criteria.py — узел V52: критерии отб
      (`xs:string` у MinCfg) индексом не разрешается вообще. Ключ `reason` разрешён у записей,
      объясняющих отсутствие цели, — `unknown_form`, определяемый тип (узла DefinedTypes нет) и
      ссылка на вид целиком; у остальных он называется лишним.
-  8. ССЫЛКИ НА ФОРМЫ (замер 2.3). `with_reference` — 3 поля на двух файлах (MinCfg обе,
-     KomMag только `DefaultForm`), остальные 27 названы `empty_value`; пара «значение ↔
-     состояние» согласована с CHECK схемы, а разрешённая ссылка обязана соответствовать
-     строке `Form` индекса состава того же объекта.
+  8. ССЫЛКИ НА ФОРМЫ (замер 2.3, переснят 03.11.2026). `with_reference` — 5 полей на трёх
+     файлах (MinCfg обе формы в каждом из двух файлов, KomMag только `DefaultForm`), остальные
+     27 названы `empty_value`; пара «значение ↔ состояние» согласована с CHECK схемы, а
+     разрешённая ссылка обязана соответствовать строке `Form` индекса состава того же объекта.
   9. СЛОВАРИ СОСТОЯНИЙ. Замкнутость словарей модуля сверяется с перечнями CHECK'ов живой
      схемы (прецедент `STATE_VOCABULARIES` V50/V51), распределение состояний в строках — с
      независимыми мерами файлов. `unknown_value`/`unknown_tag`/`unknown_form` среди строк вида
@@ -204,9 +205,9 @@ FOREIGN_TABLES = ("configurations", "configuration_objects", "session_parameters
                   "config_cross_references", "attributes", "tabular_sections", "templates")
 
 # Независимый словарь тегов `Properties` вида (замер 2.x плана: ровно 11 тегов в одном
-# порядке во всех 15 файлах). Проверка держит свой список, чтобы сверять его со словарём
-# модуля (`property_records()`), а не повторять его: расхождение в именах или порядке —
-# это потерянная позиция свойства, а не деталь реализации.
+# порядке во всех 16 файлах — пересъём 03.11.2026). Проверка держит свой список, чтобы
+# сверять его со словарём модуля (`property_records()`), а не повторять его: расхождение
+# в именах или порядке — это потерянная позиция свойства, а не деталь реализации.
 PROPERTY_NAMES = ("Name", "Synonym", "Comment", "Type", "UseStandardCommands", "Content",
                   "DefaultForm", "AuxiliaryForm", "ListPresentation",
                   "ExtendedListPresentation", "Explanation")
@@ -234,33 +235,36 @@ INDEX_CHILD_TYPES = ("Form", "Command", "CommandModule", "ManagerModule", "Help"
 #   rows_*  — строки таблиц узла, которые обязана дать загрузка этого круга;
 #   parse_* — состояния и счётчики, которые называет разбор (контур 9);
 #   прочие  — расхождения круга, которых на эталонных выгрузках нет (нули проверяются).
+# Числа `MinCfg` и итог корпуса пересняты 03.11.2026 (шаг П9 узла V54): фикстуру вида
+# пересобирали, и круг в `MinCfg` вырос с одного объекта до двух; числа KomMag, BGU2 и BP3
+# при этом не изменились ни на единицу — расхождение называет только `MinCfg`.
 PLAN_EXPECTATIONS = {
     "MinCfg": {
-        "raw_files": 1, "raw_bytes": 4257, "raw_prop_tags": 11, "raw_content_items": 0,
-        "raw_type_values": 1, "raw_type_container_Type": 1, "raw_type_container_TypeSet": 0,
-        "raw_string_qualifiers": 1, "raw_child_Form": 1, "raw_child_Command": 1,
-        "raw_form_desc": 1, "raw_form_ext_xml": 1, "raw_form_ext_bin": 0,
-        "raw_form_module": 0, "raw_form_help": 0, "raw_mgr_module": 1, "raw_cmd_module": 1,
+        "raw_files": 2, "raw_bytes": 8520, "raw_prop_tags": 22, "raw_content_items": 0,
+        "raw_type_values": 2, "raw_type_container_Type": 2, "raw_type_container_TypeSet": 0,
+        "raw_string_qualifiers": 2, "raw_child_Form": 2, "raw_child_Command": 2,
+        "raw_form_desc": 2, "raw_form_ext_xml": 2, "raw_form_ext_bin": 0,
+        "raw_form_module": 0, "raw_form_help": 0, "raw_mgr_module": 2, "raw_cmd_module": 2,
         "raw_target_type_Document": 0, "raw_targets_distinct": 0,
         "raw_help_resource_dirs": 0,
-        "idx_roots": 1, "idx_children": 5, "header_list": 1,
-        "idx_by_type": {"Form": 2, "Command": 1, "CommandModule": 1, "ManagerModule": 1,
-                        "Help": 0, "Attribute": 0, "TabularSection": 0, "Template": 0,
+        "idx_roots": 2, "idx_children": 11, "header_list": 2,
+        "idx_by_type": {"Form": 4, "Command": 2, "CommandModule": 2, "ManagerModule": 2,
+                        "Help": 1, "Attribute": 0, "TabularSection": 0, "Template": 0,
                         "ObjectModule": 0},
-        "rows_criteria": 1, "rows_content": 0, "rows_forms": 1, "rows_form_ext": 1,
-        "rows_commands": 1,
-        "parse_props_all_known": 1, "parse_children_with": 1, "parse_children_empty": 0,
-        "parse_content_with": 0, "parse_content_empty": 1,
-        "parse_type_parsed": 1, "parse_type_absent": 0, "parse_mult_single": 1,
+        "rows_criteria": 2, "rows_content": 0, "rows_forms": 2, "rows_form_ext": 2,
+        "rows_commands": 2,
+        "parse_props_all_known": 2, "parse_children_with": 2, "parse_children_empty": 0,
+        "parse_content_with": 0, "parse_content_empty": 2,
+        "parse_type_parsed": 2, "parse_type_absent": 0, "parse_mult_single": 2,
         "parse_mult_composite": 0, "parse_mult_absent": 0,
-        "parse_form_default_with": 1, "parse_form_default_empty": 0,
-        "parse_form_aux_with": 1, "parse_form_aux_empty": 0,
-        "parse_resolve_exact": 0, "parse_view_wide": 0, "parse_module_files": 2,
-        "parse_form_ext_xml": 1, "parse_form_ext_bin": 0,
-        "pseudo": 3, "declared_children": 2,
+        "parse_form_default_with": 2, "parse_form_default_empty": 0,
+        "parse_form_aux_with": 2, "parse_form_aux_empty": 0,
+        "parse_resolve_exact": 0, "parse_view_wide": 0, "parse_module_files": 4,
+        "parse_form_ext_xml": 2, "parse_form_ext_bin": 0,
+        "pseudo": 7, "declared_children": 4,
         "child_mismatch": 0, "index_only": 0, "file_only": 0, "uuid_mismatch": 0,
         "declaration_mismatch": 0, "files_failed": 0, "directory_missing": 0,
-        "command_unknown_value": 1, "command_culprits": ["Group"],
+        "command_unknown_value": 2, "command_culprits": ["Group"],
     },
     "KomMag": {
         "raw_files": 1, "raw_bytes": 2257, "raw_prop_tags": 11, "raw_content_items": 0,
@@ -347,21 +351,22 @@ PLAN_EXPECTATIONS = {
     },
 }
 # Итог по корпусу (четыре выгрузки): те же величины, что таблицы разделов 1–2 плана
-# (15 объектов, 32 строки индекса — 15 верхних и 17 дочерних, 14 псевдо-записей, 2 формы с
-# содержимым и 1 команда, 11 файлов модулей, 1 219 целей условия: 727 BGU2 + 492 BP3,
-# 429 значений типа: 428 в `Type` и 1 в `TypeSet`). Сверяется только когда прогнаны все
-# четыре выгрузки: сравнивать итог по четырём с суммой по меньшему числу — ложное расхождение
-# (прецедент V50/V51).
+# (16 объектов, 39 строк индекса — 16 верхних и 23 дочерних, 18 псевдо-записей, 3 формы с
+# содержимым и 2 команды, 13 файлов модулей, 1 219 целей условия: 727 BGU2 + 492 BP3,
+# 430 значений типа: 429 в `Type` и 1 в `TypeSet`). Числа пересняты 03.11.2026 после
+# пересбора фикстуры `MinCfg` (шаг П9 узла V54) — круг вида в ней вырос с одного объекта
+# до двух. Сверяется только когда прогнаны все четыре выгрузки: сравнивать итог по четырём
+# с суммой по меньшему числу — ложное расхождение (прецедент V50/V51).
 CORPUS_TOTALS = {
-    "raw_files": 15, "raw_bytes": 275315, "raw_prop_tags": 165, "raw_content_items": 1219,
-    "raw_type_values": 429, "raw_type_container_Type": 428, "raw_type_container_TypeSet": 1,
-    "raw_string_qualifiers": 1, "raw_child_Form": 2, "raw_child_Command": 1,
-    "raw_form_desc": 2, "raw_form_ext_xml": 1, "raw_form_ext_bin": 1, "raw_form_module": 0,
-    "raw_form_help": 1, "raw_mgr_module": 10, "raw_cmd_module": 1, "raw_help_resource_dirs": 1,
+    "raw_files": 16, "raw_bytes": 279578, "raw_prop_tags": 176, "raw_content_items": 1219,
+    "raw_type_values": 430, "raw_type_container_Type": 429, "raw_type_container_TypeSet": 1,
+    "raw_string_qualifiers": 2, "raw_child_Form": 3, "raw_child_Command": 2,
+    "raw_form_desc": 3, "raw_form_ext_xml": 2, "raw_form_ext_bin": 1, "raw_form_module": 0,
+    "raw_form_help": 1, "raw_mgr_module": 11, "raw_cmd_module": 2, "raw_help_resource_dirs": 1,
     "raw_target_type_Document": 1219, "raw_targets_distinct": 1147,
-    "idx_roots": 15, "idx_children": 17, "pseudo": 14, "declared_children": 3,
-    "rows_criteria": 15, "rows_content": 1219, "rows_forms": 2, "rows_form_ext": 2,
-    "rows_commands": 1, "parse_module_files": 11,
+    "idx_roots": 16, "idx_children": 23, "pseudo": 18, "declared_children": 5,
+    "rows_criteria": 16, "rows_content": 1219, "rows_forms": 3, "rows_form_ext": 3,
+    "rows_commands": 2, "parse_module_files": 13,
 }
 
 
@@ -785,7 +790,7 @@ def norm_value(value):
 
     Различия каналов — не различия данных: jsonb отдаётся dict/list, `ARRAY` — списком, uuid —
     объектом `psycopg2`, разбор же кладёт те же значения словарями, списками и строками. Без
-    общей нормализации сравнение столбца `types` (429 записей) давало бы расхождение на каждом
+    общей нормализации сравнение столбца `types` (430 записей) давало бы расхождение на каждом
     объекте, а проверка перестала бы что-либо доказывать. Пустая строка и NULL здесь равны:
     для колонок вида слой пишет NULL, а не пустое значение (CHECK `*_names_not_blank`
     запрещает пустое только ключевым колонкам).
@@ -1151,7 +1156,7 @@ def expected_view_wide(values):
 
     Именно таких значений не разрешить индексом состава (цель не названа), и для KomMag это
     единственное значение блока. Разбор обязан назвать их отдельным счётчиком, а не молчать и
-    не считать неразрешёнными (замер Q6: 1 из 429).
+    не считать неразрешёнными (замер Q6: 1 из 430).
     """
     return sum(1 for _container, value in values
                if value.startswith("cfg:") and value.endswith("Ref"))
@@ -1499,7 +1504,7 @@ def check_children_circle(circle, expect, tag):
     Псевдо-запись (содержимое формы, модуль, справка) — не ребёнок вида в смысле строк таблиц:
     отдельной строки вида у неё нет (узел V47). Разбор обязан назвать их списком, и список
     обязан совпасть с тем, что считает проверка по таблице индекса: иначе «детей нет»
-    читалось бы как «содержимого нет», а 14 псевдо-записей корпуса (замер 1.1) пропали бы.
+    читалось бы как «содержимого нет», а 18 псевдо-записей корпуса пропали бы.
 
     Файлы модулей и содержимое форм — третья сторона того же круга: их счётчик в ответе
     (`module_files_by_kind`, `form_ext_formats`) обязан совпасть с обходом каталога, который
@@ -1649,11 +1654,11 @@ def check_form_references(circle, expect, tag):
     """Пара «значение ↔ состояние» и разрешимость ссылки индексом состава того же объекта.
 
     Независимая мера — текст тега `DefaultForm`/`AuxiliaryForm` из файла регистрации:
-    `with_reference` обязан стоять там и только там, где текст есть (замер 2.3: 3 поля на двух
-    файлах, остальные 27 — `empty_value`). Ссылка обязана быть записью индекса состава того же
-    объекта: ссылка на форму другого объекта — другое знание, чем ссылка на форму, которой нет.
-    Перечень `form_names` строки вида сверяется с объявленными `<ChildObjects><Form>`, иначе
-    «формы нет» и «форма не объявлена» читались бы одинаково.
+    `with_reference` обязан стоять там и только там, где текст есть (пересъём 03.11.2026:
+    5 полей на трёх файлах, остальные 27 — `empty_value`). Ссылка обязана быть записью
+    индекса состава того же объекта: ссылка на форму другого объекта — другое знание, чем
+    ссылка на форму, которой нет. Перечень `form_names` строки вида сверяется с объявленными
+    `<ChildObjects><Form>`, иначе «формы нет» и «форма не объявлена» читались бы одинаково.
     """
     db, index = circle["db"], circle["index"]
     section(f"Контур 8 — ссылки на формы ({tag})")
@@ -2192,8 +2197,8 @@ def check_contract():
     core_tools = registry.get("server_configurations_core.py", [])
     check("вход группы `load_filter_criteria_tool` назван в реестре `EXPECTED_TOOLS` ядра",
           "load_filter_criteria_tool" in core_tools, _brief(sorted(core_tools)))
-    check(f"число инструментов ядра — {len(core_tools)} (после узлов V52 и V53 — 11)",
-          len(core_tools) == 11, f"в реестре {len(core_tools)}")
+    check(f"число инструментов ядра — {len(core_tools)} (после узлов V52, V53 и V54 — 12)",
+          len(core_tools) == 12, f"в реестре {len(core_tools)}")
 
 
 # ═══ контур 11 (продолжение): неприкосновенность чужих кругов ═════════════════════════
