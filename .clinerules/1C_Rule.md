@@ -9,10 +9,17 @@
 Правильный запуск psql.exe:
 
 ```powershell
-$env:PGPASSWORD='Sta090860'; C:\Postgres\bin\psql.exe -tA -P footer=off
+$env:PGPASSWORD='Sta090860'; C:\Postgres\bin\psql.exe -U postgres -h localhost -tA -P footer=off
 ```
 
 с использованием флага `-tA` для тихого режима и footer=off для отключения постраничного вывода.
+
+Роли PostgreSQL: есть пользователь `postgres` с паролем `Sta090860`. Роли `Buh` — имени
+Windows-пользователя, которое `psql.exe` подставляет по умолчанию из окружения — на сервере
+**нет**: без `-U postgres` (или `$env:PGUSER='postgres'`) подключение падает с
+`FATAL: password authentication failed for user "Buh"`. Поэтому `-U postgres` обязан быть в
+каждой команде `psql.exe`; имя базы — `ckb_1c_configurations` (замеры узлов) или `local_doc`
+(правила и знания).
 
 Критические правила:
 
