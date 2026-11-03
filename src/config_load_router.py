@@ -36,27 +36,17 @@ from configuration_loader import OBJECTS_TABLE, register_configuration
 # инструмента: карточка и инструмент обязаны рассказывать об одном слое одинаково.
 from configuration_load_contract import (
     CHILD_SECTION_HEADER,
-    COMMON_ATTRIBUTE_META_TAG,
     COMMON_ATTRIBUTES_SECTION_HEADER,
-    COMMON_ATTRIBUTES_TABLES,
-    EXCHANGE_PLAN_META_TAG,
     EXCHANGE_PLAN_SECTION_HEADER,
-    EXCHANGE_PLAN_TABLES,
-    EVENT_SUBSCRIPTION_META_TAG,
     EVENT_SUBSCRIPTIONS_SECTION_HEADER,
-    EVENT_SUBSCRIPTIONS_TABLES,
-    FILTER_CRITERIA_META_TAG,
     FILTER_CRITERIA_SECTION_HEADER,
-    FILTER_CRITERIA_TABLES,
     OBJECT_MODULES_SECTION_HEADER,
     ROLES_SECTION_HEADER,
-    ROLE_META_TAG,
-    ROLE_TABLES,
     ROOT_MODULES_SECTION_HEADER,
+    SCHEDULED_JOBS_SECTION_HEADER,
     SESSION_PARAMETERS_SECTION_HEADER,
-    SESSION_PARAMETER_META_TAG,
-    SESSION_PARAMETER_TABLE,
     STOP_STAGE_SECTION_HEADER,
+    STORED_META_KINDS,
     format_child_object_lines,
     format_common_attributes_lines,
     format_exchange_plans_lines,
@@ -65,6 +55,7 @@ from configuration_load_contract import (
     format_object_module_lines,
     format_roles_lines,
     format_root_modules_lines,
+    format_scheduled_jobs_lines,
     format_session_parameters_lines,
     format_stopped_stage_lines,
 )
@@ -409,6 +400,25 @@ def _existing_card(existing, table):
     return lines
 
 
+def _join_ru(items):
+    """Перечисление по-русски: «a, b и c» (один элемент — без запятых, два — через «и»).
+
+    Узел V54 (шаг П5): строка о `<ChildObjects>` перечисляет узлы, стадии и разделы,
+    которые к этой строке относятся. Раньше эти перечни были написаны словами и вели
+    себя как словарь покрытия: их никто не сверял с кругом, и перечень остановился на
+    V52/S4g, хотя строки покрытия добавляли V53/S4h. Перечни строятся из
+    `STORED_META_KINDS` — того же словаря, из которого берётся и сам круг тегов.
+    """
+    values = list(items)
+    if not values:
+        return ""
+    if len(values) == 1:
+        return values[0]
+    if len(values) == 2:
+        return f"{values[0]} и {values[1]}"
+    return ", ".join(values[:-1]) + " и " + values[-1]
+
+
 def _stage_section_lines(result):
     """Разделы стадий детей заголовка — один код для успеха и для остановки.
 
@@ -507,6 +517,18 @@ def _stage_section_lines(result):
     if event_subscriptions_part:
         lines.append(f"{EVENT_SUBSCRIPTIONS_SECTION_HEADER}:")
         lines.extend(format_event_subscriptions_lines(event_subscriptions_part, indent="   "))
+    # Узел V54 (стадия S4i, позиция 2.9 списка): свойства регламентных заданий.
+    # Раздел печатается и при отказе стадии, и при `not_run` — по той же причине, что у
+    # S3/S4/S4c–S4h: «загружено» без него читалось бы как «состав конфигурации в БД есть
+    # весь». Ответ стадии лежит в собственном ключе, а не внутри `event_subscriptions` или
+    # `filter_criteria` (правило C3); текст даёт общий форматёр контракта — тот же, что отдаёт
+    # отдельный инструмент `load_scheduled_jobs_tool` (шаг П5). Блока «группы круга не
+    # запрашивались» у форматёра нет: групп `kinds` у вида нет по решению Q5 (вариант A), и
+    # обещать их значило бы обещать вход, которого нет.
+    scheduled_jobs_part = result.get("scheduled_jobs") or {}
+    if scheduled_jobs_part:
+        lines.append(f"{SCHEDULED_JOBS_SECTION_HEADER}:")
+        lines.extend(format_scheduled_jobs_lines(scheduled_jobs_part, indent="   "))
     # Узел V47 (стадия S4b): модули объектов конфигурации — вторая транзакция загрузки
     # (Q6, граница D7). Раздел печатается и при отказе стадии, и при `not_run` (индекс
     # состава не разобран — круг не определён): «конфигурация загружена» без него
@@ -683,46 +705,25 @@ def format_load_result(result):
                 # остальными значило бы сказать, что подсистем и общих модулей в БД нет, —
                 # карточка противоречила бы собственному разделу СОДЕРЖИМОЕ ДОЧЕРНИХ ОБЪЕКТОВ.
                 from configuration_object_properties_loader import LOADED_META_TABLES
-                # Узел V48 (стадия S4c, позиция 2.3 списка): SessionParameters тоже относится
-                # к видам, содержимое которых сохраняется, — но своей стадией и в свою таблицу.
-                # Словарь «тег <ChildObjects> → таблицы вида» держит тот слой, который эти
-                # таблицы пишет (прецедент LOADED_META_TABLES узла V46), поэтому он дополняется
-                # здесь, а не правкой словаря V46 (круг CHILD_* этим узлом не расширяется).
+                # Узлы V48…V54 (позиции 2.3–2.9 нормативного списка) дописывали здесь свою
+                # строку «тег <ChildObjects> → таблицы вида»: SessionParameter (V48),
+                # Role (V49), CommonAttribute (V50 — строку оставил за собой V51),
+                # ExchangePlan (V51), FilterCriterion (V52), EventSubscription (V53),
+                # ScheduledJob (V54). Круг держали в форматаре карточки, а текстовые
+                # перечни узлов, стадий и разделов ниже этого круга никто не сверял: строки
+                # добавляли V48–V53, перечень остановился на V52/S4g, и карточка
+                # противоречила собственному разделу стадии (замер 03.11.2026 на MinCfg:
+                # `ScheduledJob 2` стоял и в «остальных объектах … в БД не раскладываются»,
+                # и в разделе S4i; для CommonAttribute/ExchangePlan/FilterCriterion/
+                # EventSubscription предупреждение разбора вообще утверждало «содержимое в БД
+                # не сохраняется»). С узла V54 круг называет один словарь контракта —
+                # `STORED_META_KINDS`; из него же строятся предупреждение разбора в
+                # `configuration_meta_parser` и перечни этой строки. Вид V46 по-прежнему
+                # берётся из `LOADED_META_TABLES` слоя свойств: круг CHILD_* стадии S4 этим
+                # узлом не расширяется (тот же приём, что и у строк V48…V53).
                 loaded_tags = dict(LOADED_META_TABLES)
-                loaded_tags[SESSION_PARAMETER_META_TAG] = (SESSION_PARAMETER_TABLE,)
-                # Узел V49 (стадия S4d, позиция 2.4 списка): Role — вид, содержимое которого
-                # сохраняется своей стадией в четыре свои таблицы (замер: MinCfg даёт 2 тега
-                # `Role` в <ChildObjects>). Словарь «тег → таблицы вида» дополняется здесь по
-                # той же причине, что и строка V48: круг CHILD_* видов стадии S4 этим узлом не
-                # расширяется, а таблицы называет тот слой, который их пишет.
-                loaded_tags[ROLE_META_TAG] = ROLE_TABLES
-                # Узел V50 (стадия S4e, позиция 2.5 списка) и узел V51 (стадия S4f,
-                # позиция 2.6): CommonAttribute и ExchangePlan тоже относятся к видам,
-                # содержимое которых сохраняется своими стадиями в свои таблицы. Строка V50
-                # здесь отсутствует неслучайно: узел V50 её не обновлял, и карточка
-                # относила общие реквизиты к «остальным объектам … в БД не раскладываются»,
-                # противореча собственному разделу СВОЙСТВА ОБЩИХ РЕКВИЗИТОВ. Названо это
-                # тем же шагом, что подключает стадию S4f, — правка одной строки покрытия
-                # чинит оба узла сразу (замер П0: ExchangePlan дают 2/18/26 тегов в
-                # <ChildObjects> трёх содержательных выгрузок).
-                loaded_tags[COMMON_ATTRIBUTE_META_TAG] = COMMON_ATTRIBUTES_TABLES
-                loaded_tags[EXCHANGE_PLAN_META_TAG] = EXCHANGE_PLAN_TABLES
-                # Узел V52 (стадия S4g, позиция 2.7 списка): FilterCriterion — вид, содержимое
-                # которого сохраняется своей стадией в свои таблицы вида и в общие таблицы его
-                # детей. Без строки карточка относила бы критерии отбора к «остальных объектов
-                # … в БД не раскладываются», противореча собственному разделу СВОЙСТВА
-                # КРИТЕРИЕВ ОТБОРА (тот же дефект, который чинила строка V50/V51). Круг
-                # называют таблицы вида (`filter_criteria`, `filter_criterion_content`); детей
-                # вид пишет в общие таблицы `forms`/`form_ext`/`commands`, и их в словаре нет
-                # осознанно: предикат их снятия и записи — uuid родителей круга, а не тег.
-                loaded_tags[FILTER_CRITERIA_META_TAG] = FILTER_CRITERIA_TABLES
-                # Узел V53 (стадия S4h, позиция 2.8 списка): EventSubscription — вид,
-                # содержимое которого сохраняется своей стадией в свои таблицы вида. Без строки
-                # карточка относила бы подписки к «остальных объектов … в БД не раскладываются»,
-                # противореча собственному разделу СВОЙСТВА ПОДПИСОК НА СОБЫТИЯ (тот же дефект,
-                # который чинили строки V50/V51/V52). Тег встречается в <ChildObjects>
-                # Configuration.xml (замер П0: BP3 даёт 458 элементов `<EventSubscription>`).
-                loaded_tags[EVENT_SUBSCRIPTION_META_TAG] = EVENT_SUBSCRIPTIONS_TABLES
+                loaded_tags.update({tag: info["tables"]
+                                    for tag, info in STORED_META_KINDS.items()})
                 loaded = {tag: count for tag, count in child_counts.items()
                           if tag in loaded_tags}
                 rest = {tag: count for tag, count in child_counts.items()
@@ -733,18 +734,26 @@ def format_load_result(result):
                 loaded_detail = ", ".join(
                     f"{tag} {count}" for tag, count in sorted(loaded.items())
                 )
+                # Перечни узлов, стадий и разделов строятся из того же словаря круга, что и
+                # сам круг тегов: написанные словами, они пережили три узла и стали неправдой
+                # (комментарий выше). Вид V46 называется первым осознанно: его таблицы даёт
+                # `LOADED_META_TABLES`, а не `STORED_META_KINDS`.
+                covered_nodes = _join_ru(
+                    ["V46"] + [info["node"] for info in STORED_META_KINDS.values()]
+                )
+                covered_stages = _join_ru(
+                    ["S4"] + [info["stage"] for info in STORED_META_KINDS.values()]
+                )
+                covered_sections = _join_ru(
+                    f"«{header}»" for header in [CHILD_SECTION_HEADER]
+                    + [info["section"] for info in STORED_META_KINDS.values()]
+                )
                 lines.append(
                     f"Состав из <ChildObjects> Configuration.xml: объектов "
                     f"{sum(child_counts.values())}"
-                    + (f"; видов с загруженным содержимым (узлы V46, V48, V49, V50, V51 "
-                       f"и V52): {loaded_detail} — "
-                       "их свойства и ссылки лежат в таблицах стадий S4, S4c, S4d, S4e, S4f "
-                       "и S4g, разделы «"
-                       + CHILD_SECTION_HEADER + "», «" + SESSION_PARAMETERS_SECTION_HEADER
-                       + "», «" + ROLES_SECTION_HEADER + "», «"
-                       + COMMON_ATTRIBUTES_SECTION_HEADER + "», «"
-                       + EXCHANGE_PLAN_SECTION_HEADER + "» и «"
-                       + FILTER_CRITERIA_SECTION_HEADER + "» ниже"
+                    + (f"; видов с загруженным содержимым (узлы {covered_nodes}): "
+                       f"{loaded_detail} — их свойства и ссылки лежат в таблицах стадий "
+                       f"{covered_stages}, разделы {covered_sections} ниже"
                        if loaded_detail else "")
                     + (f"; остальных объектов {sum(rest.values())} — по типам: {by_type}; "
                        "эти записи в БД не раскладываются (таблиц объектов метаданных по ним "

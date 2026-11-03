@@ -140,6 +140,17 @@ DEFAULT_TARGETS = [
 # строки вида (Q1, вариант A), поэтому частичная запись круга описывала бы состав, которого в
 # выгрузке нет, а порога цены, при котором круг стоило бы резать, замер 2.2 не дал (25 100
 # строк `<Source>` на четыре выгрузки, максимум 789 в одном файле).
+# Узел V54 (П5, 03.11.2026) добавил load_scheduled_jobs_tool: core 11 → 12. Причина та же
+# (решение оператора Q5 узла V48 — свой вход на каждую позицию нормативного списка): файл
+# регистрации вида `ScheduledJobs/` (позиция 2.9) и его содержимое `Ext/Schedule.xml`
+# меняются, а заголовок и индекс состава — нет. Стадия S4i конвейера и инструмент вызывают
+# одну и ту же функцию слоя (src/configuration_scheduled_jobs_loader.load_scheduled_jobs);
+# отдельного контракта у инструмента нет — закрытый словарь scheduled_jobs_defaults() и текст
+# раздела даёт configuration_load_contract. Отличие от входа V51 — групп `kinds` НЕТ (решение
+# Q5 узла V54, вариант A), тот же, что у V50, V52 и V53: запись расписания существует только
+# через числовой id строки вида (Q2, вариант A), поэтому частичная запись круга описывала бы
+# состав, которого в выгрузке нет, а порога цены, при котором круг стоило бы резать, замер
+# 1.1/2.2 не дал (346 файлов регистрации и 313 записей расписания, максимум 3 записи в файле).
 EXPECTED_TOOLS = {
     "server_configurations_core.py": [
         "delete_external_report_tool", "load_1c_catalog_tool",
@@ -149,7 +160,7 @@ EXPECTED_TOOLS = {
         "load_event_subscriptions_tool",
         "load_exchange_plans_tool",
         "load_filter_criteria_tool",
-        "load_roles_tool", "load_session_parameters_tool",
+        "load_roles_tool", "load_scheduled_jobs_tool", "load_session_parameters_tool",
     ],
     "server_configurations_enrichment.py": [
         "add_config_aliases_tool", "add_config_cross_reference_tool", "add_config_snippet_tool",

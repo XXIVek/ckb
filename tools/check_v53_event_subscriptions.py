@@ -75,11 +75,14 @@ r"""tools/check_v53_event_subscriptions.py — узел V53: подписки н
       `_v53_p6_uuid_probe.py`), и называется это число, а не сглаживается; внутри одной
       конфигурации uuid не повторяется — иначе пара (`configuration_uuid`, `object_uuid`) не
       различала бы строки.
-  11. КОНТРАКТ. Стадия `s4h_event_subscriptions` стоит между `s4g_filter_criteria` и
-      `s4b_object_modules` (порядок позиций 2.7 → 2.8 → модули объектов); круг снятия и
+  11. КОНТРАКТ. Стадия `s4h_event_subscriptions` стоит сразу после `s4g_filter_criteria`;
+      справа у неё с узла V54 (шаг П5) стоит `s4i_scheduled_jobs` — порядок позиций
+      2.7 → 2.8 → 2.9 нормативного списка, а `s4b_object_modules` остаётся последней
+      стадией (вторая транзакция); круг снятия и
       порядок удаления (`sources` ДО `subscriptions` — иначе `ON DELETE CASCADE` снял бы строки
       молча, и число в ответе было бы неправдой); подсказка продолжения; нулевой ответ стадии;
-      вход `load_event_subscriptions_tool` в реестре `EXPECTED_TOOLS` (11 инструментов ядра).
+      вход `load_event_subscriptions_tool` в реестре `EXPECTED_TOOLS` (11 инструментов ядра —
+      с узла V54, шаг П5, круг ядра вырос до 12, и проверка считает актуальный круг).
   12. ИТОГ ПО КОРПУСУ и неприкосновенность чужих кругов: сумма по четырём выгрузкам равна
       разделам 1 и 2 плана, таблицы других узлов прогон не меняет.
 
@@ -123,7 +126,8 @@ from configuration_event_subscriptions_loader import (  # noqa: E402
 from configuration_load_contract import (  # noqa: E402
     EVENT_SUBSCRIPTIONS_REMOVE_ORDER, EVENT_SUBSCRIPTIONS_REPEAT_HINT,
     EVENT_SUBSCRIPTIONS_TABLES, FOREIGN_STAGE_TABLES, STAGE_EVENT_SUBSCRIPTIONS,
-    STAGE_FILTER_CRITERIA, STAGE_FULL_RELOAD_ONLY, STAGE_OBJECT_MODULES, STAGES,
+    STAGE_FILTER_CRITERIA, STAGE_FULL_RELOAD_ONLY, STAGE_OBJECT_MODULES,
+    STAGE_SCHEDULED_JOBS, STAGES,
     event_subscriptions_defaults, stage_resume_hint, stage_title, stages_after,
 )
 from configuration_module_slots import resolve_dump_dir  # noqa: E402
@@ -1480,11 +1484,18 @@ def check_contract():
           STAGE_EVENT_SUBSCRIPTIONS in stage_ids, names(stage_ids))
     if STAGE_EVENT_SUBSCRIPTIONS in stage_ids:
         position = stage_ids.index(STAGE_EVENT_SUBSCRIPTIONS)
-        check("стадия стоит сразу за `s4g_filter_criteria` (позиция 2.7 → 2.8 нормативного "
-              "списка) и перед `s4b_object_modules` (вторая транзакция, не позиция списка)",
+        # Узел V54 (шаг П5): соседом справа стал не `s4b_object_modules`, а
+        # `s4i_scheduled_jobs` — позиция 2.9 нормативного списка идёт раньше модулей
+        # объектов. Прежняя проверка утверждала порядок 2.8 → модули объектов и с V54
+        # стала бы неправдой; модули объектов по-прежнему остаются последней стадией.
+        check("стадия стоит сразу за `s4g_filter_criteria` (позиции 2.7 → 2.8 нормативного "
+              "списка), справа у неё `s4i_scheduled_jobs` (узел V54, позиция 2.9), а "
+              "`s4b_object_modules` остаётся последней стадией (вторая транзакция)",
               stage_ids[position - 1] == STAGE_FILTER_CRITERIA
-              and stage_ids[position + 1] == STAGE_OBJECT_MODULES,
-              f"соседи: {stage_ids[position - 1]} / {stage_ids[position + 1]}")
+              and stage_ids[position + 1] == STAGE_SCHEDULED_JOBS
+              and stage_ids[-1] == STAGE_OBJECT_MODULES,
+              f"соседи: {stage_ids[position - 1]} / {stage_ids[position + 1]}, "
+              f"последняя: {stage_ids[-1]}")
     title = stage_title(STAGE_EVENT_SUBSCRIPTIONS)
     check("заголовок стадии называет позицию 2.8 и каталог вида (текст ответа ссылается на "
           "нормативный список, а не на выдуманное имя)",
@@ -1537,10 +1548,10 @@ def check_contract():
     registry = registry_expected_tools()
     core_tools = list((registry.get("server_configurations_core.py") or []))
     check("вход `load_event_subscriptions_tool` внесён в реестр `EXPECTED_TOOLS` ядра "
-          "(узлом V53 П5 круг ядра — 11 инструментов)",
+          "(узлом V53 П5 круг ядра — 11 инструментов; с узла V54 П5 — 12)",
           "load_event_subscriptions_tool" in core_tools, names(core_tools))
-    check(f"число инструментов ядра — {len(core_tools)} (эталон реестра: 11)",
-          len(core_tools) == 11, f"факт: {len(core_tools)}, эталон: 11")
+    check(f"число инструментов ядра — {len(core_tools)} (эталон реестра: 12)",
+          len(core_tools) == 12, f"факт: {len(core_tools)}, эталон: 12")
 
 
 # ── контур 12: итог по корпусу и неприкосновенность чужих кругов ─────────────────────────────

@@ -260,6 +260,43 @@
   * тел модулей у вида нет (замер 2.1): файлов `.bsl` в круге не читается, обработчик — только
     имя метода общего модуля, тексты принадлежат V46/V47.
 
+Узел V54 (03.11.2026, шаг П5) — свойства регламентных заданий, позиция 2.9 нормативного списка
+(`docs/CONFIGURATION_SCHEDULED_JOBS_PLAN.md`):
+
+    src/configuration_scheduled_jobs_loader.py :: load_scheduled_jobs(source_path,
+    configuration_uuid=None, changed_at=None)  →  таблицы вида `scheduled_jobs`,
+    `scheduled_job_schedules`
+
+Порядок вызова повторяет S3/S4/S4c–S4h: стадия идёт ПОСЛЕ фиксации заголовка и индекса
+состава, потому что записи перечня `<Content>` разрешаются записями `configuration_objects`,
+а имя обработчика `MethodName` — текущими общими модулями стадии S4 (Q3). Дальнейшее отличает
+её от соседних стадий:
+
+  * стадия `s4i_scheduled_jobs` стоит между `s4h_event_subscriptions` и `s4b_object_modules` —
+    порядок `STAGES` повторяет порядок нормативного списка (2.9 идёт сразу за 2.8, Q1);
+    перенумерации нет, S5 по-прежнему зарезервирован за анализом;
+  * ответ лежит в собственном ключе `scheduled_jobs` (правило C3);
+  * групп `kinds` у стадии и у отдельного входа `load_scheduled_jobs_tool` НЕТ — это решение
+    Q5 (вариант A), тот же, что у V50, V52 и V53: запись расписания существует только через
+    id строки вида (Q2), а порога цены, при котором круг стоило бы резать, замер 1.1/2.2 не дал
+    (346 файлов регистрации и 313 записей расписания на весь круг, максимум 3 записи в файле);
+  * круг пишется ОДНОЙ транзакцией, порядок записи держится иерархией данных: строки вида
+    (`insert_ids`, `RETURNING id`) → записи расписания пачками по глубине — родитель вложенной
+    записи `<ent:DetailedDailySchedules>` берётся из id строки-родителя, вставленной предыдущей
+    пачкой (своей таблицы у вложенной записи нет, Q1 вариант A; глубина ровно 2 — M6). Ссылка
+    держит числовой `scheduled_job_id` конкретной ревизии: своей цепи у строки расписания нет
+    (Q2 вариант A), её текущность читается витриной связкой по этому id;
+  * у 43 заданий из 346 (BGU2 19, BP3 24 — замер 1.3) расписания нет ни файлом, ни индексом —
+    это состояние `absent` колонки `schedule_state` строки вида, а не ноль записей (M4);
+  * строки вида снимаются вместе с заголовком явным `DELETE` (`remove_scheduled_jobs` в
+    `_remove_rows`), начиная с `scheduled_job_schedules` (порядок держит `REMOVE_ORDER` слоя):
+    FK записи расписания объявлен с `ON DELETE CASCADE`, и каскад снял бы строки молча — число
+    в ответе было бы неправдой (M7);
+  * тел модулей у вида нет (замер 2.1): файлов `.bsl` в круге не читается, обработчик — только
+    имя метода общего модуля, тексты принадлежат V46/V47; объявление метода поэтому трёхзначно
+    (`declared`/`not_declared`/`text_unavailable`, Q8): при незагруженных текстах метод назван
+    состоянием `text_unavailable`, а не «метода нет».
+
 
 Чтения идут через psycopg2 (`src/external_db.py`), а не psql-подпроцессом: `_run_psql` /
 `_psql_fields` унаследованы от прежнего загрузчика, многоколоночные выборки разбирают
@@ -368,6 +405,20 @@ from configuration_event_subscriptions_loader import (
     load_event_subscriptions,
     remove_event_subscriptions,
 )
+# Узел V54 (стадия S4i, позиция 2.9 нормативного списка): свойства регламентных заданий — тот
+# же слой, что и отдельный инструмент `load_scheduled_jobs_tool` (шаг П5); контракт стадии и
+# форматёр — в configuration_load_contract. Строки круга снимаются вместе с заголовком явным
+# DELETE (внешнего ключа на `configurations` в схеме нет осознанно — прецедент V20.1), поэтому
+# `_remove_rows` обязан вызвать его явно: без этого force=True оставил бы в базе прежний состав
+# вида (для BP3 это 186 строк задания и 164 записи расписания — замер 1.1/2.2). Снятие
+# начинается с `scheduled_job_schedules`: FK записи расписания держит `ON DELETE CASCADE`, и
+# каскад снял бы строки молча, а число в ответе стало бы неправдой (M7). Родителей по uuid
+# строк вида при этом искать не нужно — строка расписания несёт `configuration_uuid` своей
+# колонкой (тот же приём, что `event_subscription_sources` V53 и `common_attribute_targets` V50).
+from configuration_scheduled_jobs_loader import (
+    load_scheduled_jobs,
+    remove_scheduled_jobs,
+)
 # Узел V47 (стадия S4b): модули объектов конфигурации — вторая транзакция после фиксации
 # содержимого (Q6, граница D7). Точка входа стадии одна и отдельного инструмента у неё нет
 # (Q4.1), поэтому здесь импортируется и ответ «стадия не выполнялась» (`mark_index_unavailable`):
@@ -395,6 +446,8 @@ from configuration_load_contract import (
     ROLES_SECTION_HEADER,
     ROOT_MODULES_REPEAT_HINT,
     ROOT_MODULES_SECTION_HEADER,
+    SCHEDULED_JOBS_REPEAT_HINT,
+    SCHEDULED_JOBS_SECTION_HEADER,
     SESSION_PARAMETERS_REPEAT_HINT,
     SESSION_PARAMETERS_SECTION_HEADER,
     SESSION_PARAMETER_TABLE,
@@ -407,6 +460,7 @@ from configuration_load_contract import (
     STAGE_OBJECT_MODULES,
     STAGE_ROLES,
     STAGE_ROOT_MODULES,
+    STAGE_SCHEDULED_JOBS,
     STAGE_SESSION_PARAMETERS,
     STATUS_ERROR,
     STATUS_NOT_RUN,
@@ -418,6 +472,7 @@ from configuration_load_contract import (
     filter_criteria_defaults,
     roles_defaults,
     root_modules_defaults,
+    scheduled_jobs_defaults,
     session_parameters_defaults,
     stage_title,
     stopped_stage_defaults,
@@ -752,6 +807,14 @@ def _remove_rows(cur, cfg_id, configuration_uuid=None):
     # `ON DELETE CASCADE` снял бы строки молча и число в ответе было бы неправдой (M7).
     if configuration_uuid:
         children.update(remove_event_subscriptions(cur, configuration_uuid))
+    # Узел V54 (стадия S4i): строки регламентных заданий тоже адресуются uuid заголовка, а
+    # внешнего ключа и каскада по нему в схеме нет осознанно (прецеденты V20.1…V53). Родителей
+    # по uuid строк вида искать не нужно: строка расписания несёт `configuration_uuid` своей
+    # колонкой, поэтому снятие идёт по одной ноге с таблицей вида. Порядок держит
+    # `REMOVE_ORDER` слоя — сначала `scheduled_job_schedules`, иначе FK записи расписания с
+    # `ON DELETE CASCADE` снял бы строки молча, и число в ответе было бы неправдой (M7).
+    if configuration_uuid:
+        children.update(remove_scheduled_jobs(cur, configuration_uuid))
     cur.execute("DELETE FROM configurations WHERE id = %s", [cfg_id])
     children["configurations"] = cur.rowcount
     return children
@@ -851,7 +914,8 @@ def _objects_table_available():
 def _written_before_stop_note(new_id, objects_written, header_arrays_filled,
                               root_modules, child_objects, session_parameters,
                               roles=None, common_attributes=None, exchange_plans=None,
-                              filter_criteria=None, event_subscriptions=None):
+                              filter_criteria=None, event_subscriptions=None,
+                              scheduled_jobs=None):
     """Что реально лежит в базе на момент остановки конвейера (узел V48, шаг П8).
 
     Строка обязана быть: остановка стадии откатом не является (стадии S3+ идут после коммита
@@ -926,6 +990,17 @@ def _written_before_stop_note(new_id, objects_written, header_arrays_filled,
             + ", ".join(
                 f"{table}={int((event_subscriptions.get('written_by_table') or {}).get(table) or 0)}"
                 for table in ("event_subscriptions", "event_subscription_sources"))
+        )
+    # Узел V54 (стадия S4i): круг называется обеими таблицами — «задания записаны» без числа
+    # записей расписания читалось бы как полный состав вида, хотя у 43 заданий из 346
+    # расписания нет вовсе (M4), а у остальных оно вложенное (замер 2.5: максимум две
+    # вложенные записи, глубина ровно 2).
+    if scheduled_jobs and scheduled_jobs.get("success"):
+        parts.append(
+            "свойства регламентных заданий: "
+            + ", ".join(
+                f"{table}={int((scheduled_jobs.get('written_by_table') or {}).get(table) or 0)}"
+                for table in ("scheduled_jobs", "scheduled_job_schedules"))
         )
     return "; ".join(parts)
 
@@ -1243,6 +1318,12 @@ def register_configuration(source_path, force=False, xml_path=None):
     # решение Q8 узла V53 (вариант A), тот же, что у V50 и V52: строка источника существует
     # только через id строки вида (Q1), поэтому конвейер обязан записать весь круг целиком.
     event_subscriptions = event_subscriptions_defaults()
+    # Узел V54 (стадия S4i, позиция 2.9 списка): свойства регламентных заданий — ответ в
+    # собственном ключе `scheduled_jobs` (правило C3). Групп `kinds` у стадии нет — это
+    # решение Q5 узла V54 (вариант A), тот же, что у V50, V52 и V53: запись расписания
+    # существует только через id строки вида (Q2), поэтому конвейер обязан записать весь круг
+    # целиком, а раздельной дозагрузки группами у вида нет ни у стадии, ни у отдельного входа.
+    scheduled_jobs = scheduled_jobs_defaults()
     object_modules = object_modules_defaults()
     # Узел V48 (шаг П8, правило C2): пропущенная стадия называет причину пропуска. Без неё
     # форматёр стадии печатает «загрузчик не назвал причину», и читатель карточки видит
@@ -1252,7 +1333,8 @@ def register_configuration(source_path, force=False, xml_path=None):
     # (тот же приём, что `mark_index_unavailable` узла V47). Причина — в `reason`, а не в
     # `error`: «не выполнялась» и «отказала после начала работы» различаются именно так.
     for _empty_stage in (child_objects, session_parameters, roles, common_attributes,
-                         exchange_plans, filter_criteria, event_subscriptions, object_modules):
+                         exchange_plans, filter_criteria, event_subscriptions,
+                         scheduled_jobs, object_modules):
         _empty_stage["reason"] = NOT_RUN_STOPPED_REASON
     object_modules["status"] = STATUS_NOT_RUN
     stopped_stage = stopped_stage_defaults()
@@ -1272,7 +1354,7 @@ def register_configuration(source_path, force=False, xml_path=None):
             _written_before_stop_note(new_id, objects_written, header_arrays_filled,
                                       root_modules, child_objects, session_parameters,
                                       roles, common_attributes, exchange_plans,
-                                      filter_criteria, event_subscriptions),
+                                      filter_criteria, event_subscriptions, scheduled_jobs),
             warnings, incomplete_groups)
 
     if not stopped:
@@ -1622,6 +1704,58 @@ def register_configuration(source_path, force=False, xml_path=None):
             stopped = True
             load_incomplete = True
 
+    # ── узел V54 (стадия S4i, позиция 2.9 списка): свойства регламентных заданий ───────────
+    # Порядок вызова повторяет S3/S4/S4c–S4h: ПОСЛЕ коммита транзакции заголовка (своим
+    # соединением стадия не увидела бы ни незакоммиченного заголовка, ни строк индекса
+    # состава, по которым разрешаются записи перечня `<Content>`, Q4), ключ — uuid, каталог тот
+    # же `root_source`. Стадия отдельная, а не расширение S4h (прецедент Q5 узлов V48–V53):
+    # правило C3 требует своего ключа ответа `scheduled_jobs`; порядок `STAGES` повторяет
+    # порядок нормативного списка (2.9 идёт сразу за 2.8, Q1). Отказ стадии, как у S3/S4 и
+    # S4c–S4h, записанный заголовок не отменяет (C5) — но останавливает конвейер (решение Q8
+    # узла V48, вариант A): S4b после отказа S4i не выполняется и читается `not_run`.
+    #
+    # Конвейер просит ВЕСЬ круг: групп `kinds` у вида нет (Q5 узла V54, вариант A), потому что
+    # запись расписания неотделима от строки вида (Q2). Отсутствие каталога `ScheduledJobs/` —
+    # не отказ, а ответ о выгрузке: `files_found = 0` с наблюдением `directory_missing`.
+    # Индекс состава или витрина общих модулей могут быть недоступны — это не отказ стадии, а
+    # названные наблюдения (`index_unavailable`, `common_modules_unavailable`): цели и
+    # обработчики остаются `unresolved`, и мера названа в ответе. Тексты общих модулей узлом
+    # V46 не читались — объявление метода называется состоянием `text_unavailable`, а не
+    # «метода нет» (Q8, граница D-S4).
+    #
+    # Штамп времени общий с остальными стадиями этой загрузки (M2) — `load_moment` задан
+    # выше, где начинается событие детей заголовка.
+    if not stopped:
+        try:
+            scheduled_jobs = load_scheduled_jobs(
+                root_source, configuration_uuid=row["uuid"], changed_at=load_moment)
+        except Exception as exc:  # noqa: BLE001 — отказ стадии называется, а не бросается
+            scheduled_jobs = scheduled_jobs_defaults()
+            scheduled_jobs["configuration_id"] = new_id
+            scheduled_jobs["configuration_uuid"] = row["uuid"]
+            scheduled_jobs["configuration_name"] = row["name"]
+            scheduled_jobs["status"] = STATUS_ERROR
+            scheduled_jobs["error"] = (
+                f"исключение слоя свойств регламентных заданий: {exc}")
+            scheduled_jobs["reason"] = scheduled_jobs["error"]
+        for job_warning in scheduled_jobs.get("warnings") or []:
+            warnings.append(f"регламентные задания: {job_warning}")
+        if not scheduled_jobs.get("success"):
+            # Заголовок, индекс состава, модули корня, свойства подсистем с общими модулями,
+            # параметры сеанса, роли, общие реквизиты, планы обмена, критерии отбора и подписки
+            # на события уже записаны, и отказ этой стадии их не отменяет (C5). Молчать нельзя
+            # по той же причине, что у V44/V46 и V48–V53: после force=True прежние строки
+            # сняты, и «загружено» без этой строки читалось бы как полный состав конфигурации.
+            warnings.append(
+                "Свойства регламентных заданий не загружены — причина названа строкой "
+                "«Стадия не выполнена» в разделе «" + SCHEDULED_JOBS_SECTION_HEADER
+                + "» карточки. Чем продолжить: "
+                + f"{SCHEDULED_JOBS_REPEAT_HINT} (configuration_uuid={row['uuid']})."
+            )
+            stopped_stage = _stop_here(STAGE_SCHEDULED_JOBS, scheduled_jobs)
+            stopped = True
+            load_incomplete = True
+
     # ── узел V47 (стадия S4b): модули объектов конфигурации ────────────────────────────
     # Вторая транзакция ПОСЛЕ фиксации содержимого конфигурации (решение Q6, граница D7
     # узла V46): отказ стадии не откатывает заголовок, индекс состава, модули корня и
@@ -1753,6 +1887,12 @@ def register_configuration(source_path, force=False, xml_path=None):
         # инструмент `load_event_subscriptions_tool` (шаг П5). Групп `kinds` в ответе нет —
         # это решение Q8 узла V53 (вариант A), а не пропуск.
         "event_subscriptions": event_subscriptions,
+        # узел V54: машинная часть стадии S4i (позиция 2.9 списка) — полная; ответ лежит в
+        # собственном ключе, а не внутри `event_subscriptions`, `filter_criteria` или
+        # `exchange_plans` (правило C3). Текст раздела даёт общий форматёр контракта — тот же,
+        # что отдаёт отдельный инструмент `load_scheduled_jobs_tool` (шаг П5). Групп `kinds` в
+        # ответе нет — это решение Q5 узла V54 (вариант A), а не пропуск.
+        "scheduled_jobs": scheduled_jobs,
         # узел V47: машинная часть стадии S4b — полная (тот же закрытый контракт, который
         # читают проба П4 и проверка П5); текст раздела даёт общий форматёр контракта.
         # `load_incomplete`/`incomplete_groups` — признак того, что состав в БД неполный

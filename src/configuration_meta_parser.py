@@ -566,6 +566,16 @@ def parse_configuration_meta(xml_path):
     # Круг видов знает слой свойств, а не парсер XML, поэтому он читается у него (ленивый
     # импорт: модуль свойств через слой модулей корня возвращается к этому парсеру).
     from configuration_object_properties_loader import LOADED_META_TABLES
+    # Узел V54 (шаг П5): круг видов, содержимое которых сохраняется стадиями S4c…S4i
+    # (позиции 2.3–2.9 нормативного списка), называет контракт — `STORED_META_KINDS`.
+    # Ниже ветка, знающая только виды V46, для CommonAttribute/ExchangePlan/FilterCriterion/
+    # EventSubscription/ScheduledJob утверждала «их содержимое в БД не сохраняется», хотя
+    # слои V50/V51/V52/V53/V54 его пишут (замер 03.11.2026 на MinCfg: предупреждение
+    # `ChildObjects/EventSubscription: 2 … не сохраняется` стояло рядом с разделом S4h,
+    # который записал две строки подписок). Круг читается из контракта — того же словаря,
+    # из которого карточка берёт теги покрытия; ленивый импорт — тот же приём, что выше
+    # (модуль контракта тянет слои загрузки, которые возвращаются к этому парсеру).
+    from configuration_load_contract import STORED_META_KINDS
     child_objects = _child(config, "ChildObjects")
     child_counts = {}
     for element in list(child_objects) if child_objects is not None else []:
@@ -587,6 +597,16 @@ def parse_configuration_meta(xml_path):
                 "подсистем и общих модулей» карточки загрузки); слепой зоной V38 вид не "
                 "является, тексты модулей общих модулей при этом отдельная просьба "
                 "(with_module_content)"
+            )
+        elif tag in STORED_META_KINDS:
+            info = STORED_META_KINDS[tag]
+            warnings.append(
+                f"ChildObjects/{tag}: {count} — объекты перечислены индексом состава "
+                f"(configuration_objects, узел V33); содержимое этого вида сохраняется "
+                f"стадией {info['stage']} (узел {info['node']}, позиция {info['position']} "
+                f"нормативного списка) в таблицы {', '.join(info['tables'])} — см. раздел «"
+                f"{info['section']}» карточки загрузки; слепой зоной V38 вид не является, "
+                "а остальные группы A–H модели V38 этой стадией не закрываются (узел V18)"
             )
         else:
             warnings.append(
