@@ -63,7 +63,9 @@ from configuration_load_contract import (  # noqa: E402
     COMMON_ATTRIBUTES_SECTION_HEADER,
     COMMON_ATTRIBUTES_TABLES,
     EVENT_SUBSCRIPTIONS_SECTION_HEADER,
+    SCHEDULED_JOBS_SECTION_HEADER,
     EVENT_SUBSCRIPTIONS_TABLES,
+    SCHEDULED_JOBS_TABLES,
     EXCHANGE_PLAN_SECTION_HEADER,
     EXCHANGE_PLAN_TABLES,
     FILTER_CRITERIA_SECTION_HEADER,
@@ -79,6 +81,7 @@ from configuration_load_contract import (  # noqa: E402
     STAGE_CHILD_OBJECTS,
     STAGE_COMMON_ATTRIBUTES,
     STAGE_EVENT_SUBSCRIPTIONS,
+    STAGE_SCHEDULED_JOBS,
     STAGE_EXCHANGE_PLANS,
     STAGE_FILTER_CRITERIA,
     STAGE_OBJECT_MODULES,
@@ -94,6 +97,7 @@ from configuration_load_contract import (  # noqa: E402
     child_objects_defaults,
     common_attributes_defaults,
     event_subscriptions_defaults,
+    scheduled_jobs_defaults,
     exchange_plans_defaults,
     filter_criteria_defaults,
     format_stopped_stage_lines,
@@ -139,7 +143,7 @@ ROUTER = ROOT / "src" / "config_load_router.py"
 CHILD_STAGES = (
     STAGE_ROOT_MODULES, STAGE_CHILD_OBJECTS, STAGE_SESSION_PARAMETERS, STAGE_ROLES,
     STAGE_COMMON_ATTRIBUTES, STAGE_EXCHANGE_PLANS, STAGE_FILTER_CRITERIA,
-    STAGE_EVENT_SUBSCRIPTIONS, STAGE_OBJECT_MODULES,
+    STAGE_EVENT_SUBSCRIPTIONS, STAGE_SCHEDULED_JOBS, STAGE_OBJECT_MODULES,
 )
 STAGE_KEYS = {
     STAGE_ROOT_MODULES: "root_modules",
@@ -150,6 +154,7 @@ STAGE_KEYS = {
     STAGE_EXCHANGE_PLANS: "exchange_plans",
     STAGE_FILTER_CRITERIA: "filter_criteria",
     STAGE_EVENT_SUBSCRIPTIONS: "event_subscriptions",
+    STAGE_SCHEDULED_JOBS: "scheduled_jobs",
     STAGE_OBJECT_MODULES: "object_modules",
 }
 SECTION_HEADERS = {
@@ -161,6 +166,7 @@ SECTION_HEADERS = {
     STAGE_EXCHANGE_PLANS: EXCHANGE_PLAN_SECTION_HEADER,
     STAGE_FILTER_CRITERIA: FILTER_CRITERIA_SECTION_HEADER,
     STAGE_EVENT_SUBSCRIPTIONS: EVENT_SUBSCRIPTIONS_SECTION_HEADER,
+    STAGE_SCHEDULED_JOBS: SCHEDULED_JOBS_SECTION_HEADER,
     STAGE_OBJECT_MODULES: OBJECT_MODULES_SECTION_HEADER,
 }
 DEFAULTS = {
@@ -172,6 +178,7 @@ DEFAULTS = {
     STAGE_EXCHANGE_PLANS: exchange_plans_defaults,
     STAGE_FILTER_CRITERIA: filter_criteria_defaults,
     STAGE_EVENT_SUBSCRIPTIONS: event_subscriptions_defaults,
+    STAGE_SCHEDULED_JOBS: scheduled_jobs_defaults,
     STAGE_OBJECT_MODULES: object_modules_defaults,
 }
 # Функция стадии — имя в модуле загрузчика: `register_configuration` обращается к имени
@@ -185,6 +192,7 @@ STAGE_FUNCTIONS = {
     STAGE_EXCHANGE_PLANS: "load_exchange_plans",
     STAGE_FILTER_CRITERIA: "load_filter_criteria",
     STAGE_EVENT_SUBSCRIPTIONS: "load_event_subscriptions",
+    STAGE_SCHEDULED_JOBS: "load_scheduled_jobs",
     STAGE_OBJECT_MODULES: "load_object_modules",
 }
 # Чем продолжение допустимо (подстрока подсказки): у стадии с отдельным входом — имя его
@@ -198,6 +206,7 @@ RESUME_MARKS = {
     STAGE_EXCHANGE_PLANS: "load_exchange_plans_tool",
     STAGE_FILTER_CRITERIA: "load_filter_criteria_tool",
     STAGE_EVENT_SUBSCRIPTIONS: "load_event_subscriptions_tool",
+    STAGE_SCHEDULED_JOBS: "load_scheduled_jobs_tool",
     STAGE_OBJECT_MODULES: "load_1c_catalog_tool",
 }
 
@@ -399,7 +408,7 @@ check("1.21 строка о неполном составе одна на два
 
 
 def scope_counts(cur, cfg_uuid):
-    """Что лежит в базе по этой конфигурации: заголовок, индекс, таблицы восьми стадий.
+    """Что лежит в базе по этой конфигурации: заголовок, индекс, таблицы девяти стадий.
 
     Перечень таблиц берётся из словарей слоёв (V44, V46, V48, V49, V50, V51), а не
     переписывается: проба обязана считать те же таблицы, которые пишет загрузчик.
@@ -451,6 +460,14 @@ def scope_counts(cur, cfg_uuid):
         counts["s4h:" + table] = int(one(
             cur, f"SELECT count(*) FROM {table} WHERE configuration_uuid = %s::uuid",
             [str(cfg_uuid)]) or 0)
+    # Узел V54 (шаг П8): строки S4i входят в «что осталось в базе» по тому же
+    # правилу — пропущенная стадия не обязана заполнять свои таблицы, и проба
+    # обязана видеть это числом. Своих детей группы A у вида нет (замер 1.2),
+    # круг — две таблицы вида по ноге `configuration_uuid`.
+    for table in SCHEDULED_JOBS_TABLES:
+        counts["s4i:" + table] = int(one(
+            cur, f"SELECT count(*) FROM {table} WHERE configuration_uuid = %s::uuid",
+            [str(cfg_uuid)]) or 0)
     counts["s4b:bsl_modules"] = int(one(
         cur, "SELECT count(*) FROM bsl_modules WHERE configuration_uuid = %s::uuid "
              "AND parent_type = 'configuration_objects'", [str(cfg_uuid)]) or 0)
@@ -463,6 +480,7 @@ def stage_row_prefix(stage):
             STAGE_SESSION_PARAMETERS: "s4c:", STAGE_ROLES: "s4d:",
             STAGE_COMMON_ATTRIBUTES: "s4e:", STAGE_EXCHANGE_PLANS: "s4f:",
             STAGE_FILTER_CRITERIA: "s4g:", STAGE_EVENT_SUBSCRIPTIONS: "s4h:",
+            STAGE_SCHEDULED_JOBS: "s4i:",
             STAGE_OBJECT_MODULES: "s4b:"}[stage]
 
 

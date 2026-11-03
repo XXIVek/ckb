@@ -863,8 +863,8 @@ def load_scheduled_jobs(source_path: str,
     for observation, detail in (result["observations"] or []):
         if observation == "directory_missing":
             warnings.append(
-                f"Каталог {result['directory']}/ в выгрузке отсутствует — планов сеанса у этой "
-                "конфигурации нет, и нули таблиц являются ответом о выгрузке, а не отказом "
+                f"Каталог {result['directory']}/ в выгрузке отсутствует — регламентных заданий у "
+                "этой конфигурации нет, и нули таблиц являются ответом о выгрузке, а не отказом "
                 "стадии (замер 1.1 даёт именно такой вид выгрузки — Q9)"
             )
         elif observation in ("unexpected_dir", "unexpected_file"):
@@ -907,7 +907,7 @@ def load_scheduled_jobs(source_path: str,
     if index_info["available"] and int(result["index_child_records"]) != int(
             result["files_with_schedule"]):
         warnings.append(
-            f"Записей `ScheduledJob.<Имя>.{SCHEDULE_INDEX_KIND}` в индексе состава "
+            f"Записей `ScheduledJob.<Имя>.{SCHEDULE_CHILD_KIND}` в индексе состава "
             f"{result['index_child_records']}, файлов `Ext/{SCHEDULE_FILE_NAME}` "
             f"{result['files_with_schedule']} — ноги содержимого расходятся (замер 1.3 даёт "
             "равенство 303 = 303 на BGU2/BP3 и ноль на MinCfg/KomMag; расхождения перечислены "

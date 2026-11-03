@@ -6,9 +6,11 @@
 — вариант A, прецедент П8 узлов V48–V52):
 
   * стадия `s4h_event_subscriptions` стоит в `STAGES` между `s4g_filter_criteria` (2.7) и
-    `s4b_object_modules` — порядок стадий повторяет порядок нормативного списка (2.8 сразу за
-    2.7), иначе остановка пропускает позиции, стоящие раньше ошибки;
-  * `stages_after` для S4g обязан содержать `s4h_event_subscriptions`, а для S4h — только S4b:
+    `s4i_scheduled_jobs` (узел V54, позиция 2.9) — порядок стадий повторяет порядок
+    нормативного списка (2.8 сразу за 2.7), иначе остановка пропускает позиции, стоящие
+    раньше ошибки;
+  * `stages_after` для S4g обязан содержать `s4h_event_subscriptions`, а для S4h —
+    `s4i_scheduled_jobs` и `s4b_object_modules`:
     перечень пропущенных считается из `STAGES`, а не дописывается вручную там, где добавили
     новую стадию (критерий П8);
   * отказ S4h останавливает конвейер как отказ любой другой стадии: `success: false`, ключ
@@ -18,7 +20,8 @@
     полный перезапуск: ключ `STAGE_FULL_RELOAD_ONLY` у S4h внесён со значением `False`, ветвь
     `stage_resume_hint` — шагом П5 (урок П8 узла V51: значение по умолчанию маскирует отсутствие
     ветви, и стадия с существующим отдельным входом ответила бы «полная перезагрузка»);
-  * последующая S4b не вызывается вовсе и читается `not_run` (правило C2), а строки круга вида,
+  * последующие S4i и S4b не вызываются вовсе и читаются `not_run` (правило C2), а строки
+    круга вида,
     снятые перезаголовком (`remove_event_subscriptions` в `_remove_rows`), не заполняются заново:
     остановка откатом не является, и ответ обязан назвать оставшееся явно;
   * текст незакрытой части (`CHILD_NOT_IMPLEMENTED`) называет позицию 2.8 закрытой для этого вида
@@ -38,14 +41,16 @@
 
 Разделы пробы:
 
-  1 — контракт офлайн (без БД): порядок `STAGES` и `stages_after` с учётом S4h, закрытость
+  1 — контракт офлайн (без БД): порядок `STAGES` и `stages_after` с учётом S4h и S4i,
+      закрытость
       `stopped_stage_defaults()` по `STOPPED_STAGE_KEYS`, подсказки продолжения по стадиям
       (для S4h — отдельный вход при объявленном ключе `full_reload_required = false`),
       незакрытая часть S4h, форматёр стадии на отказе и на `not_run`, совпадение круга
       версионности и круга снятия при расходящемся порядке, отсутствие второго перечня таблиц и
       второго словаря состояний в проекте;
   2 — живой конвейер (одна выгрузка, `force=True`): искусственный отказ S4h даёт остановку ровно
-      на ней, `not_run` у S4b, вызов S4b отсутствует (счётчик вызовов, а не совпадение со
+      на ней, `not_run` у S4i и S4b, вызовы S4i и S4b отсутствуют (счётчик вызовов, а не
+      совпадение со
       статусом), заголовок и индекс состава остаются, строки круга вида сняты и не заполнены,
       строки двух таблиц ЧУЖИХ конфигураций не изменились;
   3 — восстановление: та же выгрузка без подмены загружается целиком, `stopped_stage` пуст,
@@ -98,7 +103,9 @@ from configuration_load_contract import (  # noqa: E402
     EVENT_SUBSCRIPTIONS_DIR,
     EVENT_SUBSCRIPTIONS_REPEAT_HINT,
     EVENT_SUBSCRIPTIONS_SECTION_HEADER,
+    SCHEDULED_JOBS_SECTION_HEADER,
     EVENT_SUBSCRIPTIONS_TABLES,
+    SCHEDULED_JOBS_TABLES,
     FILTER_CRITERIA_SECTION_HEADER,
     FOREIGN_STAGE_TABLES,
     OBJECT_MODULES_SECTION_HEADER,
@@ -106,6 +113,7 @@ from configuration_load_contract import (  # noqa: E402
     STAGE_CHILD_OBJECTS,
     STAGE_COMMON_ATTRIBUTES,
     STAGE_EVENT_SUBSCRIPTIONS,
+    STAGE_SCHEDULED_JOBS,
     STAGE_EXCHANGE_PLANS,
     STAGE_FILTER_CRITERIA,
     STAGE_FULL_RELOAD_ONLY,
@@ -122,6 +130,7 @@ from configuration_load_contract import (  # noqa: E402
     child_objects_defaults,
     common_attributes_defaults,
     event_subscriptions_defaults,
+    scheduled_jobs_defaults,
     exchange_plans_defaults,
     filter_criteria_defaults,
     format_event_subscriptions_lines,
@@ -141,13 +150,14 @@ DUMPS = ("MinCfg", "KomMag", "BGU2", "BP3")
 
 # Стадии, подменяемые пустым успехом, чтобы конвейер дошёл ровно до S4h и остановился на ней:
 # тот же приём, что в `_v52_p8_stop_probe.py` (подмена в модуле загрузчика, а не локальной
-# копии). S4b НЕ подменяется ответом: после отказа S4h она обязана не вызываться, и доказывается
-# это счётчиком вызовов, а не совпадением со статусом `not_run` (прецедент пробы V51).
+# копии). S4i и S4b НЕ подменяются ответом: после отказа S4h они обязаны не вызываться, и
+# доказывается это счётчиком вызовов, а не совпадением со статусом `not_run` (прецедент
+# пробы V51).
 EARLIER_STAGES = (
     STAGE_ROOT_MODULES, STAGE_CHILD_OBJECTS, STAGE_SESSION_PARAMETERS, STAGE_ROLES,
     STAGE_COMMON_ATTRIBUTES, STAGE_EXCHANGE_PLANS, STAGE_FILTER_CRITERIA,
 )
-LATER_STAGES = (STAGE_OBJECT_MODULES,)
+LATER_STAGES = (STAGE_SCHEDULED_JOBS, STAGE_OBJECT_MODULES,)
 STAGE_FUNCTIONS = {
     STAGE_ROOT_MODULES: "load_root_modules",
     STAGE_CHILD_OBJECTS: "load_object_properties",
@@ -157,6 +167,7 @@ STAGE_FUNCTIONS = {
     STAGE_EXCHANGE_PLANS: "load_exchange_plans",
     STAGE_FILTER_CRITERIA: "load_filter_criteria",
     STAGE_EVENT_SUBSCRIPTIONS: "load_event_subscriptions",
+    STAGE_SCHEDULED_JOBS: "load_scheduled_jobs",
     STAGE_OBJECT_MODULES: "load_object_modules",
 }
 DEFAULTS = {
@@ -168,6 +179,7 @@ DEFAULTS = {
     STAGE_EXCHANGE_PLANS: exchange_plans_defaults,
     STAGE_FILTER_CRITERIA: filter_criteria_defaults,
     STAGE_EVENT_SUBSCRIPTIONS: event_subscriptions_defaults,
+    STAGE_SCHEDULED_JOBS: scheduled_jobs_defaults,
 }
 # Круг стадии — перечень снятия (`EVENT_SUBSCRIPTIONS_REMOVE_ORDER`), а не переписанный список.
 # У S4h он совпадает составом с кругом версионности `EVENT_SUBSCRIPTIONS_TABLES` (у V51 и V52 —
@@ -340,16 +352,22 @@ def check_contract_offline():
     print("\n=== 1. Контракт стадии S4h (офлайн, без БД) ===")
     order = [stage for stage, _title in STAGES]
 
-    check("1.1 стадия S4h стоит в `STAGES` между S4g и S4b — порядок повторяет нормативный "
+    check("1.1 стадия S4h стоит в `STAGES` между S4g и S4i — порядок повторяет нормативный "
           "список (2.8 сразу за 2.7), перенумерации прежних стадий нет, S4b остаётся последней "
           "(вторая транзакция загрузки, а не позиция списка)",
           order.index(STAGE_FILTER_CRITERIA) + 1 == order.index(STAGE_EVENT_SUBSCRIPTIONS)
-          and order.index(STAGE_EVENT_SUBSCRIPTIONS) + 1 == order.index(STAGE_OBJECT_MODULES),
+          and order.index(STAGE_EVENT_SUBSCRIPTIONS) + 1
+          == order.index(STAGE_SCHEDULED_JOBS)
+          and order.index(STAGE_SCHEDULED_JOBS) + 1
+          == order.index(STAGE_OBJECT_MODULES),
           order)
-    check("1.2 `stages_after` для S4g содержит S4h, а для S4h — ровно S4b: перечень "
+    check("1.2 `stages_after` для S4g содержит S4h, а для S4h — ровно S4i и S4b: перечень "
           "пропущенных считается из `STAGES`, а не дописывается вручную (критерий П8)",
-          stages_after(STAGE_FILTER_CRITERIA) == [STAGE_EVENT_SUBSCRIPTIONS, STAGE_OBJECT_MODULES]
-          and stages_after(STAGE_EVENT_SUBSCRIPTIONS) == [STAGE_OBJECT_MODULES],
+          stages_after(STAGE_FILTER_CRITERIA) == [STAGE_EVENT_SUBSCRIPTIONS,
+                                                 STAGE_SCHEDULED_JOBS,
+                                                 STAGE_OBJECT_MODULES]
+          and stages_after(STAGE_EVENT_SUBSCRIPTIONS) == [STAGE_SCHEDULED_JOBS,
+                                                         STAGE_OBJECT_MODULES],
           {STAGE_FILTER_CRITERIA: stages_after(STAGE_FILTER_CRITERIA),
            STAGE_EVENT_SUBSCRIPTIONS: stages_after(STAGE_EVENT_SUBSCRIPTIONS)})
     check("1.3 `stage_title(S4h)` называется позицией 2.8 — строка остановки обязана называть, "
@@ -371,8 +389,10 @@ def check_contract_offline():
           and stage_resume_hint(STAGE_EVENT_SUBSCRIPTIONS) == EVENT_SUBSCRIPTIONS_REPEAT_HINT,
           stage_resume_hint(STAGE_EVENT_SUBSCRIPTIONS))
     check("1.6 незакрытая часть (`CHILD_NOT_IMPLEMENTED`) называет позицию 2.8 закрытой для этого "
-          "вида и не обещает закрытости остальных позиций списка",
-          "2.8" in CHILD_NOT_IMPLEMENTED and "2.9" not in CHILD_NOT_IMPLEMENTED,
+          "вида и не обещает закрытости остальных позиций списка; с узла V54 текст называет "
+          "закрытой и позицию 2.9, поэтому граница перечня сдвинута на 2.10",
+          "2.8" in CHILD_NOT_IMPLEMENTED and "2.9" in CHILD_NOT_IMPLEMENTED
+          and "2.10" not in CHILD_NOT_IMPLEMENTED,
           CHILD_NOT_IMPLEMENTED[:220])
 
     zero = event_subscriptions_defaults()
@@ -576,13 +596,13 @@ def main() -> int:
         card = format_load_result(stopped_result)
         check("2.5 конвейер остановлен именно на S4h и подсказывает отдельный вход, а не полную "
               "перезагрузку (критерий П8, решение Q8 варианта A); в перечне пропущенных — ровно "
-              "S4b, посчитанная из `STAGES`",
+              "S4i и S4b, посчитанная из `STAGES`",
               stopped_result.get("success") is False
               and stopped.get("stage") == STAGE_EVENT_SUBSCRIPTIONS
               and "load_event_subscriptions_tool" in str(stopped.get("resume_with"))
               and stopped.get("full_reload_required") is False
               and [item.get("stage") for item in stopped.get("not_run_stages") or []]
-                  == [STAGE_OBJECT_MODULES]
+                  == [STAGE_SCHEDULED_JOBS, STAGE_OBJECT_MODULES]
               and all(item.get("status") == STATUS_NOT_RUN
                       for item in stopped.get("not_run_stages") or []),
               {k: stopped.get(k) for k in ("stage", "full_reload_required", "resume_with")}
@@ -593,16 +613,19 @@ def main() -> int:
               and "2.8" in str(stopped.get("incomplete_group")),
               {"title": stopped.get("title"),
                "incomplete_group": str(stopped.get("incomplete_group"))[:160]})
-        check("2.7 S4b не вызывалась вовсе — по счётчику вызовов, а не по совпадению со статусом "
+        check("2.7 S4i и S4b не вызывались вовсе — по счётчику вызовов, а не по совпадению "
+              "со статусом "
               "`not_run` (прецедент пробы V51: подмена ответа скрыла бы реальный прогон хвоста); "
               "сама S4h вызвана ровно один раз",
-              calls.get(STAGE_EVENT_SUBSCRIPTIONS) == 1 and STAGE_OBJECT_MODULES not in calls,
+              calls.get(STAGE_EVENT_SUBSCRIPTIONS) == 1 and STAGE_OBJECT_MODULES not in calls
+              and STAGE_SCHEDULED_JOBS not in calls,
               {"calls": calls})
         check("2.8 карточка остановки называет раздел остановки, адрес остановленной стадии и "
-              "пропущенную S4b словом формата (правило C2: пропуск читается текстом, а не "
+              "пропущенные S4i и S4b словом формата (правило C2: пропуск читается текстом, а не "
               "пустотой)",
               STOP_STAGE_SECTION_HEADER in card and STAGE_EVENT_SUBSCRIPTIONS in card
-              and SKIPPED_PHRASE in card and stage_title(STAGE_OBJECT_MODULES) in card,
+              and SKIPPED_PHRASE in card and stage_title(STAGE_OBJECT_MODULES) in card
+              and stage_title(STAGE_SCHEDULED_JOBS) in card,
               card[:200])
         after_stop = circle_counts(cur, cfg_uuid)
         other_after_stop = other_circle_counts(cur, cfg_uuid)
