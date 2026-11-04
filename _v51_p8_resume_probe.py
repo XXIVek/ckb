@@ -61,6 +61,7 @@ from configuration_load_contract import (  # noqa: E402
     STAGE_EVENT_SUBSCRIPTIONS,
     STAGE_SCHEDULED_JOBS,
     STAGE_BOTS,
+    STAGE_FUNCTIONAL_OPTIONS,
     STAGE_OBJECT_MODULES,
     STAGE_ROLES,
     STAGE_ROOT_MODULES,
@@ -74,6 +75,7 @@ from configuration_load_contract import (  # noqa: E402
     event_subscriptions_defaults,
     scheduled_jobs_defaults,
     bots_defaults,
+    functional_options_defaults,
     format_exchange_plans_lines,
     root_modules_defaults,
     roles_defaults,
@@ -90,14 +92,14 @@ DUMPS = ("MinCfg", "KomMag", "BGU2", "BP3")
 # загрузчика, а не локальной копии). S4g и S4b НЕ подменяются заглушками: после отказа S4f
 # они не вызываются, а проверка этого факта требует счётчика — поэтому на них ставится
 # обёртка, которая зовёт настоящую функцию и помечает вызов в `calls`. S4g стоит между S4f
-# и S4b с узла V52 (шаг П5), S4h внесён узлом V53, S4i — узлом V54, S4j — узлом V55, и пропуск одной только
+# и S4b с узла V52 (шаг П5), S4h внесён узлом V53, S4i — узлом V54, S4j — узлом V55, S4k — узлом V56, и пропуск одной только
 # S4b ничего бы не доказал: отказ S4f обязан снять со вызовов весь хвост `STAGES`.
 EARLIER_STAGES = (
     STAGE_ROOT_MODULES, STAGE_CHILD_OBJECTS, STAGE_SESSION_PARAMETERS, STAGE_ROLES,
     STAGE_COMMON_ATTRIBUTES,
 )
 LATER_STAGES = (STAGE_FILTER_CRITERIA, STAGE_EVENT_SUBSCRIPTIONS,
-                STAGE_SCHEDULED_JOBS, STAGE_BOTS, STAGE_OBJECT_MODULES)
+                STAGE_SCHEDULED_JOBS, STAGE_BOTS, STAGE_FUNCTIONAL_OPTIONS, STAGE_OBJECT_MODULES)
 STAGE_FUNCTIONS = {
     STAGE_ROOT_MODULES: "load_root_modules",
     STAGE_CHILD_OBJECTS: "load_object_properties",
@@ -109,6 +111,7 @@ STAGE_FUNCTIONS = {
     STAGE_EVENT_SUBSCRIPTIONS: "load_event_subscriptions",
     STAGE_SCHEDULED_JOBS: "load_scheduled_jobs",
     STAGE_BOTS: "load_bots",
+    STAGE_FUNCTIONAL_OPTIONS: "load_functional_options",
     STAGE_OBJECT_MODULES: "load_object_modules",
 }
 DEFAULTS = {
@@ -122,6 +125,7 @@ DEFAULTS = {
     STAGE_EVENT_SUBSCRIPTIONS: event_subscriptions_defaults,
     STAGE_SCHEDULED_JOBS: scheduled_jobs_defaults,
     STAGE_BOTS: bots_defaults,
+    STAGE_FUNCTIONAL_OPTIONS: functional_options_defaults,
     STAGE_OBJECT_MODULES: object_modules_defaults,
 }
 

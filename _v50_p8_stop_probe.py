@@ -87,9 +87,11 @@ from configuration_load_contract import (  # noqa: E402
     EVENT_SUBSCRIPTIONS_SECTION_HEADER,
     SCHEDULED_JOBS_SECTION_HEADER,
     BOTS_SECTION_HEADER,
+    FUNCTIONAL_OPTIONS_SECTION_HEADER,
     EVENT_SUBSCRIPTIONS_TABLES,
     SCHEDULED_JOBS_TABLES,
     BOTS_TABLES,
+    FUNCTIONAL_OPTIONS_TABLES,
     EXCHANGE_PLAN_SECTION_HEADER,
     EXCHANGE_PLAN_TABLES,
     FILTER_CRITERIA_SECTION_HEADER,
@@ -108,6 +110,7 @@ from configuration_load_contract import (  # noqa: E402
     STAGE_EVENT_SUBSCRIPTIONS,
     STAGE_SCHEDULED_JOBS,
     STAGE_BOTS,
+    STAGE_FUNCTIONAL_OPTIONS,
     STAGE_EXCHANGE_PLANS,
     STAGE_FILTER_CRITERIA,
     STAGE_FULL_RELOAD_ONLY,
@@ -127,6 +130,7 @@ from configuration_load_contract import (  # noqa: E402
     event_subscriptions_defaults,
     scheduled_jobs_defaults,
     bots_defaults,
+    functional_options_defaults,
     exchange_plans_defaults,
     filter_criteria_defaults,
     format_common_attributes_lines,
@@ -168,7 +172,7 @@ LOADER = ROOT / "src" / "configuration_loader.py"
 ROUTER = ROOT / "src" / "config_load_router.py"
 
 # Стадии детей конвейера в порядке `STAGES` — тот же порядок, что у нормативного списка
-# (2.1–2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 2.10, модули Ext/). Перебор намеренно полный:
+# (2.1–2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 2.10, 2.11, модули Ext/). Перебор намеренно полный:
 # решение Q8 узла V48 принято «ко всем стадиям», и проверка одной стадии таким ответом не
 # является. Узел V50 добавлял в этот перечень шестую стадию — S4e; узел V51 добавлял
 # седьмую — S4f (позиция 2.6); узел V52 добавлял восьмую — S4g (позиция 2.7); узел V53
@@ -180,7 +184,7 @@ ROUTER = ROOT / "src" / "config_load_router.py"
 CHILD_STAGES = (
     STAGE_ROOT_MODULES, STAGE_CHILD_OBJECTS, STAGE_SESSION_PARAMETERS, STAGE_ROLES,
     STAGE_COMMON_ATTRIBUTES, STAGE_EXCHANGE_PLANS, STAGE_FILTER_CRITERIA,
-    STAGE_EVENT_SUBSCRIPTIONS, STAGE_SCHEDULED_JOBS, STAGE_BOTS, STAGE_OBJECT_MODULES,
+    STAGE_EVENT_SUBSCRIPTIONS, STAGE_SCHEDULED_JOBS, STAGE_BOTS, STAGE_FUNCTIONAL_OPTIONS, STAGE_OBJECT_MODULES,
 )
 STAGE_KEYS = {
     STAGE_ROOT_MODULES: "root_modules",
@@ -193,6 +197,7 @@ STAGE_KEYS = {
     STAGE_EVENT_SUBSCRIPTIONS: "event_subscriptions",
     STAGE_SCHEDULED_JOBS: "scheduled_jobs",
     STAGE_BOTS: "bots",
+    STAGE_FUNCTIONAL_OPTIONS: "functional_options",
     STAGE_OBJECT_MODULES: "object_modules",
 }
 SECTION_HEADERS = {
@@ -206,6 +211,7 @@ SECTION_HEADERS = {
     STAGE_EVENT_SUBSCRIPTIONS: EVENT_SUBSCRIPTIONS_SECTION_HEADER,
     STAGE_SCHEDULED_JOBS: SCHEDULED_JOBS_SECTION_HEADER,
     STAGE_BOTS: BOTS_SECTION_HEADER,
+    STAGE_FUNCTIONAL_OPTIONS: FUNCTIONAL_OPTIONS_SECTION_HEADER,
     STAGE_OBJECT_MODULES: OBJECT_MODULES_SECTION_HEADER,
 }
 DEFAULTS = {
@@ -219,6 +225,7 @@ DEFAULTS = {
     STAGE_EVENT_SUBSCRIPTIONS: event_subscriptions_defaults,
     STAGE_SCHEDULED_JOBS: scheduled_jobs_defaults,
     STAGE_BOTS: bots_defaults,
+    STAGE_FUNCTIONAL_OPTIONS: functional_options_defaults,
     STAGE_OBJECT_MODULES: object_modules_defaults,
 }
 # Функция стадии — имя в модуле загрузчика: `register_configuration` обращается к имени
@@ -234,6 +241,7 @@ STAGE_FUNCTIONS = {
     STAGE_EVENT_SUBSCRIPTIONS: "load_event_subscriptions",
     STAGE_SCHEDULED_JOBS: "load_scheduled_jobs",
     STAGE_BOTS: "load_bots",
+    STAGE_FUNCTIONAL_OPTIONS: "load_functional_options",
     STAGE_OBJECT_MODULES: "load_object_modules",
 }
 # Чем продолжение допустимо (подстрока подсказки): у стадии с отдельным входом — имя его
@@ -249,6 +257,7 @@ RESUME_MARKS = {
     STAGE_EVENT_SUBSCRIPTIONS: "load_event_subscriptions_tool",
     STAGE_SCHEDULED_JOBS: "load_scheduled_jobs_tool",
     STAGE_BOTS: "load_bots_tool",
+    STAGE_FUNCTIONAL_OPTIONS: "load_functional_options_tool",
     STAGE_OBJECT_MODULES: "load_1c_catalog_tool",
 }
 # Слова, которыми форматёр называет состояние стадии (правило C2): «не удалась» — круг
@@ -364,51 +373,57 @@ check("1.3 форматёр на «не останавливался» разд�
 ORDER = [stage for stage, _ in STAGES]
 # Критерий П8: перечень пропущенных считается из `STAGES`, поэтому вход вида в останов
 # виден именно здесь — у S4d пропущенными оказываются S4e, S4f, S4g и S4b, у S4e — S4f, S4g
-# и S4b, у S4f (узел V51) — S4g, S4h, S4i, S4j и S4b, у S4g (узел V52) — S4h, S4i, S4j и S4b, у S4h
+# и S4b, у S4f (узел V51) — S4g, S4h, S4i, S4j, S4k и S4b, у S4g (узел V52) — S4h, S4i, S4j, S4k и S4b, у S4h
 # (узел V53) — S4b. Строки ниже перечисляют порядок явно: вывод из `STAGES` проверяет
 # следующий пункт,
 # а явный перечень называет, какой
 # именно порядок ожидается.
-check("1.4 `stages_after` даёт порядок `STAGES`: S4d → S4e → S4f → S4g → S4h → S4i → S4j → S4b "
-      "(критерий П8, узлы V52, V53, V54 и V55)",
+check("1.4 `stages_after` даёт порядок `STAGES`: S4d → S4e → S4f → S4g → S4h → S4i → S4j → S4k → S4b "
+      "(критерий П8, узлы V52, V53, V54, V55 и V56)",
       stages_after(STAGE_SESSION_PARAMETERS) == [STAGE_ROLES, STAGE_COMMON_ATTRIBUTES,
                                                 STAGE_EXCHANGE_PLANS,
                                                 STAGE_FILTER_CRITERIA,
                                                 STAGE_EVENT_SUBSCRIPTIONS,
                                                 STAGE_SCHEDULED_JOBS,
                                                 STAGE_BOTS,
+                                                STAGE_FUNCTIONAL_OPTIONS,
                                                 STAGE_OBJECT_MODULES]
       and stages_after(STAGE_ROLES) == [STAGE_COMMON_ATTRIBUTES, STAGE_EXCHANGE_PLANS,
                                         STAGE_FILTER_CRITERIA,
                                         STAGE_EVENT_SUBSCRIPTIONS,
                                         STAGE_SCHEDULED_JOBS,
                                         STAGE_BOTS,
+                                        STAGE_FUNCTIONAL_OPTIONS,
                                         STAGE_OBJECT_MODULES]
       and stages_after(STAGE_COMMON_ATTRIBUTES) == [STAGE_EXCHANGE_PLANS,
                                                    STAGE_FILTER_CRITERIA,
                                                    STAGE_EVENT_SUBSCRIPTIONS,
                                                    STAGE_SCHEDULED_JOBS,
                                                    STAGE_BOTS,
+                                                   STAGE_FUNCTIONAL_OPTIONS,
                                                    STAGE_OBJECT_MODULES]
       and stages_after(STAGE_EXCHANGE_PLANS) == [STAGE_FILTER_CRITERIA,
                                                  STAGE_EVENT_SUBSCRIPTIONS,
                                                  STAGE_SCHEDULED_JOBS,
                                                  STAGE_BOTS,
+                                                 STAGE_FUNCTIONAL_OPTIONS,
                                                  STAGE_OBJECT_MODULES]
       and stages_after(STAGE_FILTER_CRITERIA) == [STAGE_EVENT_SUBSCRIPTIONS,
                                                  STAGE_SCHEDULED_JOBS,
                                                  STAGE_BOTS,
+                                                 STAGE_FUNCTIONAL_OPTIONS,
                                                  STAGE_OBJECT_MODULES]
       and stages_after(STAGE_EVENT_SUBSCRIPTIONS) == [
      STAGE_SCHEDULED_JOBS,
      STAGE_BOTS,
+     STAGE_FUNCTIONAL_OPTIONS,
      STAGE_OBJECT_MODULES]
       and stages_after(STAGE_OBJECT_MODULES) == []
       and all(stages_after(stage) == ORDER[ORDER.index(stage) + 1:]
               for stage in CHILD_STAGES),
       [stages_after(stage) for stage in CHILD_STAGES])
 check("1.4а порядок `STAGES` повторяет нормативный список: 2.3 → 2.4 → 2.5 → 2.6 → 2.7 → "
-      "2.8 → 2.9 → 2.10 → модули Ext/ (критерий П8, узлы V51, V52, V53, V54 и V55)",
+      "2.8 → 2.9 → 2.10 → 2.11 → модули Ext/ (критерий П8, узлы V51, V52, V53, V54, V55 и V56)",
       ORDER.index(STAGE_SESSION_PARAMETERS) + 1 == ORDER.index(STAGE_ROLES)
       and ORDER.index(STAGE_ROLES) + 1 == ORDER.index(STAGE_COMMON_ATTRIBUTES)
       and ORDER.index(STAGE_COMMON_ATTRIBUTES) + 1 == ORDER.index(STAGE_EXCHANGE_PLANS)
@@ -420,6 +435,8 @@ check("1.4а порядок `STAGES` повторяет нормативный �
       and ORDER.index(STAGE_SCHEDULED_JOBS) + 1
       == ORDER.index(STAGE_BOTS)
       and ORDER.index(STAGE_BOTS) + 1
+      == ORDER.index(STAGE_FUNCTIONAL_OPTIONS)
+      and ORDER.index(STAGE_FUNCTIONAL_OPTIONS) + 1
       == ORDER.index(STAGE_OBJECT_MODULES),
       " → ".join(ORDER))
 check("1.4б стадия S4e названа позицией 2.5 и каталогом вида, а не «дополнением S4d»",
@@ -478,12 +495,13 @@ for stage in CHILD_STAGES:
               "2.4" in str(stopped["incomplete_group"])
               and "группа F" in str(stopped["incomplete_group"]),
               stopped["incomplete_group"])
-        check("1.12в `s4d_roles`: пропущенными после отказа названы S4e, S4f, S4g, S4h, S4i, S4j и "
-              "S4b (критерий П8, узлы V51, V52, V53, V54 и V55)",
+        check("1.12в `s4d_roles`: пропущенными после отказа названы S4e, S4f, S4g, S4h, S4i, S4j, S4k и "
+              "S4b (критерий П8, узлы V51, V52, V53, V54, V55 и V56)",
               got_after == [STAGE_COMMON_ATTRIBUTES, STAGE_EXCHANGE_PLANS,
                             STAGE_FILTER_CRITERIA, STAGE_EVENT_SUBSCRIPTIONS,
                             STAGE_SCHEDULED_JOBS,
                             STAGE_BOTS,
+                            STAGE_FUNCTIONAL_OPTIONS,
                             STAGE_OBJECT_MODULES], got_after)
     if stage == STAGE_COMMON_ATTRIBUTES:
         # Критерий П8 для самой стадии: подсказка называет отдельный вход группы V50, а не
@@ -505,11 +523,12 @@ for stage in CHILD_STAGES:
               and "группа E" in str(stopped["incomplete_group"]),
               stopped["incomplete_group"])
         check("1.12е `s4e_common_attributes`: пропущенными после отказа названы S4f, S4g, "
-              "S4h, S4i, S4j и S4b (входы видов в останов предыдущей стадии — узлы V51, V52, "
+              "S4h, S4i, S4j, S4k и S4b (входы видов в останов предыдущей стадии — узлы V51, V52, "
               "V53, V54 и V55)",
               got_after == [STAGE_EXCHANGE_PLANS, STAGE_FILTER_CRITERIA,
                             STAGE_EVENT_SUBSCRIPTIONS, STAGE_SCHEDULED_JOBS,
                             STAGE_BOTS,
+                            STAGE_FUNCTIONAL_OPTIONS,
                             STAGE_OBJECT_MODULES], got_after)
         check("1.12ж `s4e_common_attributes`: словарь незакрытых групп содержит её ключ",
               STAGE_COMMON_ATTRIBUTES in STAGE_INCOMPLETE_GROUPS,
@@ -611,7 +630,7 @@ check("1.28 круг S4e не пересекается с кругами S4c и 
 
 
 def scope_counts(cur, cfg_uuid):
-    """Что лежит в базе по этой конфигурации: заголовок, индекс, таблицы десяти стадий.
+    """Что лежит в базе по этой конфигурации: заголовок, индекс, таблицы одиннадцати стадий.
 
     Перечень таблиц берётся из словарей слоёв (V44, V46, V48, V49, V50, V51), а не
     переписывается: проба обязана считать те же таблицы, которые пишет загрузчик.
@@ -680,6 +699,14 @@ def scope_counts(cur, cfg_uuid):
         counts["s4j:" + table] = int(one(
             cur, f"SELECT count(*) FROM {table} WHERE configuration_uuid = %s::uuid",
             [str(cfg_uuid)]) or 0)
+    # Узел V56 (шаг П8): строки S4k входят в «что осталось в базе» по тому
+    # же правилу — пропущенная стадия не обязана заполнять свои таблицы, и
+    # проба обязана видеть это числом. Круг вида — две таблицы (замер 1.2
+    # плана узла V56); перечень берётся из словаря слоя.
+    for table in FUNCTIONAL_OPTIONS_TABLES:
+        counts["s4k:" + table] = int(one(
+            cur, f"SELECT count(*) FROM {table} WHERE configuration_uuid = %s::uuid",
+            [str(cfg_uuid)]) or 0)
     counts["s4b:bsl_modules"] = int(one(
         cur, "SELECT count(*) FROM bsl_modules WHERE configuration_uuid = %s::uuid "
              "AND parent_type = 'configuration_objects'", [str(cfg_uuid)]) or 0)
@@ -694,6 +721,7 @@ def stage_row_prefix(stage):
             STAGE_FILTER_CRITERIA: "s4g:", STAGE_EVENT_SUBSCRIPTIONS: "s4h:",
             STAGE_SCHEDULED_JOBS: "s4i:",
             STAGE_BOTS: "s4j:",
+            STAGE_FUNCTIONAL_OPTIONS: "s4k:",
             STAGE_OBJECT_MODULES: "s4b:"}[stage]
 
 
