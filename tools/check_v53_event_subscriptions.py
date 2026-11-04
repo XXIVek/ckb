@@ -81,8 +81,9 @@ r"""tools/check_v53_event_subscriptions.py — узел V53: подписки н
       стадией (вторая транзакция); круг снятия и
       порядок удаления (`sources` ДО `subscriptions` — иначе `ON DELETE CASCADE` снял бы строки
       молча, и число в ответе было бы неправдой); подсказка продолжения; нулевой ответ стадии;
-      вход `load_event_subscriptions_tool` в реестре `EXPECTED_TOOLS` (11 инструментов ядра —
-      с узла V54, шаг П5, круг ядра вырос до 12, и проверка считает актуальный круг).
+      вход `load_event_subscriptions_tool` в реестре `EXPECTED_TOOLS` (одиннадцатый инструмент
+      ядра — с узла V54 круг вырос до 12, с узла V55 (шаг П5, `load_bots_tool`) до 13;
+      проверка считает актуальный круг, а сторож состава — `tools/check_mcp_tool_wiring.py`).
   12. ИТОГ ПО КОРПУСУ и неприкосновенность чужих кругов: сумма по четырём выгрузкам равна
       разделам 1 и 2 плана, таблицы других узлов прогон не меняет.
 
@@ -1548,10 +1549,11 @@ def check_contract():
     registry = registry_expected_tools()
     core_tools = list((registry.get("server_configurations_core.py") or []))
     check("вход `load_event_subscriptions_tool` внесён в реестр `EXPECTED_TOOLS` ядра "
-          "(узлом V53 П5 круг ядра — 11 инструментов; с узла V54 П5 — 12)",
+          "(узлом V53 П5 круг ядра — 11 инструментов; с узла V54 П5 — 12; с узла V55 П5 — 13)",
           "load_event_subscriptions_tool" in core_tools, names(core_tools))
-    check(f"число инструментов ядра — {len(core_tools)} (эталон реестра: 12)",
-          len(core_tools) == 12, f"факт: {len(core_tools)}, эталон: 12")
+    check(f"число инструментов ядра — {len(core_tools)} (эталон реестра: 13, узел V55 добавил "
+          "`load_bots_tool`)",
+          len(core_tools) == 13, f"факт: {len(core_tools)}, эталон: 13")
 
 
 # ── контур 12: итог по корпусу и неприкосновенность чужих кругов ─────────────────────────────
