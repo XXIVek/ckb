@@ -35,6 +35,7 @@ from configuration_loader import OBJECTS_TABLE, register_configuration
 # модуль (src/configuration_load_contract.py) — тот же, что и для ответа отдельного
 # инструмента: карточка и инструмент обязаны рассказывать об одном слое одинаково.
 from configuration_load_contract import (
+    BOTS_SECTION_HEADER,
     CHILD_SECTION_HEADER,
     COMMON_ATTRIBUTES_SECTION_HEADER,
     EXCHANGE_PLAN_SECTION_HEADER,
@@ -47,6 +48,7 @@ from configuration_load_contract import (
     SESSION_PARAMETERS_SECTION_HEADER,
     STOP_STAGE_SECTION_HEADER,
     STORED_META_KINDS,
+    format_bots_lines,
     format_child_object_lines,
     format_common_attributes_lines,
     format_exchange_plans_lines,
@@ -529,6 +531,20 @@ def _stage_section_lines(result):
     if scheduled_jobs_part:
         lines.append(f"{SCHEDULED_JOBS_SECTION_HEADER}:")
         lines.extend(format_scheduled_jobs_lines(scheduled_jobs_part, indent="   "))
+    # Узел V55 (стадия S4j, позиция 2.10 списка): свойства ботов конфигурации.
+    # Раздел печатается и при отказе стадии, и при `not_run` — по той же причине, что у
+    # S3/S4/S4c–S4i: «загружено» без него читалось бы как «состав конфигурации в БД есть
+    # весь». Ответ стадии лежит в собственном ключе `bots`, а не внутри `scheduled_jobs` или
+    # `event_subscriptions` (правило C3); текст даёт общий форматёр контракта — тот же, что
+    # отдаёт отдельный инструмент `load_bots_tool` (шаг П5). Блока «группы круга не
+    # запрашивались» у форматёра нет: групп `kinds` у вида нет по решению Q5 (вариант A), и
+    # обещать их значило бы обещать вход, которого нет. Блок детей отсутствует осознанно — у
+    # бота нет ни форм, ни макетов, ни команд (замер 1.2); файл модуля называется состоянием
+    # строки вида, а его текст пишет узел V47 в своём разделе ниже.
+    bots_part = result.get("bots") or {}
+    if bots_part:
+        lines.append(f"{BOTS_SECTION_HEADER}:")
+        lines.extend(format_bots_lines(bots_part, indent="   "))
     # Узел V47 (стадия S4b): модули объектов конфигурации — вторая транзакция загрузки
     # (Q6, граница D7). Раздел печатается и при отказе стадии, и при `not_run` (индекс
     # состава не разобран — круг не определён): «конфигурация загружена» без него

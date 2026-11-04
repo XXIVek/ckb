@@ -255,6 +255,29 @@ from configuration_scheduled_jobs import (
     TABLE_NAME as SCHEDULED_JOBS_TABLE,
     XML_PROPERTY_NAMES as XML_PROPERTY_NAMES_OF_JOB,
 )
+# Узел V55 (боты, шаг П4, 04.11.2026, позиция 2.10 нормативного списка): имя каталога вида,
+# имя таблицы, метка метаданных и словари состояний приходят импортом из разбора
+# (`src/configuration_bots.py`) — второго перечня таблиц или состояний в проекте нет (тот же
+# порядок, что V48…V54). Разбор ничего из контракта не импортирует, цикл односторонний.
+# Словарей ЗНАЧЕНИЙ свойств здесь нет намеренно: корпус словарь пяти тегов вида не замыкает
+# (2 файла одной из четырёх выгрузок, XSD вида нет — замер 1.5 плана), поэтому контракт
+# называет состояния (`properties_state` плюс перечень виновников), а не допустимые значения
+# (Q1 — решение оператора, вариант A, по прецеденту Q7 узла V50).
+from configuration_bots import (
+    CIRCLE_DISCREPANCIES as BOTS_CIRCLE_DISCREPANCIES,
+    COUNT_KEYS as BOTS_COUNT_KEYS,
+    DIR_NAME as BOTS_DIR,
+    INDEX_CHECK_STATES as BOTS_INDEX_CHECK_STATES,
+    LT_STATES as BOTS_PICTURE_LT_STATES,
+    MODULE_STATES as BOTS_MODULE_STATES,
+    OBJECT_KIND_TAG as BOTS_META_TAG,
+    OBSERVATION_KINDS as BOTS_OBSERVATION_KINDS,
+    PICTURE_STATES as BOTS_PICTURE_STATES,
+    PROPERTIES_STATES as BOTS_PROPERTIES_STATES,
+    TABLE_NAME as BOTS_TABLE,
+    TARGET_CLASS_VALUES as BOTS_PICTURE_TARGET_CLASSES,
+    state_columns as bots_state_columns,
+)
 from current_revision import CONFIGURATION_VERSIONED_TABLES
 
 # ── стадии конвейера: один перечень на контракт, карточку и проверку ───────────────
@@ -351,6 +374,23 @@ STAGE_EVENT_SUBSCRIPTIONS = "s4h_event_subscriptions"
 # не дал (346 файлов регистрации и 313 записей расписания на весь круг, максимум 3 записи в
 # одном файле) — отдельный вход дозагружает весь круг сразу.
 STAGE_SCHEDULED_JOBS = "s4i_scheduled_jobs"
+# Узел V55 (04.11.2026, позиция 2.10 нормативного списка): свойства ботов — отдельная
+# стадия по той же причине, что S4c (V48), S4d (V49), S4e (V50), S4f (V51), S4g (V52),
+# S4h (V53) и S4i (V54): правило C3 требует своего ключа ответа `bots`, а разбивать чужой
+# ключ значило бы переименовывать контракт соседнего узла. Номер S4j, а не S5: S5 остаётся
+# за планируемой стадией анализа. В `STAGES` ниже стадия вносится шагом П5 (позиция 2.10
+# идёт сразу за 2.9, то есть между S4i и S4b — порядок нормативного списка держает `STAGES`,
+# а не порядок номеров): слой `load_bots` (src/configuration_bots_loader.py) появляется
+# шагом П4 этим же, а точка входа `load_bots_tool` — шагом П5. Круг таблиц стадии
+# (`BOTS_TABLES`) и его включение в `FOREIGN_STAGE_TABLES` объявлены уже на П4: версионная
+# таблица без объявленного круга загрузки означала бы, что чужая стадия S4 её снимает
+# (дефект, названный узлами V49…V54). Групп запроса (`kinds`) у вида НЕТ — это решение, а не
+# упущение (Q5, вариант A по прецеденту Q8 узла V53, Q10 узла V50 и Q5 узла V54): строка
+# вида едина, её состояние свойств, состояние ссылки и состояние модуля неотделимы от неё, а
+# порога цены, при котором круг стоило бы резать, замер 1.1 не дал — весь круг четырёх
+# выгрузок это 2 файла регистрации одной конфигурации (MinCfg; KomMag, BGU2 и BP3 вида не
+# имеют ни файлами, ни строками индекса).
+STAGE_BOTS = "s4j_bots"
 # Узел V47 (28.10.2026): тексты модулей объектов конфигурации. Номер S4b, а не S5:
 # S5 остаётся за планируемой стадией анализа (дополнение оператора 23.10.2026), которой
 # в `STAGES` нет. Стадия идёт сразу за S4 и является второй транзакцией загрузки (Q6,
@@ -387,6 +427,11 @@ STAGES: Tuple[Tuple[str, str], ...] = (
     # потому что является второй транзакцией загрузки (Q6 узла V46), а не позицией списка.
     (STAGE_SCHEDULED_JOBS,
      "Свойства регламентных заданий (ScheduledJobs, позиция 2.9)"),
+    # Узел V55 (позиция 2.10 списка, решение Q5 вариант A): 2.10 идёт сразу за 2.9, литера
+    # `s4j` в коде свободна — перенумерации прежних стадий нет. S4b остаётся последней,
+    # потому что является второй транзакцией загрузки (Q6 узла V46), а не позицией списка.
+    (STAGE_BOTS,
+     "Свойства ботов конфигурации (Bots, позиция 2.10)"),
     (STAGE_OBJECT_MODULES, "Модули объектов конфигурации (тексты Ext/, вторая транзакция)"),
 )
 
@@ -546,6 +591,12 @@ STAGE_FULL_RELOAD_ONLY: Dict[str, bool] = {
     # маскировалось бы значением по умолчанию в `build_stopped_stage`: стадия без ключа
     # читается стадией без отдельного входа, хотя продолжение у неё есть.
     STAGE_SCHEDULED_JOBS: False,
+    # Узел V55 (позиция 2.10, шаг П5 — урок П8 узлов V51–V54): ключ словаря и ветка
+    # `stage_resume_hint` вносятся ОДНИМ вызовом. Разрыв между ними маскировался бы значением
+    # по умолчанию в `build_stopped_stage`: стадия без ключа читается стадией без отдельного
+    # входа, хотя продолжение у неё есть (слоем `load_bots` он обеспечен с шага П4, точкой
+    # входа группы — этим шагом П5).
+    STAGE_BOTS: False,
     STAGE_OBJECT_MODULES: True,
 }
 
@@ -588,6 +639,13 @@ STAGE_INCOMPLETE_GROUPS: Dict[str, str] = {
     STAGE_SCHEDULED_JOBS: "свойства регламентных заданий (позиция 2.9 нормативного списка, "
                           "её свойства и записи расписания <Schedule> и "
                           "<DetailedDailySchedules> файла Ext/Schedule.xml)",
+    # Узел V55 (шаг П5): группа называется позицией нормативного списка и её содержимым — по
+    # образцу записей S4c…S4i. У бота нет форм, макетов и команд (замер 1.2), единственный
+    # ребёнок вида в индексе состава — модуль Ext/Module.bsl, поэтому группа названа пятью
+    # свойствами файла регистрации, ссылкой `Picture` и дескрипторами модуля: без записи
+    # остановка на S4j оставила бы ответ без машиночитаемого признака неполноты.
+    STAGE_BOTS: "свойства ботов конфигурации (позиция 2.10 нормативного списка, её свойства "
+                "файла регистрации, ссылка Picture и дескрипторы модуля Ext/Module.bsl)",
     STAGE_OBJECT_MODULES: "модули объектов конфигурации (группа C модели V38, Ext/)",
 }
 
@@ -647,6 +705,7 @@ def stage_resume_hint(stage_id: str) -> str:
     (шаг П5 узла V51), S4g — свой вход `load_filter_criteria_tool` (шаг П5 узла V52),
     S4h — свой вход `load_event_subscriptions_tool` (шаг П5 узла V53), S4i — свой вход
     `load_scheduled_jobs_tool` (шаг П5 узла V54),
+    S4j — свой вход `load_bots_tool` (шаг П5 узла V55),
     S4b — не имеет (решение Q4.1). Стадия без
     подсказки была бы ошибкой
     контракта, поэтому ответ по умолчанию — полная перезагрузка, а не пустая строка. Отсутствие
@@ -672,6 +731,8 @@ def stage_resume_hint(stage_id: str) -> str:
         return EVENT_SUBSCRIPTIONS_REPEAT_HINT
     if stage_id == STAGE_SCHEDULED_JOBS:
         return SCHEDULED_JOBS_REPEAT_HINT
+    if stage_id == STAGE_BOTS:
+        return BOTS_REPEAT_HINT
     if stage_id == STAGE_OBJECT_MODULES:
         return OBJECT_MODULES_RELOAD_HINT
     return "полная перезагрузка load_1c_catalog_tool(source_path=…, force=True)"
@@ -1443,6 +1504,79 @@ SCHEDULED_JOBS_CIRCLE_BOUNDARY = (
     "определённых типов (`DefinedTypes`) в выгрузке нет (замер 2.4.4), узла для них нет"
 )
 
+# ── контракт стадии S4j (узел V55, шаг П4, позиция 2.10 списка) ───────────────────────
+# Круг таблиц стадии и тексты контракта объявлены одним местом — по той же причине, что у
+# V48…V54: текст незакрытой части ссылается на раздел, где читается отказ стадии, а держать
+# два написания одного заголовка нельзя. Имя таблицы, каталог вида, метка метаданных и
+# словари состояний приходят импортом из разбора (`src/configuration_bots.py`) — второго
+# перечня таблиц или состояний в проекте нет.
+#
+# Дефект, который закрывает эта константа, — тот же, что называли узлы V49…V54: регистрация
+# `bots` в круге версионности (шаг П4, `CONFIGURATION_VERSIONED_TABLES`) молча добавила бы
+# её к кругу стадии S4, потому что `CHILD_TABLES` строится из
+# `CONFIGURATION_VERSIONED_TABLES` минус `FOREIGN_STAGE_TABLES`, а стадия S4 снимала и
+# анализировала бы чужие строки (замер 1.1: 2 файла регистрации и 2 файла модулей у MinCfg).
+#
+# Таблиц детей у вида нет, и это названо, а не обойено: форм, макетов и команд у вида нет ни
+# файлами, ни строками индекса состава (замер 1.2), а единственный ребёнок вида в индексе
+# состава (`Bot.<Имя>.Module`) отдельной таблицы не имеет осознанно — его состояние и
+# дескрипторы являются колонками строки вида (Q1, вариант A: кратность ровно одна на
+# объект), а тексты пишет узел V47 в `bsl_modules` (мера M5: стадия V55 их не читает и не
+# снимает). Поэтому круг стадии — ОДНА таблица, а `BOTS_REMOVE_ORDER` совпадает с кругом
+# версионности: нулевой ответ обещает ровно тот же ключ, что и ответ прогона (в отличие от
+# V51/V52/V54, где круг снятия шире).
+BOTS_TABLES: Tuple[str, ...] = (BOTS_TABLE,)
+
+# Порядок снятия здесь совпадает с порядком записи: таблица одна, каскадных внешних ключей
+# в неё нет (прецедент V20.1 — внешний ключ на заголовок конфигурации не ставится
+# осознанно), поэтому снятие держится явным `DELETE` по `configuration_uuid`.
+BOTS_REMOVE_ORDER: Tuple[str, ...] = (BOTS_TABLE,)
+
+BOTS_SECTION_HEADER = "СВОЙСТВА БОТОВ КОНФИГУРАЦИИ (узел V55, позиция 2.10)"
+
+# Что обязан сказать ответ о повторе стадии. Отдельная точка входа группы —
+# `load_bots_tool` (шаг П5 узла, внесена в реестр сервера этим же шагом —
+# `tools/check_mcp_tool_wiring.py` сторожит состав). П4 держит формулировку про слой
+# `load_bots`, потому что обещать инструмент, которого в реестре нет, — значит дать
+# обещание, которое сервер не выполняет (прецеденты V48…V54).
+BOTS_REPEAT_HINT = (
+    "Повторить стадию можно отдельным входом группы load_bots_tool(source_path=…) без "
+    "перезагрузки конфигурации (узел V55, шаг П5) либо полной перезагрузкой "
+    "load_1c_catalog_tool(source_path=…, force=True)"
+)
+
+# Граница круга называется и при успехе: «строки записаны» не равно «о ботах сохранено всё».
+# Формулировка держится замеров разделов 1–2 плана V55 и решения Q1 (вариант A): без неё
+# ссылку `StdPicture.*` читали бы как неразрешённую, отсутствие индекса состава — как
+# «объектов нет», а незнакомый тег — как потерянное свойство. Текст следует за константами
+# круга, потому что ссылается на имена таблицы и каталога, импортированные из разбора
+# (прецеденты V48…V54).
+BOTS_CIRCLE_BOUNDARY = (
+    f"круг узла — файлы регистрации вида {BOTS_META_TAG} из каталога {BOTS_DIR}/ "
+    "(позиция 2.10 списка), подтверждённые записями индекса состава того же вида "
+    "(`Bot.<Имя>`) и перечнем заголовка `configurations.bots` (ТРИ ноги, расхождения "
+    "`index_only`/`file_only`/`uuid_mismatch` называются ответом; нога перечня заголовка "
+    "стадией не перезаписывается и сверяется проверкой узла); "
+    f"в `{BOTS_TABLE}` идут пять свойств файла регистрации (`Name`, `Synonym`, `Comment`, "
+    "`Predefined`, `Picture`) строговыми колонками и состояние разбора "
+    "`properties_state` с перечнем незнакомых тегов `unknown_property_names` (Q1 — решение "
+    "оператора, вариант A: корпус словарь не замыкает — 2 файла одной выгрузки, XSD вида "
+    "нет, поэтому незнакомый тег называется, а не отвергается записью), ссылку `Picture` "
+    "двумя разными адресами (`picture_ref` как в выгрузке и `picture_full_name` "
+    "нормализованный) с классом цели и состоянием разрешения: `CommonPicture.*` разрешается "
+    "индексом состава этой конфигурации, `StdPicture.*` индексом не разрешается НИКОГДА и "
+    "не является неразрешённой ссылкой (замер 2.1: 1 + 1 на двух файлах); дескрипторы "
+    "модуля вида (`module_state` по двум ногам — файл `Bots/<Имя>/Ext/Module.bsl` и запись "
+    "индекса `Bot.<Имя>.Module`, плюс путь и размер) и признак `module_loaded` по строкам "
+    "`bsl_modules`, которые пишет узел V47 (Q4, вариант A: текстов стадия V55 не читает и "
+    "не снимает — мера M5). Корпус вида даёт ТОЛЬКО MinCfg: 2 файла регистрации и 2 файла "
+    "модулей; у KomMag, BGU2 и BP3 вида нет ни файлами, ни строками индекса (замер 1.1) — "
+    "отсутствие каталога является наблюдением `directory_missing`, а не нулём строк (Q9, "
+    "вариант A). Форм, макетов и команд у вида нет ни в одной выгрузке (замер 1.2), поэтому "
+    "колонок под них и общих таблиц детей у узла нет осознанно. Определённых типов "
+    "(`DefinedTypes`) в выгрузке вида нет (замер 2.4.4), узла для них нет"
+)
+
 # Что из содержимого дочерних объектов стадия S4 НЕ загружает — определение перенесено
 # в это место узлом V50 (шаг П8): текст ссылается на заголовок раздела S4e, объявленного
 # рядом с кругом таблиц вида, поэтому заголовок обязан идти раньше текста (прецедент
@@ -1489,7 +1623,12 @@ CHILD_NOT_IMPLEMENTED = (
     + "» ниже; для этого вида закрыты его свойства файла регистрации, записи расписания "
     "<ent:*> с состояниями стражей и пустых элементов, а также разрешение обработчика "
     "CommonModule.<Модуль>.<Метод> по общим модулям текущей ревизии; форм, макетов, команд и "
-    "модулей у вида нет ни в одной выгрузке — замер 1.2) "
+    "модулей у вида нет ни в одной выгрузке — замер 1.2), свойства ботов конфигурации — "
+    "позиция 2.10 нормативного списка (узел V55, стадия S4j, раздел «"
+    + BOTS_SECTION_HEADER
+    + "» ниже; для этого вида закрыты его свойства файла регистрации, ссылка Picture и "
+    "дескрипторы модуля Ext/Module.bsl — текст модуля вида берёт тот же узел V47, а форм, "
+    "макетов и команд у вида нет ни в одной выгрузке — замер 1.2) "
     "и тексты модулей объектов "
     "конфигурации — шесть слотов Ext/ (узел V47, стадия S4b, раздел «"
     "МОДУЛИ ОБЪЕКТОВ КОНФИГУРАЦИИ» ниже); не реализованы реквизиты и "
@@ -1509,7 +1648,7 @@ CHILD_NOT_IMPLEMENTED = (
 # V50/V51/V52/V53 его пишут (замер 03.11.2026 на MinCfg: `ScheduledJob 2` стоял и в
 # перечне «остальных объектов … в БД не раскладываются», и в разделе стадии S4i). Круг
 # называет один словарь — его читают оба формата. Порядок ключей — порядок нормативного
-# списка (2.3…2.9), он же порядок стадий S4c…S4i. Вид V46 (подсистемы и общие модули,
+# списка (2.3…2.10), он же порядок стадий S4c…S4j. Вид V46 (подсистемы и общие модули,
 # позиции 2.1–2.2) здесь не перечислен осознанно: его таблицы держит `LOADED_META_TABLES`
 # слоя свойств, и оба формата читают и его. Формулировка «слепая зона V38» к видам этого
 # словаря не относится: их содержимое в БД лежит, а незакрытые группы A–H модели V38
@@ -1550,6 +1689,14 @@ STORED_META_KINDS: Dict[str, Dict[str, Any]] = {
         "tables": SCHEDULED_JOBS_TABLES,
         "section": SCHEDULED_JOBS_SECTION_HEADER,
     },
+    # Узел V55 (шаг П5): вид 2.10 тем же порядком — оба формата (строка о <ChildObjects> и
+    # предупреждение разбора) читают этот словарь, поэтому без строки `Bot` остался бы в
+    # перечне «содержимое в БД не раскладывается», хотя слой S4j его свойства пишет.
+    BOTS_META_TAG: {
+        "node": "V55", "stage": "S4j", "position": "2.10",
+        "tables": BOTS_TABLES,
+        "section": BOTS_SECTION_HEADER,
+    },
 }
 
 # Таблицы, чьи строки остаются нетронутыми, когда группа не запрошена: ответ обязан назвать
@@ -1561,10 +1708,13 @@ STORED_META_KINDS: Dict[str, Dict[str, Any]] = {
 # `STAGES` (шаг П5): таблица уже зарегистрирована в круге версионности
 # (`CONFIGURATION_VERSIONED_TABLES`, `src/current_revision.py`), и без этой строки стадия S4
 # снимала и анализировала бы 346 строк чужого вида и 313 записей его расписания (замеры П0).
+# Узел V55 (шаг П4) добавляет круг стадии S4j тем же порядком: без этой строки стадия S4
+# снимала и анализировала бы строки ботов чужого вида (замер 1.1: 2 файла регистрации и 2
+# файла модулей у MinCfg; у трёх других выгрузок вида нет).
 FOREIGN_STAGE_TABLES: Tuple[str, ...] = (
     SESSION_PARAMETER_TABLES + ROLE_TABLES + COMMON_ATTRIBUTES_TABLES
     + EXCHANGE_PLAN_TABLES + FILTER_CRITERIA_TABLES + EVENT_SUBSCRIPTIONS_TABLES
-    + SCHEDULED_JOBS_TABLES
+    + SCHEDULED_JOBS_TABLES + BOTS_TABLES
 )
 CHILD_TABLES: Tuple[str, ...] = tuple(
     table for table in CONFIGURATION_VERSIONED_TABLES
@@ -4202,6 +4352,278 @@ def _append_scheduled_jobs_detail(lines: List[str], result: Dict[str, Any],
     for warning in result.get("warnings") or []:
         lines.append(f"{indent}⚠️ {warning}")
     lines.append(f"{indent}Граница: {SCHEDULED_JOBS_CIRCLE_BOUNDARY}")
+    return lines
+
+
+# ── закрытый контракт стадии S4j (узел V55, шаг П4, позиция 2.10) ─────────────────────
+def bots_defaults() -> Dict[str, Any]:
+    """Закрытый контракт стадии S4j с нулями (C1, C2, C3; узел V55, шаг П4).
+
+    Словарь плоский — тот же, что возвращает слой `load_bots` и что собирает сводка
+    разбора `collect_bots` (один словарь на разбор и на ответ — приём `SUMMARY_KEYS`
+    загрузчика V48); конвейер вкладывает его в свой ключ `bots` без переименования (C3).
+    Групп `kinds` в контракте нет — это решение Q5 (вариант A), а не пропуск: строка вида
+    едина, её состояние свойств, состояние ссылки и состояние модуля неотделимы от неё, а
+    порога цены, при котором круг стоило бы резать, замер 1.1 не дал (весь круг четырёх
+    выгрузок — 2 файла регистрации одной конфигурации).
+
+    Отдельно обязаны быть названы (план, разделы 1–2, 5):
+
+    * числа по таблицам (`removed_by_table`/`written_by_table`) — по кругу снятия
+      (`BOTS_REMOVE_ORDER`), который у этого узла совпадает с кругом версионности: таблиц
+      детей у вида нет (замер 1.2), поэтому нулевой ответ обещает ровно тот же ключ, что и
+      ответ прогона (в отличие от V51/V52/V54, где круг снятия шире);
+    * замкнутые словари состояний по всем колонкам `state_columns()` разбора, включая нули:
+      `std_picture` (1 из 2 файлов — ссылка на стандартное средство платформы, индексом не
+      разрешается никогда), `unresolved` и `empty_value` (границы, которых корпус не давал),
+      `file_only`/`index_only`/`absent` модуля и `unknown_tag`/`unknown_value` свойств
+      различимы состоянием, а не нулём;
+    * `picture_pending`/`module_pending` — ОТДЕЛЬНЫЕ счётчики: состояние `pending` означает
+      «разрешение не проверялось» (индекс состава или признак V47 не входили во вход
+      разбора), в словари DDL не входит и CHECK'ами схемы отклоняется. Называть его
+      `unresolved` нельзя — «не проверяли» и «не разрешилось» разные ответы (шаг П3);
+    * `picture_total`/`picture_resolved` — разрешение ссылки не равно её наличию: блок
+      `Picture` есть в 2/2 файлов, разрешена индексом 1 из 2 (замер 2.1), и одно число без
+      другого читалось бы как «ссылок не хватает»;
+    * `counts_by_observation` — замкнутый перечень `OBSERVATION_KINDS` разбора: отсутствие
+      каталога вида (`directory_missing`, три из четырёх выгрузок — Q9 вариант A) является
+      наблюдением, а не нулём строк;
+    * `unknown_properties` — виновники состояния `unknown_tag`/`unknown_value` поимённо:
+      корпус словарь пяти тегов не замыкает (Q1, решение оператора — вариант A), поэтому
+      ответ обязан называть незнакомое, а не терять его;
+    * расхождения ног круга (`index_only`/`file_only`/`uuid_mismatch`) и дубли имён внутри
+      выгрузки (`duplicate_names`): четыре выгрузки дают нули, и нули — это ответ, а не
+      молчание (замер 1.3 даёт уникальность имён внутри выгрузки).
+    """
+    return {
+        "status": STATUS_NOT_RUN,
+        "success": False,
+        "error": None,
+        "reason": None,
+        "stage": STAGE_BOTS,
+        "configuration_id": None,
+        "configuration_uuid": None,
+        "configuration_name": None,
+        "tables": list(BOTS_TABLES),
+        "directory": BOTS_DIR,
+        "state_columns": list(bots_state_columns()),
+        "files_found": 0,
+        "files_read": 0,
+        "files_failed": [],
+        "observations": [],
+        "duplicate_names": [],
+        "rows_written": 0,
+        "bots_written": 0,
+        "removed_previous": 0,
+        "removed_by_table": {table: 0 for table in BOTS_REMOVE_ORDER},
+        "written_by_table": {table: 0 for table in BOTS_REMOVE_ORDER},
+        "index_available": False,
+        "index_kind_records": 0,
+        "index_child_records": 0,
+        "index_only": [],
+        "file_only": [],
+        "uuid_mismatch": [],
+        "counts_by_circle_discrepancy": {
+            state: 0 for state in BOTS_CIRCLE_DISCREPANCIES},
+        "counts_by_index_check_state": {
+            state: 0 for state in BOTS_INDEX_CHECK_STATES},
+        "counts_by_observation": {kind: 0 for kind in BOTS_OBSERVATION_KINDS},
+        "counts_by_properties_state": {
+            state: 0 for state in BOTS_PROPERTIES_STATES},
+        "counts_by_picture_state": {state: 0 for state in BOTS_PICTURE_STATES},
+        "counts_by_picture_target_class": {
+            value: 0 for value in BOTS_PICTURE_TARGET_CLASSES},
+        "counts_by_picture_load_transparent_state": {
+            state: 0 for state in BOTS_PICTURE_LT_STATES},
+        "counts_by_module_state": {state: 0 for state in BOTS_MODULE_STATES},
+        "picture_pending": 0,
+        "module_pending": 0,
+        "picture_total": 0,
+        "picture_resolved": 0,
+        "unknown_properties": {},
+        # Ключ добавлен шагом П5, а не П4: он нужен ответу, а не записи. Разрешение
+        # обработчика идёт по витрине общих модулей текущей ревизии (слой V46), и при её
+        # недоступности `method_name` всё равно записывается текстом из файла — ответ обязан
+        # назвать, что проверять было нечем (правило C2), а не молчать (прецедент ключа
+        # `common_modules_available` стадии S4i).
+        "common_modules_available": False,
+        "statistics_refreshed": 0,
+        "warnings": [],
+    }
+
+
+def format_bots_lines(result: Dict[str, Any], indent: str = "") -> List[str]:
+    """Текст стадии S4j по закрытому контракту `bots_defaults()` (C1, C3).
+
+    Формат один для двух контуров: раздела карточки `load_1c_catalog_tool` и ответа
+    отдельного входа `load_bots_tool` (шаг П5) — прецеденты
+    V45/V46/V48/V49/V50/V51/V52/V53/V54. Отказ форматёр называет сам, вызывающий причину не
+    повторяет. Групп `kinds` у вида нет (решение Q5, вариант A), поэтому блока «группы круга
+    не запрашивались» здесь нет: он обещал бы раздельный вход дозагрузки, которого у стадии
+    нет. Блок детей отсутствует осознанно — форм, макетов и команд у бота нет ни в одной
+    выгрузке (замер 1.2), единственный ребёнок вида в индексе состава — файл модуля
+    `Ext/Module.bsl`, и он называется состоянием модуля строки вида, а не отдельной таблицей.
+    Граница круга печатается и при успехе: «строки записаны» не равно «о ботах сохранено
+    всё» — тексты модулей вида берёт узел V47, здесь лежат только дескрипторы. Состояния
+    `pending` печатаются отдельными счётчиками: в словари DDL они не входят и CHECK'ами
+    схемы отклоняются, поэтому их нельзя показывать вместе с `unresolved` (шаг П3).
+    Имя — `format_bots_lines`: форматёры стадий слоя называются по одному образцу.
+    """
+    lines: List[str] = []
+    if not result:
+        return lines
+
+    if not result.get("success"):
+        reason = result.get("error") or result.get("reason") or "загрузчик не назвал причину"
+        prefix = ("Стадия не выполнена" if result.get("status") in (None, STATUS_NOT_RUN)
+                  else "Стадия не удалась")
+        lines.append(f"{indent}{prefix}: {reason}")
+        if result.get("files_failed"):
+            # Отказ разбора круга — тот же статус `error`, что и отказ записи (словарь
+            # статусов контракта замкнут: not_run/ok/skipped/error, C2), поэтому ветка
+            # различается признаком круга, а не новым статусом: перечисленные файлы-виновники
+            # есть только у остановки до записи.
+            lines.append(
+                f"{indent}Стадия остановлена ДО записи (приём V12/V46/V48/V49/V50/V51/V52"
+                f"/V53/V54): половина круга читалась бы как полный состав вида; прежние "
+                f"строки не сняты — {BOTS_TABLE} содержит прежнее состояние")
+            for failure in (result.get("files_failed") or [])[:10]:
+                lines.append(f"{indent}  ⚠️ файл не разобран: "
+                             f"{failure.get('source_path')} — {failure.get('reason')}")
+        lines.append(f"{indent}{BOTS_REPEAT_HINT}")
+        for warning in result.get("warnings") or []:
+            lines.append(f"{indent}⚠️ {warning}")
+        return lines
+
+    written_by_table = result.get("written_by_table") or {}
+    removed_by_table = result.get("removed_by_table") or {}
+    lines.append(
+        f"{indent}Записано строк по таблицам: "
+        + ", ".join(f"{table}={int(written_by_table.get(table) or 0)}"
+                    for table in sorted(written_by_table))
+        + f"; всего {int(result.get('rows_written') or 0)} (ботов "
+          f"{int(result.get('bots_written') or 0)}) — таблиц круга одна, детей у вида нет "
+          "(замер 1.2)"
+    )
+    lines.append(
+        f"{indent}Файлов регистрации вида: {int(result.get('files_found') or 0)} "
+        f"(разобрано {int(result.get('files_read') or 0)}, каталог "
+        f"{result.get('directory') or BOTS_DIR}/, записей индекса состава вида "
+        f"{int(result.get('index_kind_records') or 0)}, файлов модулей Ext/Module.bsl по "
+        f"индексу {int(result.get('index_child_records') or 0)}) — индекс состава для этой "
+        "стадии обязателен: состояния `pending` отклоняют CHECK'и `bots_picture_state_known` "
+        "и `bots_module_state_known`, поэтому недоступный индекс называется отказом стадии, а "
+        "не наблюдением (отличие от V48/V53/V54 названо слоем П4)"
+    )
+    if int(result.get("removed_previous") or 0):
+        lines.append(
+            f"{indent}Снято прежних строк этой конфигурации: "
+            + ", ".join(f"{table}={int(removed_by_table.get(table) or 0)}"
+                        for table in sorted(removed_by_table))
+            + " — история состояний не заводится (D8), новой ревизии повтор не создаёт"
+        )
+
+    observations = result.get("counts_by_observation") or {}
+    lines.append(
+        f"{indent}Наблюдения круга: "
+        + ", ".join(f"{kind}={int(observations.get(kind) or 0)}"
+                    for kind in BOTS_OBSERVATION_KINDS)
+        + " — отсутствие каталога вида является наблюдением `directory_missing`, а не нулём "
+          "строк (Q9, вариант A: три из четырёх выгрузок вида не имеют ни файлами, ни "
+          "записями индекса — замер 1.1)"
+    )
+    if result.get("observations"):
+        lines.append(f"{indent}  фактические наблюдения прогона: "
+                     + ", ".join(sorted(str(item) for item in result["observations"])))
+    if result.get("duplicate_names"):
+        lines.append(f"{indent}  ⚠️ повторяющиеся имена внутри выгрузки: "
+                     + ", ".join(str(name) for name in result["duplicate_names"]))
+
+    circle = result.get("counts_by_circle_discrepancy") or {}
+    index_check = result.get("counts_by_index_check_state") or {}
+    lines.append(
+        f"{indent}Расхождения ног круга: "
+        + ", ".join(f"{state}={int(circle.get(state) or 0)}"
+                    for state in BOTS_CIRCLE_DISCREPANCIES)
+        + "; состояний сверки с индексом — "
+        + ", ".join(f"{state}={int(index_check.get(state) or 0)}"
+                    for state in BOTS_INDEX_CHECK_STATES)
+        + " — нули являются ответом, а не молчанием (замер 1.3 даёт уникальность имён и "
+          "полное совпадение двух ног на единственной выгрузке с видом)"
+    )
+    if result.get("index_only"):
+        lines.append(f"{indent}  запись индекса без файла: "
+                     + ", ".join(str(item) for item in result["index_only"]))
+    if result.get("file_only"):
+        lines.append(f"{indent}  файл вне индекса: "
+                     + ", ".join(str(item) for item in result["file_only"]))
+    if result.get("uuid_mismatch"):
+        lines.append(f"{indent}  ⚠️ несовпадение uuid файла и индекса: "
+                     + ", ".join(str(item) for item in result["uuid_mismatch"]))
+
+    prop_counts = result.get("counts_by_properties_state") or {}
+    lines.append(
+        f"{indent}Свойства файла регистрации (пять тегов — замер 2.2 даёт ровно один набор "
+        "тегов на всех файлах круга): состояний — "
+        + ", ".join(f"{state}={int(prop_counts.get(state) or 0)}"
+                    for state in BOTS_PROPERTIES_STATES)
+        + " — незнакомое значение остаётся значением с состоянием `unknown_value` и именем "
+          "виновника, а не отказом записи (Q1, вариант A: корпус словарь пяти тегов не "
+          "замыкает); пустой тег `<Name/>` не читается отсутствием свойства — состоянием "
+          "называется и форма значения, и его отсутствие"
+    )
+    unknown_properties = result.get("unknown_properties") or {}
+    for name in sorted(unknown_properties):
+        lines.append(f"{indent}  ⚠️ незнакомое свойство: {name} = "
+                     f"{unknown_properties[name]}")
+
+    picture_counts = result.get("counts_by_picture_state") or {}
+    picture_classes = result.get("counts_by_picture_target_class") or {}
+    picture_lt = result.get("counts_by_picture_load_transparent_state") or {}
+    lines.append(
+        f"{indent}Ссылка `Picture`: состояний — "
+        + ", ".join(f"{state}={int(picture_counts.get(state) or 0)}"
+                    for state in BOTS_PICTURE_STATES)
+        + f"; блоков {int(result.get('picture_total') or 0)}, разрешено индексом "
+          f"{int(result.get('picture_resolved') or 0)} (замер 2.1: блок есть в 2/2 файлов, "
+          "разрешена 1 из 2 — разрешение ссылки не равно её наличию); классов цели — "
+        + ", ".join(f"{value}={int(picture_classes.get(value) or 0)}"
+                    for value in BOTS_PICTURE_TARGET_CLASSES)
+        + "; состояний `loadTransparent` — "
+        + ", ".join(f"{state}={int(picture_lt.get(state) or 0)}"
+                    for state in BOTS_PICTURE_LT_STATES)
+        + f"; состоянием `pending` {int(result.get('picture_pending') or 0)}"
+    )
+    lines.append(
+        f"{indent}Состояние `pending` означает «разрешение не проверялось» (индекс состава не "
+        "вошёл во вход разбора), `unresolved` — «разрешали и не нашли»; состояния `absent` "
+        "(блока нет), `empty_value` (пустой `<xr:Content/>` — замер 2.1) и `std_picture` "
+        "(ссылка на стандартное средство платформы, индексом не разрешается никогда) "
+        "различимы состоянием, а не нулём; в словари DDL `pending` не входит и отклоняется "
+        "CHECK'ом `bots_picture_state_known` (шаг П3)"
+    )
+
+    module_counts = result.get("counts_by_module_state") or {}
+    lines.append(
+        f"{indent}Модуль вида: состояний — "
+        + ", ".join(f"{state}={int(module_counts.get(state) or 0)}"
+                    for state in BOTS_MODULE_STATES)
+        + f"; состоянием `pending` {int(result.get('module_pending') or 0)} — дескрипторы "
+        "файла модуля (путь, размер, хэш) пишет этот узел, ТЕКСТ модуля пишет узел V47 в "
+        "`bsl_modules`, строки которого данный прогон не трогает (мера M5); `file_and_index` "
+        "означает наличие и файла, и записи индекса состава, `file_only`/`index_only` "
+        "называют расхождение ног, `absent` — отсутствие обеих (замер 1.2: других состояний "
+        "корпус не даёт)"
+    )
+    if not result.get("common_modules_available"):
+        lines.append(
+            f"{indent}Перечень общих модулей текущей ревизии не прочитан — имя обработчика "
+            "записывается текстом из тега `MethodName`, но проверять его было нечем: "
+            "«обработчика нет» и «не чем проверить» — разные ответы (правило C2)"
+        )
+    for warning in result.get("warnings") or []:
+        lines.append(f"{indent}⚠️ {warning}")
+    lines.append(f"{indent}{BOTS_CIRCLE_BOUNDARY}")
     return lines
 
 

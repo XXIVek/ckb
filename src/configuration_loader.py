@@ -297,6 +297,39 @@
     (`declared`/`not_declared`/`text_unavailable`, Q8): при незагруженных текстах метод назван
     состоянием `text_unavailable`, а не «метода нет».
 
+Узел V55 (04.11.2026, шаг П5) — свойства ботов конфигурации, позиция 2.10 нормативного списка
+(`docs/CONFIGURATION_BOTS_PLAN.md`):
+
+    src/configuration_bots_loader.py :: load_bots(source_path, configuration_uuid=None,
+    changed_at=None)  →  таблица вида `bots`
+
+Порядок вызова повторяет S3/S4/S4c–S4i: стадия идёт ПОСЛЕ фиксации заголовка и индекса
+состава, потому что ссылка `Picture` разрешается записями `configuration_objects` своей
+конфигурации, а файл модуля подтверждается той же таблицей. Дальнейшее отличает её от
+соседних стадий:
+
+  * стадия `s4j_bots` стоит между `s4i_scheduled_jobs` и `s4b_object_modules` — порядок
+    `STAGES` повторяет порядок нормативного списка (2.10 идёт сразу за 2.9); перенумерации
+    нет, S5 по-прежнему зарезервирован за анализом;
+  * ответ лежит в собственном ключе `bots` (правило C3);
+  * групп `kinds` у стадии и у отдельного входа `load_bots_tool` НЕТ — это решение Q5
+    (вариант A), тот же, что у V50, V52, V53 и V54: состояние свойств, состояние ссылки и
+    дескрипторы модуля неотделимы от строки вида (Q1), а порога цены, при котором круг стоило
+    бы резать, замер 1.1 не дал (весь круг четырёх выгрузок — 2 файла одной конфигурации);
+  * таблицу круга одна — детей у вида нет (замер 1.2: ни форм, ни макетов, ни команд),
+    единственный ребёнок вида в индексе состава — файл модуля `Ext/Module.bsl`, и он
+    называется состоянием `module_state` строки вида, а не отдельной таблицей;
+  * индекс состава здесь ОБЯЗАТЕЛЕН, в отличие от V48/V53/V54: состояние `pending`
+    («разрешение не проверялось») колонкам схемы не выразимо, его отклоняют CHECK'и
+    `bots_picture_state_known` и `bots_module_state_known`, поэтому недоступный индекс
+    называется отказом стадии с указанием причины и чем продолжить, а не наблюдением;
+  * строки вида снимаются вместе с заголовком явным `DELETE` (`remove_bots` в `_remove_rows`):
+    внешнего ключа и каскада по uuid в схеме нет осознанно (прецедент V20.1…V54); строки
+    `bsl_modules` вида при этом не снимаются и не меняются — их пишет узел V47 (мера M5);
+  * тексты модулей вида узел не читает: в `bots` лежат дескрипторы файла модуля (путь, размер,
+    хэш) и признак `module_loaded` по витрине `v_current_bsl_modules`, то есть по факту работы
+    узла V47 (правило V43 — вторым источником повторный разбор XML не становится).
+
 
 Чтения идут через psycopg2 (`src/external_db.py`), а не psql-подпроцессом: `_run_psql` /
 `_psql_fields` унаследованы от прежнего загрузчика, многоколоночные выборки разбирают
@@ -419,6 +452,18 @@ from configuration_scheduled_jobs_loader import (
     load_scheduled_jobs,
     remove_scheduled_jobs,
 )
+# Узел V55 (стадия S4j, позиция 2.10 нормативного списка): свойства ботов конфигурации — тот
+# же слой, что и отдельный инструмент `load_bots_tool` (шаг П5); контракт стадии и форматёр —
+# в configuration_load_contract. Строки круга снимаются вместе с заголовком явным `DELETE`
+# (внешнего ключа на `configurations` в схеме нет осознанно — прецедент V20.1…V54), поэтому
+# `_remove_rows` обязан вызвать его явно: без этого force=True оставил бы в базе прежний
+# состав вида (для MinCfg это 2 строки бота — замер 1.1). Таблица круга одна: детей у вида нет
+# (замер 1.2), поэтому порядок снятия `BOTS_REMOVE_ORDER` совпадает с кругом версионности, а
+# `bsl_modules` в круг не входит — их строки пишет узел V47 и этот узел их не трогает (M5).
+from configuration_bots_loader import (
+    load_bots,
+    remove_bots,
+)
 # Узел V47 (стадия S4b): модули объектов конфигурации — вторая транзакция после фиксации
 # содержимого (Q6, граница D7). Точка входа стадии одна и отдельного инструмента у неё нет
 # (Q4.1), поэтому здесь импортируется и ответ «стадия не выполнялась» (`mark_index_unavailable`):
@@ -430,6 +475,8 @@ from configuration_object_modules_loader import (
     object_modules_defaults,
 )
 from configuration_load_contract import (
+    BOTS_REPEAT_HINT,
+    BOTS_SECTION_HEADER,
     CHILD_OBJECTS_REPEAT_HINT,
     CHILD_SECTION_HEADER,
     COMMON_ATTRIBUTES_REPEAT_HINT,
@@ -451,6 +498,7 @@ from configuration_load_contract import (
     SESSION_PARAMETERS_REPEAT_HINT,
     SESSION_PARAMETERS_SECTION_HEADER,
     SESSION_PARAMETER_TABLE,
+    STAGE_BOTS,
     STAGE_CHILD_OBJECTS,
     STAGE_COMMON_ATTRIBUTES,
     STAGE_EXCHANGE_PLANS,
@@ -464,6 +512,7 @@ from configuration_load_contract import (
     STAGE_SESSION_PARAMETERS,
     STATUS_ERROR,
     STATUS_NOT_RUN,
+    bots_defaults,
     build_stopped_stage,
     child_objects_defaults,
     common_attributes_defaults,
@@ -815,6 +864,13 @@ def _remove_rows(cur, cfg_id, configuration_uuid=None):
     # `ON DELETE CASCADE` снял бы строки молча, и число в ответе было бы неправдой (M7).
     if configuration_uuid:
         children.update(remove_scheduled_jobs(cur, configuration_uuid))
+    # Узел V55 (стадия S4j): строки ботов тоже адресуются uuid заголовка, внешнего ключа и
+    # каскада по нему в схеме нет осознанно (прецеденты V20.1…V54). Таблица круга одна — детей
+    # у вида нет (замер 1.2), поэтому порядок снятия `BOTS_REMOVE_ORDER` тривиален, а строки
+    # `bsl_modules` вида здесь не снимаются: их пишет узел V47, и снятие строки бота не должно
+    # трогать чужой слой (мера M5).
+    if configuration_uuid:
+        children.update(remove_bots(cur, configuration_uuid))
     cur.execute("DELETE FROM configurations WHERE id = %s", [cfg_id])
     children["configurations"] = cur.rowcount
     return children
@@ -1324,6 +1380,15 @@ def register_configuration(source_path, force=False, xml_path=None):
     # существует только через id строки вида (Q2), поэтому конвейер обязан записать весь круг
     # целиком, а раздельной дозагрузки группами у вида нет ни у стадии, ни у отдельного входа.
     scheduled_jobs = scheduled_jobs_defaults()
+    # Узел V55 (стадия S4j, позиция 2.10 списка): свойства ботов конфигурации — ответ в
+    # собственном ключе `bots` (правило C3). Групп `kinds` у стадии нет — это решение Q5 узла
+    # V55 (вариант A), тот же, что у V50, V52, V53 и V54: состояние свойств, состояние ссылки
+    # `Picture` и дескрипторы модуля неотделимы от строки вида (Q1), а порога цены, при котором
+    # круг стоило бы резать, замер 1.1 не дал (весь круг четырёх выгрузок — 2 файла одной
+    # конфигурации). Отличия стадии от V48/V53/V54 названы слоем: индекс состава обязателен,
+    # потому что состояния `pending` отклоняют CHECK'и `bots_picture_state_known` и
+    # `bots_module_state_known` — недоступный индекс является отказом стадии, а не наблюдением.
+    bots = bots_defaults()
     object_modules = object_modules_defaults()
     # Узел V48 (шаг П8, правило C2): пропущенная стадия называет причину пропуска. Без неё
     # форматёр стадии печатает «загрузчик не назвал причину», и читатель карточки видит
@@ -1334,7 +1399,7 @@ def register_configuration(source_path, force=False, xml_path=None):
     # `error`: «не выполнялась» и «отказала после начала работы» различаются именно так.
     for _empty_stage in (child_objects, session_parameters, roles, common_attributes,
                          exchange_plans, filter_criteria, event_subscriptions,
-                         scheduled_jobs, object_modules):
+                         scheduled_jobs, bots, object_modules):
         _empty_stage["reason"] = NOT_RUN_STOPPED_REASON
     object_modules["status"] = STATUS_NOT_RUN
     stopped_stage = stopped_stage_defaults()
@@ -1756,6 +1821,60 @@ def register_configuration(source_path, force=False, xml_path=None):
             stopped = True
             load_incomplete = True
 
+    # ── узел V55 (стадия S4j, позиция 2.10 списка): свойства ботов конфигурации ──────────
+    # Порядок вызова повторяет S3/S4/S4c–S4i: ПОСЛЕ коммита транзакции заголовка (своим
+    # соединением стадия не увидела бы ни незакоммиченного заголовка, ни строк индекса состава,
+    # которыми разрешается ссылка `Picture` и подтверждается файл модуля), ключ — uuid, каталог
+    # тот же `root_source`. Стадия отдельная, а не расширение S4i (прецедент Q5 узлов V48–V54):
+    # правило C3 требует своего ключа ответа `bots`; порядок `STAGES` повторяет порядок
+    # нормативного списка (2.10 идёт сразу за 2.9). Отказ стадии, как у S3/S4 и S4c–S4i,
+    # записанный заголовок не отменяет (C5) — но останавливает конвейер (решение Q8 узла V48,
+    # вариант A): S4b после отказа S4j не выполняется и читается `not_run`.
+    #
+    # Конвейер просит ВЕСЬ круг: групп `kinds` у вида нет (Q5 узла V55, вариант A). Отсутствие
+    # каталога `Bots/` — не отказ, а ответ о выгрузке: `files_found = 0` с наблюдением
+    # `directory_missing` (три из четырёх выгрузок вида не имеют — замер 1.1). Отличие от
+    # V48/V53/V54 названо слоем П4: индекс состава здесь ОБЯЗАТЕЛЕН — состояния `pending`
+    # колонкам схемы не выразимы, их отклоняют CHECK'и `bots_picture_state_known` и
+    # `bots_module_state_known`, поэтому недоступный индекс является отказом стадии с указанием
+    # причины, а не наблюдением. Перечень общих модулей текущей ревизии (витрина V46) может быть
+    # недоступен — это не отказ: имя обработчика записывается текстом из файла, а ответ называет,
+    # что проверять его было нечем (правило C2). Тексты модулей вида пишет узел V47: здесь
+    # лежат дескрипторы файла модуля, строки `bsl_modules` прогон не трогает (мера M5).
+    #
+    # Штамп времени общий с остальными стадиями этой загрузки (M2) — `load_moment` задан
+    # выше, где начинается событие детей заголовка.
+    if not stopped:
+        try:
+            bots = load_bots(
+                root_source, configuration_uuid=row["uuid"], changed_at=load_moment)
+        except Exception as exc:  # noqa: BLE001 — отказ стадии называется, а не бросается
+            bots = bots_defaults()
+            bots["configuration_id"] = new_id
+            bots["configuration_uuid"] = row["uuid"]
+            bots["configuration_name"] = row["name"]
+            bots["status"] = STATUS_ERROR
+            bots["error"] = f"исключение слоя свойств ботов конфигурации: {exc}"
+            bots["reason"] = bots["error"]
+        for bot_warning in bots.get("warnings") or []:
+            warnings.append(f"боты конфигурации: {bot_warning}")
+        if not bots.get("success"):
+            # Заголовок, индекс состава, модули корня, свойства подсистем с общими модулями,
+            # параметры сеанса, роли, общие реквизиты, планы обмена, критерии отбора, подписки
+            # на события и регламентные задания уже записаны, и отказ этой стадии их не
+            # отменяет (C5). Молчать нельзя по той же причине, что у V44/V46 и V48–V54: после
+            # force=True прежние строки сняты, и «загружено» без этой строки читалось бы как
+            # полный состав конфигурации.
+            warnings.append(
+                "Свойства ботов конфигурации не загружены — причина названа строкой "
+                "«Стадия не выполнена» в разделе «" + BOTS_SECTION_HEADER
+                + "» карточки. Чем продолжить: "
+                + f"{BOTS_REPEAT_HINT} (configuration_uuid={row['uuid']})."
+            )
+            stopped_stage = _stop_here(STAGE_BOTS, bots)
+            stopped = True
+            load_incomplete = True
+
     # ── узел V47 (стадия S4b): модули объектов конфигурации ────────────────────────────
     # Вторая транзакция ПОСЛЕ фиксации содержимого конфигурации (решение Q6, граница D7
     # узла V46): отказ стадии не откатывает заголовок, индекс состава, модули корня и
@@ -1893,6 +2012,13 @@ def register_configuration(source_path, force=False, xml_path=None):
         # что отдаёт отдельный инструмент `load_scheduled_jobs_tool` (шаг П5). Групп `kinds` в
         # ответе нет — это решение Q5 узла V54 (вариант A), а не пропуск.
         "scheduled_jobs": scheduled_jobs,
+        # узел V55: машинная часть стадии S4j (позиция 2.10 списка) — полная; ответ лежит в
+        # собственном ключе `bots`, а не внутри `scheduled_jobs` или `event_subscriptions`
+        # (правило C3). Текст раздела даёт общий форматёр контракта — тот же, что отдаёт
+        # отдельный инструмент `load_bots_tool` (шаг П5). Групп `kinds` в ответе нет — это
+        # решение Q5 узла V55 (вариант A), а не пропуск; тексты модулей вида в ответе нет —
+        # их пишет узел V47, здесь дескрипторы файла модуля (мера M5).
+        "bots": bots,
         # узел V47: машинная часть стадии S4b — полная (тот же закрытый контракт, который
         # читают проба П4 и проверка П5); текст раздела даёт общий форматёр контракта.
         # `load_incomplete`/`incomplete_groups` — признак того, что состав в БД неполный
