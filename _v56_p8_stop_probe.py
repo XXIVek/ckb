@@ -5,11 +5,11 @@
 Норматив (план `docs/CONFIGURATION_FUNCTIONAL_OPTIONS_PLAN.md`, строка П8; решения Q5, Q8 и Q9 узла
 — вариант A, прецедент П8 узлов V48–V54):
 
-  * стадия `s4k_functional_options` стоит в `STAGES` между `s4i_scheduled_jobs` (2.9) и
+  * стадия `s4k_functional_options` стоит в `STAGES` между `s4j_bots` (2.10) и
     `s4b_object_modules` — порядок стадий повторяет порядок нормативного списка (2.11 сразу за
-    2.9), перенумерации прежних стадий нет, S4b остаётся последней (вторая транзакция загрузки,
+    2.10), перенумерации прежних стадий нет, S4b остаётся последней (вторая транзакция загрузки,
     а не позиция списка); иначе остановка пропускает позиции, стоящие раньше ошибки;
-  * `stages_after` для S4i обязан содержать `s4k_functional_options`, а для S4k — ровно
+  * `stages_after` для S4j обязан начинаться с `s4k_functional_options`, а для S4k — ровно с
     `s4b_object_modules`:
     перечень пропущенных считается из `STAGES`, а не дописывается вручную там, где добавили
     новую стадию (критерий П8);
@@ -80,14 +80,21 @@
       `ConfigDumpInfo.xml` без каталога вида: пустой круг при НЕпустом индексе обязан быть
       назван расхождением `index_only` по регистрации (записей детей вида индекс не содержит),
       строки круга сняты и не заполнены, затем круг восстановлен одиночным вызовом слоя по
-      настоящей выгрузке (числа равны базовым).
+      настоящей выгрузке (числа равны базовым);
+  5 — возврат базы в эталонное состояние соседнего узла V55 (мера П9, урок П8 узла V52): полная
+      загрузка каталога оставляет `bots.module_loaded` ложным, потому что S4j пишется раньше S4b,
+      а признак снимает состояние живой базы на момент записи строки; одиночный вход слоя ботов
+      возвращает признак в состояние, которое читает `tools/check_v55_bots.py`, не трогая ни
+      заголовок конфигурации, ни индекс состава, ни круг вида. Править эталон соседней проверки
+      под состояние полной загрузки — значит завести второй ответ о том же состоянии.
 
 Проба меняет только память процесса (подмена функций стадий в модуле загрузчика) и состояние БД
 той же перезагрузкой, что делает обычный прогон конвейера: выгрузка на диске не правится, фикстура
 пишется в временный каталог и удаляется. Строки
 других стадий этой пробой не проверяются — их круги считают пробы `_v48_p8_stop_probe.py` …
-`_v54_p8_stop_probe.py` (все семь приведены к составу стадий с S4k и остаются регрессом шага).
-Код возврата 0 — расхождений нет.
+`_v55_p8_stop_probe.py` и пробы продолжения `_v51_p8_resume_probe.py`,
+`_v52_p8_resume_probe.py` (все десять приведены к составу стадий с S4k и остаются регрессом
+шага). Код возврата 0 — расхождений нет.
 
 Запуск (прогоны, меняющие общую БД, не параллелят — наблюдение П8 узла V50):
 
@@ -117,6 +124,13 @@ except Exception:
 import configuration_loader as CL  # noqa: E402  — подмена функций стадий читается им
 from config_load_router import format_load_result, load_catalog  # noqa: E402
 from configuration_functional_options_loader import load_functional_options  # noqa: E402
+# Раздел 5 пробы — возврат эталона соседнего узла V55 (мера П9): слой ботов вызывается
+# однократно, чтобы флаг `module_loaded` вернулся в состояние, которое читает
+# `tools/check_v55_bots.py` (полная загрузка пишет ботов раньше модулей объектов).
+from configuration_bots import module_index_name  # noqa: E402
+from configuration_bots_loader import (  # noqa: E402
+    BSL_MODULES_VIEW, BOTS_META_TYPE, load_bots, read_loaded_module_names,
+)
 from configuration_load_contract import (  # noqa: E402
     CHILD_NOT_IMPLEMENTED,
     CHILD_TABLES,
@@ -336,7 +350,7 @@ def by_table(answer, key):
     return {table: int(raw.get(table) or 0) for table in CIRCLE_TABLES}
 
 
-def stop_at_s4j(dump_dir, reason):
+def stop_at_s4k(dump_dir, reason):
     """Один прогон конвейера с отказом S4k: предыдущие стадии — пустой успех, S4k — отказ.
 
     S4b не подменяется ответом: после отказа S4k конвейер обязан её не звать, и это проверяется
@@ -748,6 +762,74 @@ def check_empty_scope_live(result, cur, cfg_uuid, chosen):
          "что реакция конвейера не зависит от размера круга.")
 
 
+def restore_neighbour_reference(cur, dump_dir, cfg_uuid, cfg_id, header_ref, index_ref):
+    """Раздел 5 — возврат базы в эталонное состояние соседнего узла V55 (мера П9, урок П8 V52).
+
+    Конвейер пишет ботов (`s4j_bots`, позиция 2.10 нормативного списка) раньше модулей
+    объектов (`s4b_object_modules`, вторая транзакция), поэтому полная загрузка каталога
+    оставляет `bots.module_loaded = false` при уже записанных строках `bsl_modules`: признак
+    относится к моменту записи строки, а не к моменту чтения (правило V43). Эталон
+    `tools/check_v55_bots.py` — состояние после одиночного входа слоя ботов, его оставляет
+    проба П8 узла V55 разделом 4в. Возврат обязателен: без него провал соседней проверки
+    читался бы как деградация узла V56, хотя круг V55 пробой не тронут.
+    """
+    print("\n=== 5. Возврат базы в эталонное состояние соседнего узла V55 ===")
+    bots_rows = int(one(cur, "SELECT count(*) FROM v_current_bots "
+                             "WHERE configuration_uuid = %s::uuid",
+                        [str(cfg_uuid)]) or 0)
+    if bots_rows == 0:
+        note("в выбранной выгрузке круга вида `Bots/` нет (строок витрины `v_current_bots` "
+             "ноль) — восстанавливать признак `module_loaded` нечего: эталон соседней проверки "
+             "по этой конфигурации нулевой, и прогон `check_v55` берёт круг с `MinCfg`")
+        return
+    flagged = int(one(cur, "SELECT count(*) FROM v_current_bots b "
+                            "WHERE b.configuration_uuid = %s::uuid AND b.module_loaded",
+                       [str(cfg_uuid)]) or 0)
+    module_rows = int(one(cur, f"SELECT count(*) FROM {BSL_MODULES_VIEW} "
+                                "WHERE configuration_uuid = %s::uuid AND object_type = %s",
+                            [str(cfg_uuid), BOTS_META_TYPE]) or 0)
+    check("5.1 после полной загрузки признак `module_loaded` ложен при записанных строках V47 — "
+          "следствие порядка стадий (S4j раньше S4b), а не записи: возврат эталона является "
+          "шагом пробы, а не наблюдением (иначе соседняя проверка падает на состоянии)",
+          flagged == 0 and module_rows > 0,
+          f"истинных флагов: {flagged}, строк модулей V47 в витрине: {module_rows}")
+
+    answer = load_bots(str(dump_dir), configuration_uuid=str(cfg_uuid))
+    check("5.2 одиночный вход слоя ботов успешен и не трогает ни заголовок конфигурации, ни "
+          "индекс состава — тот же контракт одиночного входа, что у раздела 4а для своего круга",
+          answer.get("success") is True
+          and header_snapshot(cur, cfg_uuid) == header_ref
+          and index_count(cur, cfg_id) == index_ref,
+          {k: answer.get(k) for k in ("success", "error")}
+          | {"индекс": index_count(cur, cfg_id)})
+
+    after_rows = int(one(cur, "SELECT count(*) FROM v_current_bots "
+                              "WHERE configuration_uuid = %s::uuid",
+                         [str(cfg_uuid)]) or 0)
+    duplicates = int(one(cur, "SELECT count(*) FROM (SELECT object_name FROM v_current_bots "
+                              "WHERE configuration_uuid = %s::uuid GROUP BY object_name "
+                              "HAVING count(*) > 1) t", [str(cfg_uuid)]) or 0)
+    check("5.3 круг вида `bots` не изменился: возврат эталона не заводит второй цепи ревизий и "
+          "не меняет числа строк витрины (тот же контроль, что раздел 3.4 для своего круга)",
+          after_rows == bots_rows and duplicates == 0,
+          f"было {bots_rows}, стало {after_rows}, дублей {duplicates}")
+
+    info = read_loaded_module_names(cur, str(cfg_uuid))
+    loaded = set(info.get("names") or [])
+    cur.execute("SELECT object_name FROM v_current_bots WHERE configuration_uuid = %s::uuid "
+                "AND module_loaded", [str(cfg_uuid)])
+    flags = {module_index_name(str(row[0])) for row in cur.fetchall()}
+    check("5.4 признак истинен ровно там, где строку V47 подтверждает живая база "
+          f"({len(loaded)} имён) — эталон соседней проверки восстановлен, и прогон "
+          "`tools/check_v55_bots.py` не должен знать, что перед ним работала проба другого узла",
+          loaded and flags == loaded,
+          f"флаг: {sorted(flags)}; база: {sorted(loaded)}")
+    note("признак `module_loaded` — снимок момента записи строки: полная загрузка оставляет его "
+         "ложным, эталон читается после одиночного входа слоя. Правка эталона соседней проверки "
+         "означала бы второй ответ о том же состоянии (правило C2), поэтому проба возвращает "
+         "состояние, а не числа соседа.")
+
+
 def main() -> int:
     chosen = next((arg for arg in sys.argv[1:] if arg in DUMPS), "MinCfg")
     dump_dir = DUMP_ROOT / chosen
@@ -806,7 +888,7 @@ def main() -> int:
         note(f"базовый круг: {baseline}; чужие круги: {other_baseline}")
 
         reason = f"искусственный отказ стадии {STAGE_FUNCTIONAL_OPTIONS} (проба П8)"
-        stopped_result, calls = stop_at_s4j(dump_dir, reason)
+        stopped_result, calls = stop_at_s4k(dump_dir, reason)
         stopped = stopped_result.get("stopped_stage") or {}
         # `format_load_result` возвращает готовую строку карточки (а не список строк), поэтому
         # её не склеивают: join по строке разбил бы её на символы, и сравнение подстрок
@@ -920,6 +1002,11 @@ def main() -> int:
                                        cfg_uuid, header_ref, index_ref)
         else:
             check_empty_scope_live(again, cur, cfg_uuid, chosen)
+
+        # Раздел 5 — возврат базы в эталонное состояние соседнего узла V55 (мера П9, урок П8
+        # узла V52): проба обязана оставить базу в состоянии, которое читает проверка соседа,
+        # иначе её провал выглядел бы деградацией V56 при непричастности круга V55.
+        restore_neighbour_reference(cur, dump_dir, cfg_uuid, cfg_id_now, header_ref, index_ref)
     finally:
         conn.close()
 

@@ -50,13 +50,20 @@
      размер дескриптора сверяются с файлом на диске НЕ разбором, а `stat`; строки
      `bsl_modules` принадлежат узлу V47 и не снимаются стадией: их число равно числу строк
      с `module_loaded = true`, а круга снятия `bots` их не содержит.
+     Граница эталона (вскрыта регрессией узла V56, шаг П9): `module_loaded` — признак момента
+     записи строки, а не чтения. Конвейер пишет ботов (S4j) раньше модулей объектов (S4b),
+     поэтому полная загрузка каталога оставляет флаг `false` при уже существующих строках
+     `bsl_modules`; эталон `module_loaded = 2` соответствует состоянию после одиночного входа
+     `load_bots_tool` (его и оставляет проба П8 узла V55 разделом 4в). Пробы следующих узлов
+     обязаны возвращать базу в это же состояние — иначе деградация выглядит как провал V55.
   7. ВИТРИНЫ, СИРОТЫ И ЧУЖИЕ КРУГИ. Витрина отдаёт ровно строки максимальной ревизии;
      строк без заголовка — ноль; строк вида в чужих кругах (реквизиты, табличные части,
      формы, элементы форм, макеты, команды по `parent_uuid`) — ноль, потому что детей у вида
      нет ни в одной выгрузке (замер 1.1); запись вида обязана существовать в индексе
      состава той же конфигурации.
-  8. КОНТРАКТ. Стадия `s4j_bots` стоит сразу после `s4i_scheduled_jobs` и перед
-     `s4b_object_modules` (порядок позиций 2.9 → 2.10, модули остаются второй транзакцией);
+  8. КОНТРАКТ. Стадия `s4j_bots` стоит сразу после `s4i_scheduled_jobs`, а справа у неё
+     `s4k_functional_options` (порядок позиций 2.9 → 2.10 → 2.11 нормативного списка; узел V56
+     вставил стадию между ботами и модулями объектов, модули остаются второй транзакцией);
      зеркало `STAGE_FULL_RELOAD_ONLY` = False (стадия дозакрывается отдельным входом),
      подсказка называет `load_bots_tool`, вид назван в `STORED_META_KINDS` кругом
      `BOTS_TABLES`, а `bots` входит в `FOREIGN_STAGE_TABLES` — иначе стадия S4 сняла бы
@@ -114,7 +121,8 @@ from configuration_bots import (  # noqa: E402
 from configuration_bots_loader import read_index_records, read_loaded_module_names  # noqa: E402
 from configuration_load_contract import (  # noqa: E402
     BOTS_DIR, BOTS_META_TAG, BOTS_REMOVE_ORDER, BOTS_TABLES, FOREIGN_STAGE_TABLES,
-    STAGE_BOTS, STAGE_FULL_RELOAD_ONLY, STAGE_OBJECT_MODULES, STAGE_SCHEDULED_JOBS, STAGES,
+    STAGE_BOTS, STAGE_FULL_RELOAD_ONLY, STAGE_FUNCTIONAL_OPTIONS, STAGE_OBJECT_MODULES,
+    STAGE_SCHEDULED_JOBS, STAGES,
     STORED_META_KINDS, stage_resume_hint, stage_title, stages_after,
 )
 from configuration_module_slots import resolve_dump_dir  # noqa: E402
@@ -1066,15 +1074,22 @@ def check_contract():
           "2.9 → 2.10 нормативного списка, а не порядок литер)",
           ids.index(STAGE_BOTS) == ids.index(STAGE_SCHEDULED_JOBS) + 1,
           f"порядок: {ids}")
+    # Узел V56 (шаг П8): соседом справа стал не `s4b_object_modules`, а
+    # `s4k_functional_options` — позиция 2.11 нормативного списка идёт раньше модулей
+    # объектов. Прежняя проверка утверждала порядок 2.10 → модули объектов и с V56 стала бы
+    # неправдой; модули объектов по-прежнему остаются последней стадией.
     check(f"`{STAGE_OBJECT_MODULES}` остаётся последней стадией (вторая транзакция текстов), "
-          f"а `{STAGE_BOTS}` стоит перед ней",
-          ids[-1] == STAGE_OBJECT_MODULES and ids.index(STAGE_BOTS) == len(ids) - 2,
+          f"а справа у `{STAGE_BOTS}` — `{STAGE_FUNCTIONAL_OPTIONS}` (узел V56, позиция 2.11)",
+          ids[-1] == STAGE_OBJECT_MODULES
+          and ids.index(STAGE_BOTS) + 1 == len(ids) - 2
+          and ids[ids.index(STAGE_BOTS) + 1] == STAGE_FUNCTIONAL_OPTIONS,
           f"порядок: {ids}")
     check(f"`stages_after('{STAGE_SCHEDULED_JOBS}')` называет продолжением `{STAGE_BOTS}`",
           stages_after(STAGE_SCHEDULED_JOBS)[:1] == [STAGE_BOTS],
           str(stages_after(STAGE_SCHEDULED_JOBS)))
-    check(f"`stages_after('{STAGE_BOTS}')` называет продолжением `{STAGE_OBJECT_MODULES}`",
-          stages_after(STAGE_BOTS)[:1] == [STAGE_OBJECT_MODULES],
+    check(f"`stages_after('{STAGE_BOTS}')` называет продолжением `{STAGE_FUNCTIONAL_OPTIONS}` "
+          "(узел V56), а не модули объектов",
+          stages_after(STAGE_BOTS)[:1] == [STAGE_FUNCTIONAL_OPTIONS],
           str(stages_after(STAGE_BOTS)))
     check(f"у стадии `{STAGE_BOTS}` есть зеркало продолжения (`STAGE_FULL_RELOAD_ONLY` = "
           "False — стадия дозакрывается отдельным входом)",

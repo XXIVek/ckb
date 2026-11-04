@@ -1549,11 +1549,12 @@ def check_contract():
     registry = registry_expected_tools()
     core_tools = list((registry.get("server_configurations_core.py") or []))
     check("вход `load_event_subscriptions_tool` внесён в реестр `EXPECTED_TOOLS` ядра "
-          "(узлом V53 П5 круг ядра — 11 инструментов; с узла V54 П5 — 12; с узла V55 П5 — 13)",
+          "(узлом V53 П5 круг ядра — 11 инструментов; с узла V54 П5 — 12; с узла V55 П5 — 13; "
+          "с узла V56 П5 — 14)",
           "load_event_subscriptions_tool" in core_tools, names(core_tools))
-    check(f"число инструментов ядра — {len(core_tools)} (эталон реестра: 13, узел V55 добавил "
-          "`load_bots_tool`)",
-          len(core_tools) == 13, f"факт: {len(core_tools)}, эталон: 13")
+    check(f"число инструментов ядра — {len(core_tools)} (эталон реестра: 14, узел V56 добавил "
+          "`load_functional_options_tool`)",
+          len(core_tools) == 14, f"факт: {len(core_tools)}, эталон: 14")
 
 
 # ── контур 12: итог по корпусу и неприкосновенность чужих кругов ─────────────────────────────

@@ -2198,9 +2198,9 @@ def check_contract():
     check("вход группы `load_filter_criteria_tool` назван в реестре `EXPECTED_TOOLS` ядра",
           "load_filter_criteria_tool" in core_tools, _brief(sorted(core_tools)))
     check(f"число инструментов ядра — {len(core_tools)} (после узлов V52, V53 и V54 было 12; "
-          "с узла V55, шаг П5 — 13: добавлен `load_bots_tool`, состав сторожит "
-          "`tools/check_mcp_tool_wiring.py`)",
-          len(core_tools) == 13, f"в реестре {len(core_tools)}")
+          "с узла V55, шаг П5 — 13: добавлен `load_bots_tool`; с узла V56, шаг П5 — 14: добавлен "
+          "`load_functional_options_tool`; состав сторожит `tools/check_mcp_tool_wiring.py`)",
+          len(core_tools) == 14, f"в реестре {len(core_tools)}")
 
 
 # ═══ контур 11 (продолжение): неприкосновенность чужих кругов ═════════════════════════
