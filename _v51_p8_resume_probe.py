@@ -60,6 +60,7 @@ from configuration_load_contract import (  # noqa: E402
     STAGE_FILTER_CRITERIA,
     STAGE_EVENT_SUBSCRIPTIONS,
     STAGE_SCHEDULED_JOBS,
+    STAGE_BOTS,
     STAGE_OBJECT_MODULES,
     STAGE_ROLES,
     STAGE_ROOT_MODULES,
@@ -72,6 +73,7 @@ from configuration_load_contract import (  # noqa: E402
     filter_criteria_defaults,
     event_subscriptions_defaults,
     scheduled_jobs_defaults,
+    bots_defaults,
     format_exchange_plans_lines,
     root_modules_defaults,
     roles_defaults,
@@ -88,14 +90,14 @@ DUMPS = ("MinCfg", "KomMag", "BGU2", "BP3")
 # загрузчика, а не локальной копии). S4g и S4b НЕ подменяются заглушками: после отказа S4f
 # они не вызываются, а проверка этого факта требует счётчика — поэтому на них ставится
 # обёртка, которая зовёт настоящую функцию и помечает вызов в `calls`. S4g стоит между S4f
-# и S4b с узла V52 (шаг П5), S4h внесён узлом V53, S4i — узлом V54, и пропуск одной только
+# и S4b с узла V52 (шаг П5), S4h внесён узлом V53, S4i — узлом V54, S4j — узлом V55, и пропуск одной только
 # S4b ничего бы не доказал: отказ S4f обязан снять со вызовов весь хвост `STAGES`.
 EARLIER_STAGES = (
     STAGE_ROOT_MODULES, STAGE_CHILD_OBJECTS, STAGE_SESSION_PARAMETERS, STAGE_ROLES,
     STAGE_COMMON_ATTRIBUTES,
 )
 LATER_STAGES = (STAGE_FILTER_CRITERIA, STAGE_EVENT_SUBSCRIPTIONS,
-                STAGE_SCHEDULED_JOBS, STAGE_OBJECT_MODULES)
+                STAGE_SCHEDULED_JOBS, STAGE_BOTS, STAGE_OBJECT_MODULES)
 STAGE_FUNCTIONS = {
     STAGE_ROOT_MODULES: "load_root_modules",
     STAGE_CHILD_OBJECTS: "load_object_properties",
@@ -106,6 +108,7 @@ STAGE_FUNCTIONS = {
     STAGE_FILTER_CRITERIA: "load_filter_criteria",
     STAGE_EVENT_SUBSCRIPTIONS: "load_event_subscriptions",
     STAGE_SCHEDULED_JOBS: "load_scheduled_jobs",
+    STAGE_BOTS: "load_bots",
     STAGE_OBJECT_MODULES: "load_object_modules",
 }
 DEFAULTS = {
@@ -118,6 +121,7 @@ DEFAULTS = {
     STAGE_FILTER_CRITERIA: filter_criteria_defaults,
     STAGE_EVENT_SUBSCRIPTIONS: event_subscriptions_defaults,
     STAGE_SCHEDULED_JOBS: scheduled_jobs_defaults,
+    STAGE_BOTS: bots_defaults,
     STAGE_OBJECT_MODULES: object_modules_defaults,
 }
 
@@ -301,7 +305,7 @@ def main() -> int:
               EXCHANGE_PLAN_REPEAT_HINT[:70])
         check("2.2 хвост `STAGES` после отказа S4f не вызывался — ни S4g критериев отбора "
               "(узел V52), ни S4h подписок на события (узел V53), ни S4i регламентных "
-              "заданий (узел V54), ни S4b модулей объектов",
+              "заданий (узел V54), ни S4j ботов (узел V55), ни S4b модулей объектов",
               all(calls.get(stage) in (None, 0) for stage in LATER_STAGES),
               {stage: calls.get(stage, 0) for stage in LATER_STAGES})
         after_stop = circle_counts(cur, cfg_uuid)

@@ -8,9 +8,9 @@
 1. базовая полная загрузка выгрузки (`force=True`) — снимок круга вида пятью таблицами,
    снимок круга ЧУЖИХ конфигураций, снимок строки заголовка и индекса состава;
 2. прогон конвейера с искусственным отказом стадии S4g: предыдущие стадии подменены
-   пустым успехом (иначе остановка была бы на более ранней стадии), S4h, S4i и S4b —
+   пустым успехом (иначе остановка была бы на более ранней стадии), S4h, S4i, S4j и S4b —
    обёртками со счётчиком (их вызов после отказа и есть поломка механизма; узел V53 добавил
-   в перечень вторую пропущенную стадию — S4h, узел V54 добавил третью — S4i);
+   в перечень вторую пропущенную стадию — S4h, узел V54 добавил третью — S4i, узел V55 добавил четвёртую — S4j);
 3. продолжение ОТДЕЛЬНЫМ входом `load_filter_criteria(source_path=…, configuration_uuid=…)`
    без перезагрузки конфигурации — круг восстановлен ровно базовыми числами;
 4. повторный вызов того же входа — идемпотентность: снятое равно записанному, витрина
@@ -85,6 +85,7 @@ from configuration_load_contract import (  # noqa: E402
     STAGE_COMMON_ATTRIBUTES,
     STAGE_EVENT_SUBSCRIPTIONS,
     STAGE_SCHEDULED_JOBS,
+    STAGE_BOTS,
     STAGE_EXCHANGE_PLANS,
     STAGE_FILTER_CRITERIA,
     STAGE_OBJECT_MODULES,
@@ -120,7 +121,7 @@ EARLIER_STAGES = (
     STAGE_ROOT_MODULES, STAGE_CHILD_OBJECTS, STAGE_SESSION_PARAMETERS, STAGE_ROLES,
     STAGE_COMMON_ATTRIBUTES, STAGE_EXCHANGE_PLANS,
 )
-LATER_STAGES = (STAGE_EVENT_SUBSCRIPTIONS, STAGE_SCHEDULED_JOBS, STAGE_OBJECT_MODULES,)
+LATER_STAGES = (STAGE_EVENT_SUBSCRIPTIONS, STAGE_SCHEDULED_JOBS, STAGE_BOTS, STAGE_OBJECT_MODULES,)
 STAGE_FUNCTIONS = {
     STAGE_ROOT_MODULES: "load_root_modules",
     STAGE_CHILD_OBJECTS: "load_object_properties",
@@ -131,6 +132,7 @@ STAGE_FUNCTIONS = {
     STAGE_FILTER_CRITERIA: "load_filter_criteria",
     STAGE_EVENT_SUBSCRIPTIONS: "load_event_subscriptions",
     STAGE_SCHEDULED_JOBS: "load_scheduled_jobs",
+    STAGE_BOTS: "load_bots",
     STAGE_OBJECT_MODULES: "load_object_modules",
 }
 DEFAULTS = {
@@ -398,7 +400,7 @@ def main() -> int:
               FILTER_CRITERIA_REPEAT_HINT[:70])
         check("2.2 стадии S4h подписок на события и S4b модулей объектов после отказа S4g "
               "НЕ вызывались — узел V53 поставил S4h между S4g и S4i, и обе обязаны быть "
-              "пропущены (критерий П8, узлы V52, V53 и V54)",
+              "пропущены (критерий П8, узлы V52, V53, V54 и V55)",
               all(calls.get(stage) in (None, 0) for stage in LATER_STAGES),
               {stage: calls.get(stage, 0) for stage in LATER_STAGES})
         check("2.2а отказавшая стадия вызвана ровно один раз (остановка идёт по её ответу, "
@@ -431,6 +433,8 @@ def main() -> int:
               f"{stage_title(STAGE_EVENT_SUBSCRIPTIONS)}" in card
               and f"{SKIPPED_PHRASE}: {STAGE_SCHEDULED_JOBS} — "
               f"{stage_title(STAGE_SCHEDULED_JOBS)}" in card
+              and f"{SKIPPED_PHRASE}: {STAGE_BOTS} — "
+              f"{stage_title(STAGE_BOTS)}" in card
               and f"{SKIPPED_PHRASE}: {STAGE_OBJECT_MODULES} — "
               f"{stage_title(STAGE_OBJECT_MODULES)}" in card,
               [line.strip() for line in card.splitlines()
