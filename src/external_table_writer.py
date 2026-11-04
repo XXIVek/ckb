@@ -132,6 +132,14 @@ from configuration_scheduled_jobs import (
     SCHEDULES_TABLE_NAME as SCHEDULED_JOB_SCHEDULES_TABLE,
     TABLE_NAME as SCHEDULED_JOBS_TABLE,
 )
+# Узел V55 (боты, шаг П4, 04.11.2026, позиция 2.10 нормативного списка): имя таблицы задаёт
+# разбор (`src/configuration_bots.py`), а не писатель — тот же порядок, что у V51–V54.
+# Второго перечня таблиц в проекте нет: таблицы детей у вида нет ни файлами, ни индексом
+# состава (замер 1.2 плана), поэтому добавлять в реестр вторую запись нечем. Цикла импортов
+# нет: разбор вида не импортирует писателей.
+from configuration_bots import (
+    TABLE_NAME as BOTS_TABLE,
+)
 
 # Ревизионные колонки в спецификациях версионированных писателей (M1). Порядок -
 # тот же, что в DDL (шаг 1 src/generate_ddl.py): integer / timestamp / text / boolean.
@@ -2721,6 +2729,74 @@ class ScheduledJobSchedulesRowWriter(TableRowWriter):
     }
 
 
+# Строка бота конфигурации (узел V55, 04.11.2026, позиция 2.10 нормативного списка —
+# `Bots/<Имя>.xml`, таблица `bots`, миграция `migrate_v55_bots.sql`).
+#
+# Модель хранения — решение оператора Q1 (вариант A): свойства вида хранятся strict-колонками
+# пяти тегов словаря разбора, а не jsonb-слотом; незнакомый тег называется колонками
+# `properties_state` и `unknown_property_names`, а не отвергается записью — корпус словарь не
+# замыкает (2 файла одной из четырёх выгрузок, XSD вида нет — замер раздела 1.5 плана).
+#
+# Колонки, смысл которых не выводится из имени:
+#   * `picture_ref` — адрес КАК В ВЫГРУЗКЕ, `picture_full_name` — нормализованный адрес цели:
+#     это два разных факта, и восстановление одного по другому теряет исходную запись;
+#   * `picture_object_id`/`picture_object_uuid` — только то, что дала строка индекса состава
+#     ЭТОЙ конфигурации; `object_id` держится текстом, потому что у составных идентификаторов
+#     индексной колонки `uuid` нет (граница колонки `uuid` таблицы `configuration_objects`,
+#     узел V33);
+#   * `module_state` — состояние ДВУХ ног модуля (файла и записи индекса состава
+#     `Bot.<Имя>.Module`), а не «файл есть/нет»: ровно один модуль на объект по замеру 1.2,
+#     поэтому отдельной таблицы у состояния нет (Q1, вариант A);
+#   * `module_source_path`/`module_source_size` — дескрипторы файла модуля, а не его текст:
+#     тексты пишет узел V47 в `bsl_modules`, стадия V55 их не читает и не снимает (Q4,
+#     вариант A, мера M5);
+#   * `module_loaded` — признак строки `bsl_modules`, проверенный по живой БД (правило V43), а
+#     не повторным разбором `ConfigDumpInfo.xml`; `FALSE` при имеющемся файле означает «V47
+#     для этой выгрузки ещё не запускалась», а не «модуля нет»;
+#   * `full_name` совпадает с `object_name`: иерархии раскладки у вида нет (замер 1.2),
+#     колонка заведена для единой формы чтения детей конфигурации (прецеденты V50, V54);
+#   * `source_path` — путь относительно КОРНЯ выгрузки (`Bots/<Имя>.xml`), а не каталога вида
+#     (поправка V46).
+
+
+class BotsRowWriter(TableRowWriter):
+    """Строка бота конфигурации (таблица `bots`, узел V55, позиция 2.10).
+
+    Обязательных колонок без значения у разбора нет: файл без `<Name>` нечем ключить, а файл
+    без атрибута `uuid` не является ссылкой на объект метаданных (правило R3) — оба называются
+    отказом разбора файла, а не NULL-колонкой. Писатель поэтому ничего не подставляет: пустое
+    значение здесь означало бы потерянный факт, а не состояние выгрузки. `synonym` —
+    `jsonb_nullable`, а не `jsonb_object`: «свойства в выгрузке нет» и «свойство есть, но
+    пустое» — разные состояния (тот же контракт, что V48, V50, V53, V54).
+    """
+
+    TABLE = BOTS_TABLE
+    COLUMNS = versioned_columns({
+        "configuration_uuid": "uuid",
+        "object_uuid": "uuid",
+        "object_name": "text",
+        "full_name": "text",
+        "synonym": "jsonb_nullable",
+        "comment": "text",
+        "predefined": "bool",
+        "picture_ref": "text",
+        "picture_target_class": "text",
+        "picture_full_name": "text",
+        "picture_object_id": "text",
+        "picture_object_uuid": "uuid",
+        "picture_load_transparent": "bool",
+        "picture_load_transparent_state": "text",
+        "picture_state": "text",
+        "module_state": "text",
+        "module_source_path": "text",
+        "module_source_size": "int",
+        "module_loaded": "bool",
+        "properties_state": "text",
+        "unknown_property_names": "text_array_nullable",
+        "source_path": "text",
+    })
+
+
 CONFIGURATION_OBJECT_WRITERS = {
     "subsystems": SubsystemsRowWriter,
     "subsystem_content": SubsystemContentRowWriter,
@@ -2788,6 +2864,17 @@ CONFIGURATION_OBJECT_WRITERS = {
     # колонкой `parent_id` той же таблицы, а не отдельной таблицей (Q1, вариант A).
     SCHEDULED_JOBS_TABLE: ScheduledJobsRowWriter,
     SCHEDULED_JOB_SCHEDULES_TABLE: ScheduledJobSchedulesRowWriter,
+    # Узел V55 (боты, шаг П4, 04.11.2026, позиция 2.10 нормативного списка): ОДНА таблица
+    # вида, версионируемая своей цепью (configuration_uuid, object_name, revision_no — M1:
+    # uuid вида встречается в нескольких конфигурациях, имя уникально внутри конфигурации).
+    # Писателей общих таблиц детей в реестре нет: у вида нет ни форм, ни макетов, ни команд
+    # ни файлами, ни индексом состава (замер 1.2 плана), поэтому второй записи общей таблицы
+    # добавлять нечем. Единственный ребёнок вида в индексе состава (`Bot.<Имя>.Module`)
+    # отдельной таблицы не имеет осознанно: его состояние и дескрипторы являются колонками
+    # строки вида (Q1, вариант A), а тексты пишет узел V47 в `bsl_modules` (мера M5 — стадия
+    # V55 их не снимает). Безцепочечных таблиц у узла нет, поэтому `bots` входит в круг
+    # версионности и не входит в исключение `CONFIGURATION_UNVERSIONED_TABLES`.
+    BOTS_TABLE: BotsRowWriter,
 }
 
 # Таблицы, чей писатель зарегистрирован общим реестром, но своей ЦЕПИ РЕВИЗИЙ у таблицы

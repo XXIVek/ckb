@@ -260,6 +260,19 @@ OBJECT_VERSIONED_TABLES = (
 # расширяется общими таблицами `forms`/`form_ext`/`commands` — как у V53. Вложенная запись
 # расписания `<ent:DetailedDailySchedules>` отдельной таблицы не имеет (Q1, вариант A): она
 # держится колонкой `parent_id` той же таблицы и снимается тем же каскадом.
+# Узел V55 (04.11.2026, позиция 2.10 нормативного списка — боты, `bots`, миграция
+# `migrate_v55_bots.sql`) добавляет в круг ОДНУ таблицу. Ключ цепочки —
+# (configuration_uuid, object_name), как у V48…V54: имя вида уникально в конфигурации, а
+# uuid вида встречается в нескольких конфигурациях (замер `_v55_m1_probe.py`, раздел 1.3
+# плана docs/CONFIGURATION_BOTS_PLAN.md — M1), поэтому граница конфигурации в ключе
+# обязательна по той же причине, что у остальных видов. Таблиц детей у вида нет: форм,
+# макетов и команд у него нет ни файлами, ни строками индекса состава (замер 1.2 плана —
+# единственным ребёнком вида индекс состава называет `Bot.<Имя>.Module`), поэтому круг
+# стадии S4j не расширяется общими таблицами `forms`/`form_ext`/`commands` — как у V53 и
+# V54. Дескрипторы модуля и ссылка `Picture` являются колонками строки вида осознанно
+# (Q1, вариант A): кратность ровно одна на объект по замеру 1.2, а отдельной цепи ревизий
+# у них нет; тексты модулей пишет узел V47 в `bsl_modules`, и стадия V55 их не читает и не
+# снимает (мера M5) — второй копии тех же строк в схеме не быть.
 CONFIGURATION_VERSIONED_TABLES = (
     "subsystems", "subsystem_content", "common_modules", "common_module_sources",
     "session_parameters",
@@ -269,6 +282,7 @@ CONFIGURATION_VERSIONED_TABLES = (
     "filter_criteria",
     "event_subscriptions",
     "scheduled_jobs",
+    "bots",
 )
 
 VERSIONED_TABLES = OBJECT_VERSIONED_TABLES + CONFIGURATION_VERSIONED_TABLES
