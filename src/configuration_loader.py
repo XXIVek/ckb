@@ -331,6 +331,46 @@
     узла V47 (правило V43 — вторым источником повторный разбор XML не становится).
 
 
+Узел V56 (04.11.2026, шаг П5) — свойства функциональных опций, позиция 2.11 нормативного списка
+(`docs/CONFIGURATION_FUNCTIONAL_OPTIONS_PLAN.md`):
+
+    src/configuration_functional_options_loader.py :: load_functional_options(source_path,
+    configuration_uuid=None, changed_at=None)  →  таблицы `functional_options`,
+    `functional_option_content`
+
+Порядок вызова повторяет S3/S4/S4c–S4j: стадия идёт ПОСЛЕ фиксации заголовка и индекса
+состава, потому что адрес `Location` и цели перечня `<Content>` разрешаются записями
+`configuration_objects` своей конфигурации (правило V43 — повторный разбор `ConfigDumpInfo.xml`
+вторым источником не становится). Дальнейшее отличает её от соседних стадий:
+
+  * стадия `s4k_functional_options` стоит между `s4j_bots` и `s4b_object_modules` — порядок
+    `STAGES` повторяет порядок нормативного списка (2.11 идёт сразу за 2.10); перенумерации
+    нет, S5 по-прежнему зарезервирован за анализом;
+  * ответ лежит в собственном ключе `functional_options` (правило C3);
+  * групп `kinds` у стадии и у отдельного входа `load_functional_options_tool` НЕТ — это
+    решение Q4 раздела 6 плана (вариант A), тот же, что у V50, V52, V53, V54 и V55: строка
+    применения существует только через id строки опции (Q1, вариант A), а порога цены, при
+    котором круг стоило бы резать, замер 1.4 не дал (2 467 629 байта файлов регистрации на
+    весь круг, прочего содержимого — 0 байт);
+  * круг — ДВЕ таблицы: строка опции версионируется общей цепью ревизий (витрина
+    `v_current_functional_options`), строки применения — своей цепи ревизий нет, FK ведёт на
+    числовой id конкретной ревизии с `ON DELETE CASCADE` (витрина
+    `v_current_functional_option_content` читается связкой). Поэтому порядок снятия
+    `FUNCTIONAL_OPTIONS_REMOVE_ORDER` начинается с применения: каскад снял бы строки молча, и
+    число в ответе было бы неправдой (M7);
+  * индекс состава НЕ является обязательным входом, в отличие от V55: состояний `pending` у
+    вида в схеме нет, поэтому индекс, не входивший в ход разбора, называется наблюдением
+    `index_not_provided` и предупреждением, а адреса и цели остаются `unresolved` — «цели нет
+    в перечне» и «перечень не загружен» являются разными ответами (правило C2, Q3 и Q6
+    раздела 6 плана);
+  * строки вида и применения снимаются вместе с заголовком явным `DELETE`
+    (`remove_functional_options` в `_remove_rows`): внешнего ключа и каскада по uuid в схеме
+    нет осознанно (прецедент V20.1…V55); для BP3 это 539 + 6 789 строк (замеры 1.1, 2.2);
+  * перечень заголовка `configurations.functional_options` стадия НЕ пишет (его заполняет S2),
+    но называет число записей индекса вида и расхождение с числом файлов — третья нога круга
+    (замер 1.1 даёт равенство на тех выгрузках, где вид есть).
+
+
 Чтения идут через psycopg2 (`src/external_db.py`), а не psql-подпроцессом: `_run_psql` /
 `_psql_fields` унаследованы от прежнего загрузчика, многоколоночные выборки разбирают
 текст по '|', а URL и комментарий конфигурации — как раз значения с '|'.
@@ -464,6 +504,19 @@ from configuration_bots_loader import (
     load_bots,
     remove_bots,
 )
+# Узел V56 (стадия S4k, позиция 2.11 нормативного списка): свойства функциональных опций — тот
+# же слой, что и отдельный инструмент `load_functional_options_tool` (шаг П5); контракт стадии и
+# форматёр — в configuration_load_contract. Строки круга снимаются вместе с заголовком явным
+# `DELETE` (внешнего ключа на `configurations` в схеме нет осознанно — прецедент V20.1…V55),
+# поэтому `_remove_rows` обязан вызвать его явно: без этого force=True оставил бы в базе прежний
+# состав вида (для BP3 это 539 строк опций и 6 789 строк применения — замеры 1.1, 2.2). Порядок
+# снятия держит `FUNCTIONAL_OPTIONS_REMOVE_ORDER`: применение идёт раньше строки вида, иначе FK
+# `functional_option_content_functional_option_id_fkey` с `ON DELETE CASCADE` снял бы строки
+# молча, и число в ответе было бы неправдой (M7).
+from configuration_functional_options_loader import (
+    load_functional_options,
+    remove_functional_options,
+)
 # Узел V47 (стадия S4b): модули объектов конфигурации — вторая транзакция после фиксации
 # содержимого (Q6, граница D7). Точка входа стадии одна и отдельного инструмента у неё нет
 # (Q4.1), поэтому здесь импортируется и ответ «стадия не выполнялась» (`mark_index_unavailable`):
@@ -487,6 +540,8 @@ from configuration_load_contract import (
     EVENT_SUBSCRIPTIONS_SECTION_HEADER,
     FILTER_CRITERIA_REPEAT_HINT,
     FILTER_CRITERIA_SECTION_HEADER,
+    FUNCTIONAL_OPTIONS_REPEAT_HINT,
+    FUNCTIONAL_OPTIONS_SECTION_HEADER,
     NOT_RUN_STOPPED_REASON,
     OBJECT_MODULES_SECTION_HEADER,
     ROLES_REPEAT_HINT,
@@ -504,6 +559,7 @@ from configuration_load_contract import (
     STAGE_EXCHANGE_PLANS,
     STAGE_EVENT_SUBSCRIPTIONS,
     STAGE_FILTER_CRITERIA,
+    STAGE_FUNCTIONAL_OPTIONS,
     STAGE_INCOMPLETE_GROUPS,
     STAGE_OBJECT_MODULES,
     STAGE_ROLES,
@@ -519,6 +575,7 @@ from configuration_load_contract import (
     exchange_plans_defaults,
     event_subscriptions_defaults,
     filter_criteria_defaults,
+    functional_options_defaults,
     roles_defaults,
     root_modules_defaults,
     scheduled_jobs_defaults,
@@ -871,6 +928,14 @@ def _remove_rows(cur, cfg_id, configuration_uuid=None):
     # трогать чужой слой (мера M5).
     if configuration_uuid:
         children.update(remove_bots(cur, configuration_uuid))
+    # Узел V56 (стадия S4k): строки функциональных опций и их применения тоже адресуются uuid
+    # заголовка, внешнего ключа и каскада по нему в схеме нет осознанно (прецеденты V20.1…V55).
+    # Порядок держит `FUNCTIONAL_OPTIONS_REMOVE_ORDER` — сначала `functional_option_content`,
+    # иначе FK строки применения с `ON DELETE CASCADE` снял бы строки молча, и число в ответе
+    # было бы неправдой (M7). Для BP3 это 539 + 6 789 строк (замеры 1.1, 2.2), поэтому явная
+    # очистка здесь обязательна: без неё force=True оставил бы в базе прежний состав вида.
+    if configuration_uuid:
+        children.update(remove_functional_options(cur, configuration_uuid))
     cur.execute("DELETE FROM configurations WHERE id = %s", [cfg_id])
     children["configurations"] = cur.rowcount
     return children
@@ -1389,6 +1454,16 @@ def register_configuration(source_path, force=False, xml_path=None):
     # потому что состояния `pending` отклоняют CHECK'и `bots_picture_state_known` и
     # `bots_module_state_known` — недоступный индекс является отказом стадии, а не наблюдением.
     bots = bots_defaults()
+    # Узел V56 (стадия S4k, позиция 2.11 списка): свойства функциональных опций — ответ в
+    # собственном ключе `functional_options` (правило C3). Групп `kinds` у стадии нет — это
+    # решение Q4 раздела 6 плана (вариант A), тот же, что у V50, V52, V53, V54 и V55: строка
+    # применения существует только через id строки опции (Q1, вариант A), поэтому конвейер
+    # обязан записать весь круг целиком, а раздельной дозагрузки группами у вида нет ни у
+    # стадии, ни у отдельного входа. Отличие от V55 названо слоем: индекс состава НЕ
+    # обязателен — состояний `pending` у вида в схеме нет, поэтому недоступный индекс
+    # называется предупреждением, а адреса и цели остаются `unresolved` (правило C2, Q3).
+    functional_options = functional_options_defaults()
+
     object_modules = object_modules_defaults()
     # Узел V48 (шаг П8, правило C2): пропущенная стадия называет причину пропуска. Без неё
     # форматёр стадии печатает «загрузчик не назвал причину», и читатель карточки видит
@@ -1399,7 +1474,7 @@ def register_configuration(source_path, force=False, xml_path=None):
     # `error`: «не выполнялась» и «отказала после начала работы» различаются именно так.
     for _empty_stage in (child_objects, session_parameters, roles, common_attributes,
                          exchange_plans, filter_criteria, event_subscriptions,
-                         scheduled_jobs, bots, object_modules):
+                         scheduled_jobs, bots, functional_options, object_modules):
         _empty_stage["reason"] = NOT_RUN_STOPPED_REASON
     object_modules["status"] = STATUS_NOT_RUN
     stopped_stage = stopped_stage_defaults()
@@ -1875,6 +1950,65 @@ def register_configuration(source_path, force=False, xml_path=None):
             stopped = True
             load_incomplete = True
 
+    # ── узел V56 (стадия S4k, позиция 2.11 списка): свойства функциональных опций ────────
+    # Порядок вызова повторяет S3/S4/S4c–S4j: ПОСЛЕ коммита транзакции заголовка (своим
+    # соединением стадия не увидела бы ни незакоммиченного заголовка, ни строк индекса состава,
+    # которыми разрешается адрес `Location` и цели перечня `<Content>`), ключ — uuid, каталог
+    # тот же `root_source`. Стадия отдельная, а не расширение S4j (прецедент Q5 узлов V48–V55):
+    # правило C3 требует своего ключа ответа `functional_options`; порядок `STAGES` повторяет
+    # порядок нормативного списка (2.11 идёт сразу за 2.10). Отказ стадии, как у S3/S4 и
+    # S4c–S4j, записанный заголовок не отменяет (C5) — но останавливает конвейер (решение Q8
+    # узла V48, вариант A): S4b после отказа S4k не выполняется и читается `not_run`.
+    #
+    # Конвейер просит ВЕСЬ круг: групп `kinds` у вида нет (Q4 раздела 6 плана, вариант A) —
+    # строка применения существует только через id строки опции (Q1, вариант A). Отсутствие
+    # каталога `FunctionalOptions/` — не отказ, а ответ о выгрузке: `files_found = 0` с
+    # наблюдением `directory_missing` (KomMag вида не имеет ни файлами, ни строками индекса —
+    # замер 1.1). Отличие от V55 названо слоем: индекс состава НЕ обязателен — состояний
+    # `pending` у вида в схеме нет, поэтому недоступный индекс является наблюдением и
+    # предупреждением, а адреса и цели остаются `unresolved` («цели нет в перечне» и «перечень
+    # не загружен» — разные ответы, правило C2). Перечня заголовка `configurations.
+    # functional_options` стадия не пишет (его заполняет S2), но называет число записей индекса
+    # вида и расхождение с числом файлов — третья нога круга (замер 1.1).
+    #
+    # Штамп времени общий с остальными стадиями этой загрузки (M2) — `load_moment` задан выше,
+    # где начинается событие детей заголовка. Строки применения метку не несут: своей цепи
+    # ревизий у них нет (Q2, вариант A), их текущность читается витриной связкой по
+    # `functional_option_id`.
+    if not stopped:
+        try:
+            functional_options = load_functional_options(
+                root_source, configuration_uuid=row["uuid"], changed_at=load_moment)
+        except Exception as exc:  # noqa: BLE001 — отказ стадии называется, а не бросается
+            functional_options = functional_options_defaults()
+            functional_options["configuration_id"] = new_id
+            functional_options["configuration_uuid"] = row["uuid"]
+            functional_options["configuration_name"] = row["name"]
+            functional_options["status"] = STATUS_ERROR
+            functional_options["error"] = (
+                "исключение слоя свойств функциональных опций конфигурации: " + str(exc))
+            functional_options["reason"] = functional_options["error"]
+        for option_warning in functional_options.get("warnings") or []:
+            warnings.append(f"функциональные опции конфигурации: {option_warning}")
+        if not functional_options.get("success"):
+            # Заголовок, индекс состава, модули корня, свойства подсистем с общими модулями,
+            # параметры сеанса, роли, общие реквизиты, планы обмена, критерии отбора, подписки
+            # на события, регламентные задания и боты уже записаны, и отказ этой стадии их не
+            # отменяет (C5). Молчать нельзя по той же причине, что у V44/V46 и V48–V55: после
+            # force=True прежние строки сняты, и «загружено» без этой строки читалось бы как
+            # полный состав конфигурации.
+            warnings.append(
+                "Свойства функциональных опций конфигурации не загружены — причина названа "
+                "строкой «Стадия не выполнена» в разделе «"
+                + FUNCTIONAL_OPTIONS_SECTION_HEADER
+                + "» карточки. Чем продолжить: "
+                + f"{FUNCTIONAL_OPTIONS_REPEAT_HINT} (configuration_uuid={row['uuid']})."
+            )
+            stopped_stage = _stop_here(STAGE_FUNCTIONAL_OPTIONS, functional_options)
+            stopped = True
+            load_incomplete = True
+
+
     # ── узел V47 (стадия S4b): модули объектов конфигурации ────────────────────────────
     # Вторая транзакция ПОСЛЕ фиксации содержимого конфигурации (решение Q6, граница D7
     # узла V46): отказ стадии не откатывает заголовок, индекс состава, модули корня и
@@ -2019,6 +2153,13 @@ def register_configuration(source_path, force=False, xml_path=None):
         # решение Q5 узла V55 (вариант A), а не пропуск; тексты модулей вида в ответе нет —
         # их пишет узел V47, здесь дескрипторы файла модуля (мера M5).
         "bots": bots,
+        # узел V56: машинная часть стадии S4k (позиция 2.11 списка) — полная; ответ лежит в
+        # собственном ключе `functional_options`, а не внутри `bots` или `scheduled_jobs`
+        # (правило C3). Текст раздела даёт общий форматёр контракта — тот же, что отдаёт
+        # отдельный инструмент `load_functional_options_tool` (шаг П5). Групп `kinds` в ответе
+        # нет — это решение Q4 раздела 6 плана (вариант A), а не пропуск; целей перечня без
+        # строки опции в ответе нет (Q1, вариант A).
+        "functional_options": functional_options,
         # узел V47: машинная часть стадии S4b — полная (тот же закрытый контракт, который
         # читают проба П4 и проверка П5); текст раздела даёт общий форматёр контракта.
         # `load_incomplete`/`incomplete_groups` — признак того, что состав в БД неполный

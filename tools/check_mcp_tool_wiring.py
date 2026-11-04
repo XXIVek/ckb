@@ -162,6 +162,19 @@ DEFAULT_TARGETS = [
 # 1.1), и индекс состава ОБЯЗАТЕЛЕН: состояние `pending` колонкам схемы не выразимо, его
 # отклоняют CHECK'и `bots_picture_state_known` и `bots_module_state_known`, поэтому
 # недоступный индекс называется отказом стадии, а не наблюдением (в отличие от V48/V53/V54).
+# Узел V56 (П5, 04.11.2026) добавил load_functional_options_tool: core 13 → 14. Причина та же
+# (решение оператора Q5 узла V48 — свой вход на каждую позицию нормативного списка): файлы
+# регистрации вида `FunctionalOptions/` (позиция 2.11) меняются, а
+# заголовок и индекс состава — нет. Стадия S4k конвейера и инструмент вызывают одну и ту же
+# функцию слоя (src/configuration_functional_options_loader.load_functional_options); закрытый
+# словарь functional_options_defaults() и текст раздела даёт configuration_load_contract.
+# Групп `kinds` НЕТ — решение Q4 раздела 6 плана узла V56 (вариант A, тот же, что у V50, V52,
+# V53, V54 и V55): строка применения существует только через id строки опции (Q1, вариант A),
+# а порога цены, при котором круг стоило бы резать, замер 1.4 не дал (весь круг четырёх
+# выгрузок — 2 467 629 байтов файлов регистрации при нуле прочего содержимого). Индекс состава
+# здесь, в отличие от V55, НЕ обязателен: состояний `pending` у вида в схеме нет, поэтому
+# недоступный индекс называется наблюдением `index_unavailable` и предупреждением, а цели
+# остаются `unresolved` (Q3 раздела 4 плана узла V56).
 EXPECTED_TOOLS = {
     "server_configurations_core.py": [
         "delete_external_report_tool", "load_1c_catalog_tool",
@@ -172,6 +185,7 @@ EXPECTED_TOOLS = {
         "load_event_subscriptions_tool",
         "load_exchange_plans_tool",
         "load_filter_criteria_tool",
+        "load_functional_options_tool",
         "load_roles_tool", "load_scheduled_jobs_tool", "load_session_parameters_tool",
     ],
     "server_configurations_enrichment.py": [

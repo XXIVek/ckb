@@ -41,6 +41,7 @@ from configuration_load_contract import (
     EXCHANGE_PLAN_SECTION_HEADER,
     EVENT_SUBSCRIPTIONS_SECTION_HEADER,
     FILTER_CRITERIA_SECTION_HEADER,
+    FUNCTIONAL_OPTIONS_SECTION_HEADER,
     OBJECT_MODULES_SECTION_HEADER,
     ROLES_SECTION_HEADER,
     ROOT_MODULES_SECTION_HEADER,
@@ -54,6 +55,7 @@ from configuration_load_contract import (
     format_exchange_plans_lines,
     format_event_subscriptions_lines,
     format_filter_criteria_lines,
+    format_functional_options_lines,
     format_object_module_lines,
     format_roles_lines,
     format_root_modules_lines,
@@ -545,6 +547,21 @@ def _stage_section_lines(result):
     if bots_part:
         lines.append(f"{BOTS_SECTION_HEADER}:")
         lines.extend(format_bots_lines(bots_part, indent="   "))
+    # Узел V56 (стадия S4k, позиция 2.11 списка): свойства функциональных опций.
+    # Раздел печатается и при отказе стадии, и при `not_run` — по той же причине, что у
+    # S3/S4/S4c–S4j: «загружено» без него читалось бы как «состав конфигурации в БД есть
+    # весь». Ответ стадии лежит в собственном ключе `functional_options`, а не внутри `bots`
+    # или `scheduled_jobs` (правило C3); текст даёт общий форматёр контракта — тот же, что
+    # отдаёт отдельный инструмент `load_functional_options_tool` (шаг П5). Блока «группы круга
+    # не запрашивались» у форматёра нет: групп `kinds` у вида нет по решению Q4 раздела 6
+    # плана (вариант A), и обещать их значило бы обещать вход, которого нет. Цели перечня
+    # `<Content>` без строки опции в разделе не перечисляются: строка применения существует
+    # только через id строки вида (Q1, вариант A).
+    functional_options_part = result.get("functional_options") or {}
+    if functional_options_part:
+        lines.append(f"{FUNCTIONAL_OPTIONS_SECTION_HEADER}:")
+        lines.extend(
+            format_functional_options_lines(functional_options_part, indent="   "))
     # Узел V47 (стадия S4b): модули объектов конфигурации — вторая транзакция загрузки
     # (Q6, граница D7). Раздел печатается и при отказе стадии, и при `not_run` (индекс
     # состава не разобран — круг не определён): «конфигурация загружена» без него
