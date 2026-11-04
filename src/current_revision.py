@@ -273,6 +273,25 @@ OBJECT_VERSIONED_TABLES = (
 # (Q1, вариант A): кратность ровно одна на объект по замеру 1.2, а отдельной цепи ревизий
 # у них нет; тексты модулей пишет узел V47 в `bsl_modules`, и стадия V55 их не читает и не
 # снимает (мера M5) — второй копии тех же строк в схеме не быть.
+# Узел V56 (04.11.2026, позиция 2.11 нормативного списка — функциональные опции,
+# `functional_options`, миграция `migrate_v56_functional_options.sql`) добавляет в круг ОДНУ
+# таблицу. Ключ цепочки — (configuration_uuid, object_name), как у V48…V55: имя вида уникально
+# внутри выгрузки (765 файлов дают 765 различных имён — замер 1.1 плана), но uuid вида
+# повторяется между конфигурациями: 135 uuid стоят одновременно в BGU2 и BP3, а 143 имени
+# встречаются в двух и более выгрузках (замер `_v56_m1_probe.py`, раздел 1.3 плана
+# docs/CONFIGURATION_FUNCTIONAL_OPTIONS_PLAN.md) — граница конфигурации в ключе обязательна по
+# той же причине, что у остальных видов. `functional_option_content` в круг НЕ вносится
+# осознанно и это названо, а не обойено молча: своей цепи ревизий у строк применения нет (Q2,
+# вариант A по прецедентам `common_attribute_targets` V50, `filter_criterion_content` V52,
+# `event_subscription_sources` V53 и `scheduled_job_schedules` V54) — их ключ начинается с
+# `functional_option_id`, то есть со ссылки на конкретную ревизию строки вида; запись в этом
+# реестре означала бы цепь, которой у таблицы нет. Безцепочечная таблица названа исключением
+# `CONFIGURATION_UNVERSIONED_TABLES` (src/external_table_writer.py), а её витрина
+# `v_current_functional_option_content` строится связкой по этому id (имя не порождается этим
+# реестром). Таблиц детей у вида нет: форм, макетов, команд и модулей у него нет ни файлами, ни
+# строками индекса состава (замер 1.2 плана — записей индекса ровно по числу файлов,
+# псевдозаписей и блока `ChildObjects` ноль), поэтому круг стадии S4k не расширяется общими
+# таблицами `forms`/`form_ext`/`commands` — как у V53, V54, V55.
 CONFIGURATION_VERSIONED_TABLES = (
     "subsystems", "subsystem_content", "common_modules", "common_module_sources",
     "session_parameters",
@@ -283,6 +302,7 @@ CONFIGURATION_VERSIONED_TABLES = (
     "event_subscriptions",
     "scheduled_jobs",
     "bots",
+    "functional_options",
 )
 
 VERSIONED_TABLES = OBJECT_VERSIONED_TABLES + CONFIGURATION_VERSIONED_TABLES

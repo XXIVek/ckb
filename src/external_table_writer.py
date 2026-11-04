@@ -140,6 +140,15 @@ from configuration_scheduled_jobs import (
 from configuration_bots import (
     TABLE_NAME as BOTS_TABLE,
 )
+# Узел V56 (функциональные опции, шаг П4, 04.11.2026, позиция 2.11 нормативного списка):
+# имена двух таблиц вида задаёт разбор (`src/configuration_functional_options.py`), а не
+# писатель — тот же порядок, что у V51–V55. Второго перечня таблиц в проекте нет: проверка
+# узла (`tools/check_v56_functional_options.py`, шаг П6) сверяет с живой схемой именно эти
+# имена. Цикла импортов нет: разбор вида не импортирует писателей.
+from configuration_functional_options import (
+    CONTENT_TABLE_NAME as FUNCTIONAL_OPTION_CONTENT_TABLE,
+    TABLE_NAME as FUNCTIONAL_OPTIONS_TABLE,
+)
 
 # Ревизионные колонки в спецификациях версионированных писателей (M1). Порядок -
 # тот же, что в DDL (шаг 1 src/generate_ddl.py): integer / timestamp / text / boolean.
@@ -2797,6 +2806,157 @@ class BotsRowWriter(TableRowWriter):
     })
 
 
+# Строка функциональной опции конфигурации (узел V56, 04.11.2026, позиция 2.11
+# нормативного списка — `FunctionalOptions/<Имя>.xml`, таблица `functional_options`,
+# миграция `migrate_v56_functional_options.sql`).
+#
+# Модель хранения — решение оператора Q1 (вариант A, прецедент V50): свойства вида хранятся
+# strict-колонками шести тегов словаря разбора, а перечень применения — второй таблицей;
+# jsonb-слота под свойства узел не заводит. Неизвестный тег называется колонками
+# `properties_state` и `unknown_property_names`, а не отвергается записью: словарь шести
+# тегов замкнут замером 2 плана (6 тегов в 765/765 файлов), но XSD вида отсутствует
+# (замер 1.5), поэтому замыкать его CHECK'ом схемы значило бы выдать измеренное за норматив
+# (Q7, вариант A).
+#
+# Колонки, смысл которых не выводится из имени:
+#   * ключом цепочки состояний является (`configuration_uuid`, `object_name`, `revision_no`),
+#     а НЕ `object_uuid`: 135 uuid вида стоят одновременно в BGU2 и BP3 (замер 1.3 плана) —
+#     тот же урок, что V47, V48, V53, V55;
+#   * `full_name` совпадает с `object_name`: иерархии раскладки у вида нет — записи индекса
+#     состава имеют верхний уровень и имя `FunctionalOption.<Имя>` (замер 1.1). Колонка
+#     заведена для единой формы чтения детей конфигурации (прецеденты V50, V54, V55);
+#   * `location_ref` — адрес КАК В ВЫГРУЗКЕ, `location_full_name` — нормализованное полное
+#     имя цели: это два разных факта, и восстановление одного по другому теряет исходную
+#     запись (прецедент `picture_ref`/`picture_full_name` узла V55);
+#   * класс цели ссылки читается парой `location_object_type` (вид метаданных из индексного
+#     имени) и `location_target_form` (форма адреса: `single` / `register_resource` /
+#     `attribute` / `other`). Отдельного словаря `constant`/`information_register_resource`
+#     схемная пара не завела: форма нужна ответу «как опция привязана к носителю», вид — ответу
+#     «к какому виду метаданных»; две половины одного факта в одной колонке сделали бы запрос
+#     по виду невозможным (замер 2.1: 605 / 154 / 6);
+#   * `location_object_id`/`location_object_uuid` — только то, что дала строка индекса состава
+#     ЭТОЙ конфигурации; `object_id` держится текстом, потому что у составных идентификаторов
+#     индексной колонки `uuid` нет (граница колонки `uuid` таблицы `configuration_objects`,
+#     узел V33). Внешнего ключа нет осознанно: ссылка бывает `prefix_only` или `unresolved`, а
+#     разрешённая ведёт к строке, которую снимает перезагрузка индекса (прецедент V49, V53);
+#   * `privileged_get_mode` — логический флаг; его отсутствие в файле является состоянием
+#     `absent` строки свойств, а колонка остаётся NULL (замер 2.3: тег есть в 765/765 файлов,
+#     `false` — один файл MinCfg). CHECK
+#     `functional_options_privileged_get_mode_declared` согласует значение колонки с состоянием
+#     `all_known`, чтобы «значения нет» и «значения не было в файле» различались запросом;
+#   * `content_state` и `targets_count` — состояние перечня и его счётчик в строке вида:
+#     пустой перечень `<Content/>` является состоянием `empty_content` (203 файла корпуса,
+#     замер 2.2), а не нулём строк без объяснения. Равенство «счётчик = число строк
+#     применения» остаётся текстом комментария и проверкой П6, а не CHECK: ограничение
+#     требовало бы связки со второй таблицей (те же соображения, что у счётчиков `roles` V49 и
+#     `common_attributes` V50);
+#   * `source_path` — путь относительно КОРНЯ выгрузки (`FunctionalOptions/<Имя>.xml`), а не
+#     каталога вида (поправка V46).
+
+class FunctionalOptionsRowWriter(TableRowWriter):
+    """Строка функциональной опции (таблица `functional_options`, узел V56, позиция 2.11).
+
+    Обязательных колонок без значения у разбора нет: файл без `<Name>` нечем ключить, а файл
+    без атрибута `uuid` не является ссылкой на объект метаданных (правило R3) — оба называются
+    отказом разбора файла, а не NULL-колонкой. Писатель поэтому ничего не подставляет: пустое
+    значение здесь означало бы потерянный факт, а не состояние выгрузки. `synonym` —
+    `jsonb_nullable`, а не `jsonb_object`: «свойства в выгрузке нет» и «свойство есть, но
+    пустое» — разные состояния (тот же контракт, что V48, V50, V53, V54, V55).
+
+    Отсутствие тега `PrivilegedGetMode` — наоборот, наблюдаемое состояние (`absent`): файл без
+    флага остаётся файлом выгрузки, строка пишется, а колонка остаётся NULL.
+    """
+
+    TABLE = FUNCTIONAL_OPTIONS_TABLE
+    COLUMNS = versioned_columns({
+        "configuration_uuid": "uuid",
+        "object_uuid": "uuid",
+        "object_name": "text",
+        "full_name": "text",
+        "synonym": "jsonb_nullable",
+        "comment": "text",
+        "location_ref": "text",
+        "location_full_name": "text",
+        "location_object_type": "text",
+        "location_target_form": "text",
+        "location_object_id": "text",
+        "location_object_uuid": "uuid",
+        "location_unresolved_path": "text",
+        "location_state": "text",
+        "privileged_get_mode": "bool",
+        "content_state": "text",
+        "targets_count": "int",
+        "properties_state": "text",
+        "unknown_property_names": "text_array_nullable",
+        "source_path": "text",
+    })
+
+
+class FunctionalOptionContentRowWriter(TableRowWriter):
+    """Строка применения функциональной опции (таблица `functional_option_content`, узел V56).
+
+    Таблица НЕ версионируется своей цепочкой — та же форма, что `common_attribute_targets`
+    узла V50 и `filter_criterion_content` узла V52 (Q2, вариант A): ключ начинается с
+    `functional_option_id`, то есть со ссылки на КОНКРЕТНУЮ строку `functional_options`, а
+    значит на конкретную ревизию. Текущность строки применения выводится витриной
+    `v_current_functional_option_content` связкой, а не поиском максимума по собственной цепи.
+    Запись в реестре `CONFIGURATION_OBJECT_WRITERS` при этом есть намеренно: реестр выбирает
+    писателя по таблице, и её отсутствие означало бы выбор класса по имени. Исключение названо
+    константой `CONFIGURATION_UNVERSIONED_TABLES`, а не молча.
+
+    Колонки, смысл которых не выводится из имени:
+
+      * `functional_option_id` подставляет вызывающий слой (стадия П5) из id, полученного
+        `FunctionalOptionsRowWriter.insert_ids`; в контракте разбора для этой связи служит
+        `option_full_name` (`OPTION_LINK_KEY`), и колонкой строки вида он не становится
+        намеренно — иначе строка применения могла бы ссылаться на имя вместо ревизии
+        (прецедент `attribute_full_name` узла V50, `role_name` узла V49);
+      * `configuration_uuid` повторяет значение строки вида осознанно: запрос «где применяется
+        этот срез регистра» идёт по строкам применения, и без колонки он требовал бы связки с
+        `functional_options` и с её витриной на каждом шаге;
+      * `option_object_uuid` / `option_full_name` — указатель на опцию в форме индекса состава
+        (`FunctionalOption.<Имя>`): он остаётся читаемым и тогда, когда строка вида снята
+        (перезагрузка индекса), то есть отвечает на вопрос «о какой опции шла речь»;
+      * `ordinal` — позиция записи перечня `<Content>` в файле. Порядок писатель не меняет: он
+        и есть обещание смысловой сборки перечня обратно (замер 2.2 плана: до 438 целей в одном
+        файле — без отдельной колонки порядок не восстановить);
+      * уникального ключа по паре (вид, цель) в схеме нет осознанно: повтор цели внутри одного
+        перечня корпус не давал (замер 2.2 — ноль), но кратность целей нормальна (M6), а вопрос
+        решался шагом П1 на откатанной транзакции с данными корпуса — уникальный индекс
+        отклонил бы легальную в другой выгрузке повторную цель с другим `ordinal`;
+      * `target_tag` — тег элемента перечня (`<xr:Object>` — единственная наблюдаемая форма,
+        замер 2.2). Иной тег круг не описывает: он называется наблюдаемым разбором, а не
+        записывается строкой применения; колонка нужна, чтобы утверждение «тег один» оставался
+        проверяемым, а не предполагаемым;
+      * `target_object_type` — вид цели из её индексного имени (`Document`, `Catalog`,
+        `InformationRegister`, `Constant`, `CommonCommand`, `Subsystem`, `CommonForm`, … — 21 вид
+        по замеру 2.2), а не таблица: вид нужен ответу «опция применяется к документу», и он не
+        зависит от того, загружено ли содержимое этого вида (круг V38 шире круга V56);
+      * `target_object_id` / `target_object_uuid` — ссылка на СТРОКУ ИНДЕКСА состава, а не на
+        таблицу содержимого цели: внешнего ключа нет осознанно, потому что цель может быть не
+        разрешена (`prefix_only` / `unresolved`), а разрешённая ссылка ведёт к строке, которую
+        снимает перезагрузка индекса (тот же контракт, что `common_attribute_targets` V50);
+      * `target_unresolved_path` остаётся NULL при `exact` — CHECK согласует состояние со
+        ссылкой и остатком пути, поэтому «не разрешено» и «не читалось» различимы запросом.
+    """
+
+    TABLE = FUNCTIONAL_OPTION_CONTENT_TABLE
+    COLUMNS = {
+        "functional_option_id": "int",
+        "configuration_uuid": "uuid",
+        "option_object_uuid": "uuid",
+        "option_full_name": "text",
+        "ordinal": "int",
+        "target_tag": "text",
+        "target_full_name": "text",
+        "target_object_type": "text",
+        "target_object_id": "text",
+        "target_object_uuid": "uuid",
+        "target_resolve_state": "text",
+        "target_unresolved_path": "text",
+    }
+
+
 CONFIGURATION_OBJECT_WRITERS = {
     "subsystems": SubsystemsRowWriter,
     "subsystem_content": SubsystemContentRowWriter,
@@ -2875,6 +3035,21 @@ CONFIGURATION_OBJECT_WRITERS = {
     # V55 их не снимает). Безцепочечных таблиц у узла нет, поэтому `bots` входит в круг
     # версионности и не входит в исключение `CONFIGURATION_UNVERSIONED_TABLES`.
     BOTS_TABLE: BotsRowWriter,
+    # Узел V56 (функциональные опции, шаг П4, 04.11.2026, позиция 2.11 нормативного списка):
+    # две таблицы вида — строка опции и строки её перечня `<Content>` (Q1, вариант A,
+    # прецедент V50: строка применения не существует без строки вида, а строка вида пишется и
+    # с пустым перечнем — пустой перечень является состоянием `empty_content`, замер 2.2: 203
+    # файла из 765). Писателей общих таблиц детей в реестре нет намеренно и это названо, а не
+    # обойено молча: у вида нет ни форм, ни макетов, ни команд, ни модулей — ни файлами, ни
+    # индексом состава (замер 1.2 плана: записей индекса ровно по числу файлов, псевдозаписей
+    # и блока `ChildObjects` ноль), поэтому второй записью общей таблицы круг не расширяется.
+    # Строка применения не имеет своей цепи ревизий и названа исключением
+    # `CONFIGURATION_UNVERSIONED_TABLES` (Q2, вариант A); каскад
+    # `functional_option_content_functional_option_id_fkey` (`ON DELETE CASCADE`) остаётся
+    # средством снятия строк применения вместе с ревизией вида, а текущность читается витриной
+    # `v_current_functional_option_content` связкой по числовому id родителя.
+    FUNCTIONAL_OPTIONS_TABLE: FunctionalOptionsRowWriter,
+    FUNCTIONAL_OPTION_CONTENT_TABLE: FunctionalOptionContentRowWriter,
 }
 
 # Таблицы, чей писатель зарегистрирован общим реестром, но своей ЦЕПИ РЕВИЗИЙ у таблицы
@@ -2917,10 +3092,21 @@ CONFIGURATION_OBJECT_WRITERS = {
 # Текущность читается витриной `v_current_scheduled_job_schedules` связкой по числовому id
 # родителя (прецеденты `v_current_role_rights`, `v_current_filter_criterion_content`,
 # `v_current_event_subscription_sources`).
+# Узел V56 добавляет в список `functional_option_content` по тому же основанию (Q2,
+# вариант A): ключ строки применения начинается с `functional_option_id` — ссылки на конкретную
+# ревизию строки функциональной опции (замер 2.2 плана
+# docs/CONFIGURATION_FUNCTIONAL_OPTIONS_PLAN.md: 10 063 цели перечня на круг, максимум 438 в
+# одном файле — при такой цене собственная цепь ревизий дала бы две «текущие» строки об одном и
+# том же применении, а правка строки вида пересоздала бы весь её перечень заново). Каскад
+# `functional_option_content_functional_option_id_fkey` остаётся средством снятия строк
+# применения вместе с ревизией вида, а текущность читается витриной
+# `v_current_functional_option_content` связкой по числовому id родителя (прецеденты
+# `v_current_common_attribute_targets`, `v_current_filter_criterion_content`).
 CONFIGURATION_UNVERSIONED_TABLES = ("role_rights", "common_attribute_targets",
                                     "filter_criterion_content",
                                     "event_subscription_sources",
-                                    "scheduled_job_schedules")
+                                    "scheduled_job_schedules",
+                                    "functional_option_content")
 
 
 class ConfigCrossReferenceRowWriter(TableRowWriter):
