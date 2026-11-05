@@ -5,10 +5,10 @@
 Норматив (план `docs/CONFIGURATION_EXCHANGE_PLANS_PLAN.md`, строка П8; решение Q8 узла V48 —
 вариант A, прецедент П8 узлов V49 и V50):
 
-  * стадия `s4f_exchange_plans` стоит в `STAGES` между `s4e_common_attributes` (2.5) и
-    `s4b_object_modules` — порядок перечня повторяет порядок нормативного списка, иначе
+  * стадия `s4f_exchange_plans` стоит в `STAGES` сразу после ``s4e_common_attributes``2.5, а за ней —
+    остальные стадии продолжения, последней `s4b_object_modules` — порядок перечня повторяет порядок нормативного списка, иначе
     остановка пропускает группы, стоящие раньше ошибки;
-  * `stages_after` для S4e обязан содержать `s4f_exchange_plans`, а для S4f — только S4b:
+  * `stages_after` для S4e обязан содержать `s4f_exchange_plans`, а для S4f — весь хвост продолжения, посчитанный из `STAGES`:
     перечень пропущенных стадий считается из `STAGES`, а не дописывается вручную там, где
     добавили новую стадию (критерий П8);
   * отказ S4f останавливает конвейер так же, как отказ любой другой стадии: `success: false`,
@@ -104,6 +104,7 @@ from configuration_load_contract import (  # noqa: E402
     SCHEDULED_JOBS_SECTION_HEADER,
     BOTS_SECTION_HEADER,
     FUNCTIONAL_OPTIONS_SECTION_HEADER,
+    FUNCTIONAL_OPTIONS_PARAMETERS_SECTION_HEADER,
     EXCHANGE_PLAN_SECTION_HEADER,
     EXCHANGE_PLAN_TABLES,
     FILTER_CRITERIA_SECTION_HEADER,
@@ -120,6 +121,7 @@ from configuration_load_contract import (  # noqa: E402
     STAGE_SCHEDULED_JOBS,
     STAGE_BOTS,
     STAGE_FUNCTIONAL_OPTIONS,
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
     STAGE_EXCHANGE_PLANS,
     STAGE_FILTER_CRITERIA,
     STAGE_FULL_RELOAD_ONLY,
@@ -140,6 +142,7 @@ from configuration_load_contract import (  # noqa: E402
     scheduled_jobs_defaults,
     bots_defaults,
     functional_options_defaults,
+    functional_options_parameters_defaults,
     exchange_plans_defaults,
     filter_criteria_defaults,
     format_exchange_plans_lines,
@@ -177,7 +180,9 @@ PLANS_LOADER = ROOT / "src" / "configuration_exchange_plans_loader.py"
 CHILD_STAGES = (
     STAGE_ROOT_MODULES, STAGE_CHILD_OBJECTS, STAGE_SESSION_PARAMETERS, STAGE_ROLES,
     STAGE_COMMON_ATTRIBUTES, STAGE_EXCHANGE_PLANS, STAGE_FILTER_CRITERIA,
-    STAGE_EVENT_SUBSCRIPTIONS, STAGE_SCHEDULED_JOBS, STAGE_BOTS, STAGE_FUNCTIONAL_OPTIONS, STAGE_OBJECT_MODULES,
+    STAGE_EVENT_SUBSCRIPTIONS, STAGE_SCHEDULED_JOBS, STAGE_BOTS, STAGE_FUNCTIONAL_OPTIONS,
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
+    STAGE_OBJECT_MODULES,
 )
 STAGE_KEYS = {
     STAGE_ROOT_MODULES: "root_modules",
@@ -191,6 +196,7 @@ STAGE_KEYS = {
     STAGE_SCHEDULED_JOBS: "scheduled_jobs",
     STAGE_BOTS: "bots",
     STAGE_FUNCTIONAL_OPTIONS: "functional_options",
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS: "functional_options_parameters",
     STAGE_OBJECT_MODULES: "object_modules",
 }
 SECTION_HEADERS = {
@@ -205,6 +211,7 @@ SECTION_HEADERS = {
     STAGE_SCHEDULED_JOBS: SCHEDULED_JOBS_SECTION_HEADER,
     STAGE_BOTS: BOTS_SECTION_HEADER,
     STAGE_FUNCTIONAL_OPTIONS: FUNCTIONAL_OPTIONS_SECTION_HEADER,
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS: FUNCTIONAL_OPTIONS_PARAMETERS_SECTION_HEADER,
     STAGE_OBJECT_MODULES: OBJECT_MODULES_SECTION_HEADER,
 }
 DEFAULTS = {
@@ -219,6 +226,7 @@ DEFAULTS = {
     STAGE_SCHEDULED_JOBS: scheduled_jobs_defaults,
     STAGE_BOTS: bots_defaults,
     STAGE_FUNCTIONAL_OPTIONS: functional_options_defaults,
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS: functional_options_parameters_defaults,
     STAGE_OBJECT_MODULES: object_modules_defaults,
 }
 # Функция стадии — имя в модуле загрузчика: `register_configuration` обращается к имени
@@ -235,6 +243,7 @@ STAGE_FUNCTIONS = {
     STAGE_SCHEDULED_JOBS: "load_scheduled_jobs",
     STAGE_BOTS: "load_bots",
     STAGE_FUNCTIONAL_OPTIONS: "load_functional_options",
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS: "load_functional_options_parameters",
     STAGE_OBJECT_MODULES: "load_object_modules",
 }
 # Чем продолжение допустимо (подстрока подсказки): у стадии с отдельным входом — имя его
@@ -251,6 +260,7 @@ RESUME_MARKS = {
     STAGE_SCHEDULED_JOBS: "load_scheduled_jobs_tool",
     STAGE_BOTS: "load_bots_tool",
     STAGE_FUNCTIONAL_OPTIONS: "load_functional_options_tool",
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS: "load_functional_options_parameters_tool",
     STAGE_OBJECT_MODULES: "load_1c_catalog_tool",
 }
 # Слова, которыми форматёр называет состояние стадии (правило C2): «не удалась» — круг
@@ -365,11 +375,11 @@ check("1.3 форматёр на «не останавливался» разд�
 
 ORDER = [stage for stage, _ in STAGES]
 # Критерий П8 для узла V51: перечень пропущенных считается из `STAGES`, поэтому вход вида
-# в останов виден именно здесь — у S4e пропущенными оказываются S4f, S4g, S4h, S4i, S4j, S4k и S4b, у S4f —
-# S4g, S4h, S4i, S4j, S4k и S4b, у S4g (узел V52) — S4h, S4i, S4j, S4k и S4b, у S4h (узел V53) — S4b. Явный
+# в останов виден именно здесь — у S4e пропущенными оказываются S4f, S4g, S4h, S4i, S4j, S4k, S4l и S4b, у S4f —
+# S4g, S4h, S4i, S4j, S4k, S4l и S4b, у S4g (узел V52) — S4h, S4i, S4j, S4k, S4l и S4b, у S4h (узел V53) — S4b. Явный
 # перечень ниже называет, какой именно порядок
 # ожидается; вывод из `STAGES` проверяет следующий пункт.
-check("1.4 `stages_after` даёт порядок `STAGES`: S4e → S4f → S4g → S4h → S4i → S4j → S4k → S4b "
+check("1.4 `stages_after` даёт порядок `STAGES`: S4e → S4f → S4g → S4h → S4i → S4j → S4k → S4l → S4b "
       "(критерий П8, узлы V52, V53, V54, V55 и V56)",
       stages_after(STAGE_COMMON_ATTRIBUTES) == [STAGE_EXCHANGE_PLANS,
                                                STAGE_FILTER_CRITERIA,
@@ -377,22 +387,26 @@ check("1.4 `stages_after` даёт порядок `STAGES`: S4e → S4f → S4g 
                                                STAGE_SCHEDULED_JOBS,
                                                STAGE_BOTS,
                                                STAGE_FUNCTIONAL_OPTIONS,
+                                               STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
                                                STAGE_OBJECT_MODULES]
       and stages_after(STAGE_EXCHANGE_PLANS) == [STAGE_FILTER_CRITERIA,
                                                  STAGE_EVENT_SUBSCRIPTIONS,
                                                  STAGE_SCHEDULED_JOBS,
                                                  STAGE_BOTS,
                                                  STAGE_FUNCTIONAL_OPTIONS,
+                                                 STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
                                                  STAGE_OBJECT_MODULES]
       and stages_after(STAGE_FILTER_CRITERIA) == [STAGE_EVENT_SUBSCRIPTIONS,
                                                  STAGE_SCHEDULED_JOBS,
                                                  STAGE_BOTS,
                                                  STAGE_FUNCTIONAL_OPTIONS,
+                                                 STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
                                                  STAGE_OBJECT_MODULES]
       and stages_after(STAGE_EVENT_SUBSCRIPTIONS) == [
      STAGE_SCHEDULED_JOBS,
      STAGE_BOTS,
      STAGE_FUNCTIONAL_OPTIONS,
+     STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
      STAGE_OBJECT_MODULES]
       and stages_after(STAGE_OBJECT_MODULES) == []
       and all(stages_after(stage) == ORDER[ORDER.index(stage) + 1:]
@@ -412,7 +426,8 @@ check("1.4а порядок `STAGES` повторяет нормативный �
       and ORDER.index(STAGE_BOTS) + 1
       == ORDER.index(STAGE_FUNCTIONAL_OPTIONS)
       and ORDER.index(STAGE_FUNCTIONAL_OPTIONS) + 1
-      == ORDER.index(STAGE_OBJECT_MODULES),
+      == ORDER.index(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS)
+      and ORDER.index(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS) + 1 == ORDER.index(STAGE_OBJECT_MODULES),
       " → ".join(ORDER))
 check("1.4б стадия S4f названа позицией 2.6 и каталогом вида, а не «дополнением S4e»",
       "2.6" in stage_title(STAGE_EXCHANGE_PLANS)
@@ -471,18 +486,19 @@ check("1.12а `s4f_exchange_plans`: незакрытая часть называ
       "2.6" in str(s4f_stopped["incomplete_group"])
       and "планов обмена" in str(s4f_stopped["incomplete_group"]),
       s4f_stopped["incomplete_group"])
-check("1.12б `s4f_exchange_plans`: пропущенными после отказа названы S4g, S4h, S4i, S4j, S4k и S4b — вход "
+check("1.12б `s4f_exchange_plans`: пропущенными после отказа названы S4g, S4h, S4i, S4j, S4k, S4l и S4b — вход "
       "видов V52, V53, V54, V55 и V56 в останов предыдущей стадии (критерий П8, узлы V52, V53, V54, V55 и V56)",
       [item["stage"] for item in s4f_stopped["not_run_stages"]] == [STAGE_FILTER_CRITERIA,
                                                                     STAGE_EVENT_SUBSCRIPTIONS,
                                                                     STAGE_SCHEDULED_JOBS,
                                                                     STAGE_BOTS,
                                                                     STAGE_FUNCTIONAL_OPTIONS,
+                                                                    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
                                                                     STAGE_OBJECT_MODULES],
       [item["stage"] for item in s4f_stopped["not_run_stages"]])
 check("1.12в словарь незакрытых групп содержит её ключ (прецедент записи S4e)",
       STAGE_EXCHANGE_PLANS in STAGE_INCOMPLETE_GROUPS, sorted(STAGE_INCOMPLETE_GROUPS))
-check("1.12г `s4e_common_attributes`: после её отказа пропущенными названы S4f, S4g, S4h, S4i, S4j, S4k и "
+check("1.12г `s4e_common_attributes`: после её отказа пропущенными названы S4f, S4g, S4h, S4i, S4j, S4k, S4l и "
       "S4b — вход новых стадий в останов предыдущей (критерий П8, узлы V51, V52, V53, V54, V55 и V56)",
       stages_after(STAGE_COMMON_ATTRIBUTES) == [STAGE_EXCHANGE_PLANS,
                                                STAGE_FILTER_CRITERIA,
@@ -490,6 +506,7 @@ check("1.12г `s4e_common_attributes`: после её отказа пропущ
                                                STAGE_SCHEDULED_JOBS,
                                                STAGE_BOTS,
                                                STAGE_FUNCTIONAL_OPTIONS,
+                                               STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
                                                STAGE_OBJECT_MODULES],
       stages_after(STAGE_COMMON_ATTRIBUTES))
 

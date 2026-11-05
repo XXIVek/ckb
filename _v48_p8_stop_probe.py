@@ -66,10 +66,12 @@ from configuration_load_contract import (  # noqa: E402
     SCHEDULED_JOBS_SECTION_HEADER,
     BOTS_SECTION_HEADER,
     FUNCTIONAL_OPTIONS_SECTION_HEADER,
+    FUNCTIONAL_OPTIONS_PARAMETERS_SECTION_HEADER,
     EVENT_SUBSCRIPTIONS_TABLES,
     SCHEDULED_JOBS_TABLES,
     BOTS_TABLES,
     FUNCTIONAL_OPTIONS_TABLES,
+    FUNCTIONAL_OPTION_PARAMETERS_TABLES,
     EXCHANGE_PLAN_SECTION_HEADER,
     EXCHANGE_PLAN_TABLES,
     FILTER_CRITERIA_SECTION_HEADER,
@@ -88,6 +90,7 @@ from configuration_load_contract import (  # noqa: E402
     STAGE_SCHEDULED_JOBS,
     STAGE_BOTS,
     STAGE_FUNCTIONAL_OPTIONS,
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
     STAGE_EXCHANGE_PLANS,
     STAGE_FILTER_CRITERIA,
     STAGE_OBJECT_MODULES,
@@ -106,6 +109,7 @@ from configuration_load_contract import (  # noqa: E402
     scheduled_jobs_defaults,
     bots_defaults,
     functional_options_defaults,
+    functional_options_parameters_defaults,
     exchange_plans_defaults,
     filter_criteria_defaults,
     format_stopped_stage_lines,
@@ -151,7 +155,9 @@ ROUTER = ROOT / "src" / "config_load_router.py"
 CHILD_STAGES = (
     STAGE_ROOT_MODULES, STAGE_CHILD_OBJECTS, STAGE_SESSION_PARAMETERS, STAGE_ROLES,
     STAGE_COMMON_ATTRIBUTES, STAGE_EXCHANGE_PLANS, STAGE_FILTER_CRITERIA,
-    STAGE_EVENT_SUBSCRIPTIONS, STAGE_SCHEDULED_JOBS, STAGE_BOTS, STAGE_FUNCTIONAL_OPTIONS, STAGE_OBJECT_MODULES,
+    STAGE_EVENT_SUBSCRIPTIONS, STAGE_SCHEDULED_JOBS, STAGE_BOTS, STAGE_FUNCTIONAL_OPTIONS,
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
+    STAGE_OBJECT_MODULES,
 )
 STAGE_KEYS = {
     STAGE_ROOT_MODULES: "root_modules",
@@ -165,6 +171,7 @@ STAGE_KEYS = {
     STAGE_SCHEDULED_JOBS: "scheduled_jobs",
     STAGE_BOTS: "bots",
     STAGE_FUNCTIONAL_OPTIONS: "functional_options",
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS: "functional_options_parameters",
     STAGE_OBJECT_MODULES: "object_modules",
 }
 SECTION_HEADERS = {
@@ -179,6 +186,7 @@ SECTION_HEADERS = {
     STAGE_SCHEDULED_JOBS: SCHEDULED_JOBS_SECTION_HEADER,
     STAGE_BOTS: BOTS_SECTION_HEADER,
     STAGE_FUNCTIONAL_OPTIONS: FUNCTIONAL_OPTIONS_SECTION_HEADER,
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS: FUNCTIONAL_OPTIONS_PARAMETERS_SECTION_HEADER,
     STAGE_OBJECT_MODULES: OBJECT_MODULES_SECTION_HEADER,
 }
 DEFAULTS = {
@@ -193,6 +201,7 @@ DEFAULTS = {
     STAGE_SCHEDULED_JOBS: scheduled_jobs_defaults,
     STAGE_BOTS: bots_defaults,
     STAGE_FUNCTIONAL_OPTIONS: functional_options_defaults,
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS: functional_options_parameters_defaults,
     STAGE_OBJECT_MODULES: object_modules_defaults,
 }
 # Функция стадии — имя в модуле загрузчика: `register_configuration` обращается к имени
@@ -209,6 +218,7 @@ STAGE_FUNCTIONS = {
     STAGE_SCHEDULED_JOBS: "load_scheduled_jobs",
     STAGE_BOTS: "load_bots",
     STAGE_FUNCTIONAL_OPTIONS: "load_functional_options",
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS: "load_functional_options_parameters",
     STAGE_OBJECT_MODULES: "load_object_modules",
 }
 # Чем продолжение допустимо (подстрока подсказки): у стадии с отдельным входом — имя его
@@ -225,6 +235,7 @@ RESUME_MARKS = {
     STAGE_SCHEDULED_JOBS: "load_scheduled_jobs_tool",
     STAGE_BOTS: "load_bots_tool",
     STAGE_FUNCTIONAL_OPTIONS: "load_functional_options_tool",
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS: "load_functional_options_parameters_tool",
     STAGE_OBJECT_MODULES: "load_1c_catalog_tool",
 }
 
@@ -502,6 +513,13 @@ def scope_counts(cur, cfg_uuid):
         counts["s4k:" + table] = int(one(
             cur, f"SELECT count(*) FROM {table} WHERE configuration_uuid = %s::uuid",
             [str(cfg_uuid)]) or 0)
+    # Узел V57 (шаг П8): строки S4l входят в «что осталось в базе»
+    # по тому же правилу. Круг вида — две таблицы (замер 1.2 плана
+    # узла V57); перечень берётся из словаря слоя.
+    for table in FUNCTIONAL_OPTION_PARAMETERS_TABLES:
+        counts["s4l:" + table] = int(one(
+            cur, f"SELECT count(*) FROM {table} WHERE configuration_uuid = %s::uuid",
+            [str(cfg_uuid)]) or 0)
     counts["s4b:bsl_modules"] = int(one(
         cur, "SELECT count(*) FROM bsl_modules WHERE configuration_uuid = %s::uuid "
              "AND parent_type = 'configuration_objects'", [str(cfg_uuid)]) or 0)
@@ -517,6 +535,7 @@ def stage_row_prefix(stage):
             STAGE_SCHEDULED_JOBS: "s4i:",
             STAGE_BOTS: "s4j:",
             STAGE_FUNCTIONAL_OPTIONS: "s4k:",
+            STAGE_FUNCTIONAL_OPTIONS_PARAMETERS: "s4l:",
             STAGE_OBJECT_MODULES: "s4b:"}[stage]
 
 

@@ -8,7 +8,7 @@
 1. базовая полная загрузка выгрузки (`force=True`) — снимок круга вида пятью таблицами,
    снимок круга ЧУЖИХ конфигураций, снимок строки заголовка и индекса состава;
 2. прогон конвейера с искусственным отказом стадии S4g: предыдущие стадии подменены
-   пустым успехом (иначе остановка была бы на более ранней стадии), S4h, S4i, S4j, S4k и S4b —
+   пустым успехом (иначе остановка была бы на более ранней стадии), S4h, S4i, S4j, S4k, S4l и S4b —
    обёртками со счётчиком (их вызов после отказа и есть поломка механизма; узел V53 добавил
    в перечень вторую пропущенную стадию — S4h, узел V54 добавил третью — S4i, узел V55 добавил четвёртую — S4j, узел V56 добавил пятую — S4k);
 3. продолжение ОТДЕЛЬНЫМ входом `load_filter_criteria(source_path=…, configuration_uuid=…)`
@@ -87,6 +87,7 @@ from configuration_load_contract import (  # noqa: E402
     STAGE_SCHEDULED_JOBS,
     STAGE_BOTS,
     STAGE_FUNCTIONAL_OPTIONS,
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
     STAGE_EXCHANGE_PLANS,
     STAGE_FILTER_CRITERIA,
     STAGE_OBJECT_MODULES,
@@ -122,7 +123,9 @@ EARLIER_STAGES = (
     STAGE_ROOT_MODULES, STAGE_CHILD_OBJECTS, STAGE_SESSION_PARAMETERS, STAGE_ROLES,
     STAGE_COMMON_ATTRIBUTES, STAGE_EXCHANGE_PLANS,
 )
-LATER_STAGES = (STAGE_EVENT_SUBSCRIPTIONS, STAGE_SCHEDULED_JOBS, STAGE_BOTS, STAGE_FUNCTIONAL_OPTIONS, STAGE_OBJECT_MODULES,)
+LATER_STAGES = (STAGE_EVENT_SUBSCRIPTIONS, STAGE_SCHEDULED_JOBS, STAGE_BOTS, STAGE_FUNCTIONAL_OPTIONS,
+STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
+STAGE_OBJECT_MODULES,)
 STAGE_FUNCTIONS = {
     STAGE_ROOT_MODULES: "load_root_modules",
     STAGE_CHILD_OBJECTS: "load_object_properties",
@@ -135,6 +138,7 @@ STAGE_FUNCTIONS = {
     STAGE_SCHEDULED_JOBS: "load_scheduled_jobs",
     STAGE_BOTS: "load_bots",
     STAGE_FUNCTIONAL_OPTIONS: "load_functional_options",
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS: "load_functional_options_parameters",
     STAGE_OBJECT_MODULES: "load_object_modules",
 }
 DEFAULTS = {

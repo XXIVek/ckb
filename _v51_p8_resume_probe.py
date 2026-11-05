@@ -12,7 +12,7 @@ MCP-инструмент (двух кодов, способных разойти
   1 — конвейер останавливается на S4f (подмена функции стадии, как в
       `_v51_p8_stop_probe.py`): строки круга вида сняты, заголовок и индекс состава остались.
       После отказа S4f не вызываются ВСЕ последующие стадии — и S4g критериев отбора (узел V52,
-      шаг П5: стадия внесена в `STAGES` между `s4f_exchange_plans` и `s4b_object_modules`), и
+      шаг П5: стадия внесена в `STAGES` сразу после `s4f_exchange_plans`), и
       S4b модулей объектов. Обе отсчитываются обёртками, которые зовут настоящую функцию и
       записывают число вызовов: «не вызывалась» доказывается нулём счётчика, а не отсутствием
       записи в словаре (тот же урок, что у `_v51_p8_stop_probe.py`).
@@ -62,6 +62,7 @@ from configuration_load_contract import (  # noqa: E402
     STAGE_SCHEDULED_JOBS,
     STAGE_BOTS,
     STAGE_FUNCTIONAL_OPTIONS,
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
     STAGE_OBJECT_MODULES,
     STAGE_ROLES,
     STAGE_ROOT_MODULES,
@@ -76,6 +77,7 @@ from configuration_load_contract import (  # noqa: E402
     scheduled_jobs_defaults,
     bots_defaults,
     functional_options_defaults,
+    functional_options_parameters_defaults,
     format_exchange_plans_lines,
     root_modules_defaults,
     roles_defaults,
@@ -99,7 +101,9 @@ EARLIER_STAGES = (
     STAGE_COMMON_ATTRIBUTES,
 )
 LATER_STAGES = (STAGE_FILTER_CRITERIA, STAGE_EVENT_SUBSCRIPTIONS,
-                STAGE_SCHEDULED_JOBS, STAGE_BOTS, STAGE_FUNCTIONAL_OPTIONS, STAGE_OBJECT_MODULES)
+                STAGE_SCHEDULED_JOBS, STAGE_BOTS, STAGE_FUNCTIONAL_OPTIONS,
+                STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
+                STAGE_OBJECT_MODULES)
 STAGE_FUNCTIONS = {
     STAGE_ROOT_MODULES: "load_root_modules",
     STAGE_CHILD_OBJECTS: "load_object_properties",
@@ -112,6 +116,7 @@ STAGE_FUNCTIONS = {
     STAGE_SCHEDULED_JOBS: "load_scheduled_jobs",
     STAGE_BOTS: "load_bots",
     STAGE_FUNCTIONAL_OPTIONS: "load_functional_options",
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS: "load_functional_options_parameters",
     STAGE_OBJECT_MODULES: "load_object_modules",
 }
 DEFAULTS = {
@@ -126,6 +131,7 @@ DEFAULTS = {
     STAGE_SCHEDULED_JOBS: scheduled_jobs_defaults,
     STAGE_BOTS: bots_defaults,
     STAGE_FUNCTIONAL_OPTIONS: functional_options_defaults,
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS: functional_options_parameters_defaults,
     STAGE_OBJECT_MODULES: object_modules_defaults,
 }
 

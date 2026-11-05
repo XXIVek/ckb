@@ -5,12 +5,11 @@
 Норматив (план `docs/CONFIGURATION_FILTER_CRITERIA_PLAN.md`, строка П8; решение Q8 узла V48 —
 вариант A, прецедент П8 узлов V49, V50, V51):
 
-  * стадия `s4g_filter_criteria` стоит в `STAGES` между `s4f_exchange_plans` (2.6) и
-    `s4b_object_modules` — порядок стадий повторяет порядок нормативного списка (2.7 сразу за
+  * стадия `s4g_filter_criteria` стоит в `STAGES` сразу после ``s4f_exchange_plans``2.6, а за ней —
+    остальные стадии продолжения, последней `s4b_object_modules` — порядок стадий повторяет порядок нормативного списка (2.7 сразу за
     2.6), иначе остановка пропускает группы, стоящие раньше ошибки;
   * `stages_after` для S4f обязан содержать `s4g_filter_criteria` и
-    `s4h_event_subscriptions`, а для S4g — `s4h_event_subscriptions`,
-    `s4i_scheduled_jobs` и `s4b_object_modules`:
+    `s4h_event_subscriptions`, а для S4g — весь хвост продолжения, посчитанный из `STAGES`:
     перечень пропущенных считается из `STAGES`, а не дописывается вручную там, где добавили
     новую стадию (критерий П8);
   * отказ S4g останавливает конвейер так же, как отказ любой другой стадии: `success: false`,
@@ -43,7 +42,7 @@
 
 Разделы пробы:
 
-  1 — контракт офлайн (без БД): порядок `STAGES` и `stages_after` с учётом S4g, S4h, S4i, S4j и S4k,
+  1 — контракт офлайн (без БД): порядок `STAGES` и `stages_after` с учётом S4g, S4h, S4i, S4j, S4k и S4l,
       закрытость
       `stopped_stage_defaults()` по `STOPPED_STAGE_KEYS`, подсказки продолжения по стадиям
       (для S4g — отдельный вход при объявленном ключе `full_reload_required = false`),
@@ -109,6 +108,7 @@ from configuration_load_contract import (  # noqa: E402
     SCHEDULED_JOBS_SECTION_HEADER,
     BOTS_SECTION_HEADER,
     FUNCTIONAL_OPTIONS_SECTION_HEADER,
+    FUNCTIONAL_OPTIONS_PARAMETERS_SECTION_HEADER,
     EXCHANGE_PLAN_SECTION_HEADER,
     FILTER_CRITERIA_CIRCLE_BOUNDARY,
     FILTER_CRITERIA_DIR,
@@ -128,6 +128,7 @@ from configuration_load_contract import (  # noqa: E402
     STAGE_SCHEDULED_JOBS,
     STAGE_BOTS,
     STAGE_FUNCTIONAL_OPTIONS,
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
     STAGE_EXCHANGE_PLANS,
     STAGE_FILTER_CRITERIA,
     STAGE_FULL_RELOAD_ONLY,
@@ -150,6 +151,7 @@ from configuration_load_contract import (  # noqa: E402
     scheduled_jobs_defaults,
     bots_defaults,
     functional_options_defaults,
+    functional_options_parameters_defaults,
     exchange_plans_defaults,
     filter_criteria_defaults,
     format_filter_criteria_lines,
@@ -201,6 +203,7 @@ STAGE_KEYS = {
     STAGE_SCHEDULED_JOBS: "scheduled_jobs",
     STAGE_BOTS: "bots",
     STAGE_FUNCTIONAL_OPTIONS: "functional_options",
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS: "functional_options_parameters",
     STAGE_OBJECT_MODULES: "object_modules",
 }
 SECTION_HEADERS = {
@@ -215,6 +218,7 @@ SECTION_HEADERS = {
     STAGE_SCHEDULED_JOBS: SCHEDULED_JOBS_SECTION_HEADER,
     STAGE_BOTS: BOTS_SECTION_HEADER,
     STAGE_FUNCTIONAL_OPTIONS: FUNCTIONAL_OPTIONS_SECTION_HEADER,
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS: FUNCTIONAL_OPTIONS_PARAMETERS_SECTION_HEADER,
     STAGE_OBJECT_MODULES: OBJECT_MODULES_SECTION_HEADER,
 }
 DEFAULTS = {
@@ -229,6 +233,7 @@ DEFAULTS = {
     STAGE_SCHEDULED_JOBS: scheduled_jobs_defaults,
     STAGE_BOTS: bots_defaults,
     STAGE_FUNCTIONAL_OPTIONS: functional_options_defaults,
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS: functional_options_parameters_defaults,
     STAGE_OBJECT_MODULES: object_modules_defaults,
 }
 # Функция стадии — имя в модуле загрузчика: `register_configuration` обращается к имени
@@ -245,6 +250,7 @@ STAGE_FUNCTIONS = {
     STAGE_SCHEDULED_JOBS: "load_scheduled_jobs",
     STAGE_BOTS: "load_bots",
     STAGE_FUNCTIONAL_OPTIONS: "load_functional_options",
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS: "load_functional_options_parameters",
     STAGE_OBJECT_MODULES: "load_object_modules",
 }
 # Чем продолжение допустимо (подстрока подсказки): у стадии с отдельным входом — имя его
@@ -261,6 +267,7 @@ RESUME_MARKS = {
     STAGE_SCHEDULED_JOBS: "load_scheduled_jobs_tool",
     STAGE_BOTS: "load_bots_tool",
     STAGE_FUNCTIONAL_OPTIONS: "load_functional_options_tool",
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS: "load_functional_options_parameters_tool",
     STAGE_OBJECT_MODULES: "load_1c_catalog_tool",
 }
 # Слова, которыми форматёр называет состояние стадии (правило C2): «не удалась» — круг
@@ -399,25 +406,28 @@ check("1.3 форматёр на «не останавливался» разд�
 
 ORDER = [stage for stage, _title in STAGES]
 # Критерий П8 узла V52: перечень пропущенных считается из `STAGES`, поэтому вход вида в
-# останов виден именно здесь — у S4f пропущенными оказываются S4g, S4h, S4i, S4j, S4k и S4b, у S4g — S4h и
-# S4b, у S4h (узел V53) — только S4b.
-check("1.4 `stages_after` даёт порядок `STAGES`: S4f → S4g → S4h → S4i → S4j → S4k → S4b "
+# останов виден именно здесь — у S4f пропущенными оказываются S4g, S4h, S4i, S4j, S4k, S4l и S4b, у S4g — S4h и весь хвост продолжения,
+        # у S4h (узел V53) — тоже весь хвост.
+check("1.4 `stages_after` даёт порядок `STAGES`: S4f → S4g → S4h → S4i → S4j → S4k → S4l → S4b "
       "(критерий П8, узлы V52, V53, V54, V55 и V56)",
       stages_after(STAGE_EXCHANGE_PLANS) == [STAGE_FILTER_CRITERIA,
                                              STAGE_EVENT_SUBSCRIPTIONS,
                                              STAGE_SCHEDULED_JOBS,
                                              STAGE_BOTS,
                                              STAGE_FUNCTIONAL_OPTIONS,
+                                             STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
                                              STAGE_OBJECT_MODULES]
       and stages_after(STAGE_FILTER_CRITERIA) == [STAGE_EVENT_SUBSCRIPTIONS,
                                                  STAGE_SCHEDULED_JOBS,
                                                  STAGE_BOTS,
                                                  STAGE_FUNCTIONAL_OPTIONS,
+                                                 STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
                                                  STAGE_OBJECT_MODULES]
       and stages_after(STAGE_EVENT_SUBSCRIPTIONS) == [
      STAGE_SCHEDULED_JOBS,
      STAGE_BOTS,
      STAGE_FUNCTIONAL_OPTIONS,
+     STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
      STAGE_OBJECT_MODULES]
       and stages_after(STAGE_OBJECT_MODULES) == []
       and all(stages_after(stage) == ORDER[ORDER.index(stage) + 1:]
@@ -436,7 +446,8 @@ check("1.4а порядок `STAGES` повторяет нормативный �
       and ORDER.index(STAGE_BOTS) + 1
       == ORDER.index(STAGE_FUNCTIONAL_OPTIONS)
       and ORDER.index(STAGE_FUNCTIONAL_OPTIONS) + 1
-      == ORDER.index(STAGE_OBJECT_MODULES),
+      == ORDER.index(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS)
+      and ORDER.index(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS) + 1 == ORDER.index(STAGE_OBJECT_MODULES),
       " → ".join(ORDER))
 check("1.4б стадия S4g названа позицией 2.7 и каталогом вида, а не «дополнением S4f» "
       "(критерий П8)",
@@ -445,18 +456,19 @@ check("1.4б стадия S4g названа позицией 2.7 и катал�
       and STAGE_FILTER_CRITERIA not in [stage for stage in ORDER
                                        if stage.startswith(("s4c", "s4d", "s4e", "s4f"))],
       stage_title(STAGE_FILTER_CRITERIA))
-check("1.4в перечень стадий детей выводится из `STAGES`: двенадцать стадий, S4g, S4h, S4i, S4j и S4k входят, "
+check("1.4в перечень стадий детей выводится из `STAGES`: тринадцать стадий, S4g, S4h, S4i, S4j, S4k и S4l входят, "
       "двух "
       "первых стадий (разбор каталога и заголовок) в перечне нет — подмена их не достигается, "
       "а словарей `*_defaults` у них нет (урок первого прогона этой пробы: ручной перечень "
       "молча расходится с `STAGES`)",
       CHILD_STAGES == tuple(stage for stage, _title in STAGES
                             if stage not in NON_CHILD_STAGES)
-      and len(CHILD_STAGES) == 12 and STAGE_FILTER_CRITERIA in CHILD_STAGES
+      and len(CHILD_STAGES) == 13 and STAGE_FILTER_CRITERIA in CHILD_STAGES
       and STAGE_EVENT_SUBSCRIPTIONS in CHILD_STAGES
       and STAGE_SCHEDULED_JOBS in CHILD_STAGES
       and STAGE_BOTS in CHILD_STAGES
       and STAGE_FUNCTIONAL_OPTIONS in CHILD_STAGES
+      and STAGE_FUNCTIONAL_OPTIONS_PARAMETERS in CHILD_STAGES
       and not set(NON_CHILD_STAGES) & set(CHILD_STAGES)
       and all(stage in DEFAULTS and stage in STAGE_KEYS and stage in SECTION_HEADERS
               and stage in STAGE_FUNCTIONS and stage in RESUME_MARKS
@@ -514,10 +526,12 @@ check("1.12а `s4g_filter_criteria`: незакрытая часть назыв�
       "2.7" in str(s4g_stopped["incomplete_group"])
       and "критериев отбора" in str(s4g_stopped["incomplete_group"]),
       s4g_stopped["incomplete_group"])
-check("1.12б `s4g_filter_criteria`: после отказа пропущенными названы S4h, S4i, S4j, S4k и S4b — "
+check("1.12б `s4g_filter_criteria`: после отказа пропущенными названы S4h, S4i, S4j, S4k, S4l и S4b — "
       "узлы V53, V54 и V55 поставили стадии после S4g (критерий П8, узлы V52, V53, V54, V55 и V56)",
       [item["stage"] for item in s4g_stopped["not_run_stages"]] == [
-          STAGE_EVENT_SUBSCRIPTIONS, STAGE_SCHEDULED_JOBS, STAGE_BOTS, STAGE_FUNCTIONAL_OPTIONS, STAGE_OBJECT_MODULES],
+          STAGE_EVENT_SUBSCRIPTIONS, STAGE_SCHEDULED_JOBS, STAGE_BOTS, STAGE_FUNCTIONAL_OPTIONS,
+          STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
+          STAGE_OBJECT_MODULES],
       [item["stage"] for item in s4g_stopped["not_run_stages"]])
 check("1.12в словарь незакрытых групп содержит её ключ (прецедент записей S4c…S4f)",
       STAGE_FILTER_CRITERIA in STAGE_INCOMPLETE_GROUPS, sorted(STAGE_INCOMPLETE_GROUPS))
@@ -532,6 +546,7 @@ check("1.13 отказ предыдущей стадии S4f называет п
                                                                     STAGE_SCHEDULED_JOBS,
                                                                     STAGE_BOTS,
                                                                     STAGE_FUNCTIONAL_OPTIONS,
+                                                                    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
                                                                     STAGE_OBJECT_MODULES],
       [item["stage"] for item in s4f_stopped["not_run_stages"]])
 check("1.14 текст незакрытой части называет позицию 2.7 закрытой для этого вида и не "

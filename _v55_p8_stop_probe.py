@@ -5,12 +5,11 @@
 Норматив (план `docs/CONFIGURATION_BOTS_PLAN.md`, строка П8; решения Q5, Q8 и Q9 узла
 — вариант A, прецедент П8 узлов V48–V54):
 
-  * стадия `s4j_bots` стоит в `STAGES` между `s4i_scheduled_jobs` (2.9) и
-    `s4b_object_modules` — порядок стадий повторяет порядок нормативного списка (2.10 сразу за
+  * стадия `s4j_bots` стоит в `STAGES` сразу после ``s4i_scheduled_jobs``2.9, а за ней —
+    остальные стадии продолжения, последней `s4b_object_modules` — порядок стадий повторяет порядок нормативного списка (2.10 сразу за
     2.9), перенумерации прежних стадий нет, S4b остаётся последней (вторая транзакция загрузки,
     а не позиция списка); иначе остановка пропускает позиции, стоящие раньше ошибки;
-  * `stages_after` для S4i обязан содержать `s4j_bots`, а для S4j — ровно
-    `s4b_object_modules`:
+  * `stages_after` для S4i обязан содержать `s4j_bots`, а для S4j — весь хвост продолжения, посчитанный из `STAGES`:
     перечень пропущенных считается из `STAGES`, а не дописывается вручную там, где добавили
     новую стадию (критерий П8);
   * отказ S4j останавливает конвейер как отказ любой другой стадии: `success: false`, ключ
@@ -54,7 +53,7 @@
 
 Разделы пробы:
 
-  1 — контракт офлайн (без БД): порядок `STAGES` и `stages_after` с учётом S4j и S4k, закрытость
+  1 — контракт офлайн (без БД): порядок `STAGES` и `stages_after` с учётом S4j, S4k и S4l, закрытость
       `stopped_stage_defaults()` по `STOPPED_STAGE_KEYS`, подсказки продолжения по стадиям
       (для S4j — отдельный вход при объявленном ключе `full_reload_required = false`),
       незакрытая часть S4j, форматёр стадии на отказе и на `not_run`, совпадение круга
@@ -123,8 +122,10 @@ from configuration_load_contract import (  # noqa: E402
     BOTS_REPEAT_HINT,
     BOTS_SECTION_HEADER,
     FUNCTIONAL_OPTIONS_SECTION_HEADER,
+    FUNCTIONAL_OPTIONS_PARAMETERS_SECTION_HEADER,
     BOTS_TABLES,
     FUNCTIONAL_OPTIONS_TABLES,
+    FUNCTIONAL_OPTION_PARAMETERS_TABLES,
     FILTER_CRITERIA_SECTION_HEADER,
     FOREIGN_STAGE_TABLES,
     OBJECT_MODULES_SECTION_HEADER,
@@ -135,6 +136,7 @@ from configuration_load_contract import (  # noqa: E402
     STAGE_SCHEDULED_JOBS,
     STAGE_BOTS,
     STAGE_FUNCTIONAL_OPTIONS,
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
     STAGE_EXCHANGE_PLANS,
     STAGE_FILTER_CRITERIA,
     STAGE_FULL_RELOAD_ONLY,
@@ -154,6 +156,7 @@ from configuration_load_contract import (  # noqa: E402
     scheduled_jobs_defaults,
     bots_defaults,
     functional_options_defaults,
+    functional_options_parameters_defaults,
     exchange_plans_defaults,
     filter_criteria_defaults,
     format_bots_lines,
@@ -188,6 +191,7 @@ EARLIER_STAGES = (
     STAGE_EVENT_SUBSCRIPTIONS, STAGE_SCHEDULED_JOBS,
 )
 LATER_STAGES = (STAGE_FUNCTIONAL_OPTIONS,
+STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
 STAGE_OBJECT_MODULES,)
 STAGE_FUNCTIONS = {
     STAGE_ROOT_MODULES: "load_root_modules",
@@ -201,6 +205,7 @@ STAGE_FUNCTIONS = {
     STAGE_SCHEDULED_JOBS: "load_scheduled_jobs",
     STAGE_BOTS: "load_bots",
     STAGE_FUNCTIONAL_OPTIONS: "load_functional_options",
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS: "load_functional_options_parameters",
     STAGE_OBJECT_MODULES: "load_object_modules",
 }
 DEFAULTS = {
@@ -390,14 +395,18 @@ def check_contract_offline():
           and order.index(STAGE_BOTS) + 1
           == order.index(STAGE_FUNCTIONAL_OPTIONS)
           and order.index(STAGE_FUNCTIONAL_OPTIONS) + 1
-          == order.index(STAGE_OBJECT_MODULES),
+          == order.index(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS)
+          and order.index(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS) + 1 == order.index(STAGE_OBJECT_MODULES),
           order)
-    check("1.2 `stages_after` для S4i содержит S4j, а для S4j — ровно S4k и S4b: перечень "
+    check("1.2 `stages_after` для S4i содержит S4j, а для S4j — ровно S4k, S4l и S4b: перечень "
           "пропущенных считается из `STAGES`, а не дописывается вручную (критерий П8)",
           stages_after(STAGE_SCHEDULED_JOBS) == [STAGE_BOTS,
                                                  STAGE_FUNCTIONAL_OPTIONS,
+                                                 STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
                                                  STAGE_OBJECT_MODULES]
-          and stages_after(STAGE_BOTS) == [STAGE_FUNCTIONAL_OPTIONS, STAGE_OBJECT_MODULES],
+          and stages_after(STAGE_BOTS) == [STAGE_FUNCTIONAL_OPTIONS,
+          STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
+          STAGE_OBJECT_MODULES],
           {STAGE_SCHEDULED_JOBS: stages_after(STAGE_SCHEDULED_JOBS),
            STAGE_BOTS: stages_after(STAGE_BOTS)})
     check("1.3 `stage_title(S4j)` называется позицией 2.10 — строка остановки обязана называть, "
@@ -422,7 +431,7 @@ def check_contract_offline():
           "вида и не обещает закрытости следующей позиции списка; с узла V55 текст называет "
           "закрытой и позицию 2.10, а узел V56 — позицию 2.11, поэтому граница перечня сдвинута на 2.12",
           "2.10" in CHILD_NOT_IMPLEMENTED and "2.11" in CHILD_NOT_IMPLEMENTED
- and "2.12" not in CHILD_NOT_IMPLEMENTED,
+ and "2.13" not in CHILD_NOT_IMPLEMENTED,
           CHILD_NOT_IMPLEMENTED[:220])
 
     zero = bots_defaults()
@@ -781,13 +790,15 @@ def main() -> int:
         card = format_load_result(stopped_result)
         check("2.5 конвейер остановлен именно на S4j и подсказывает отдельный вход, а не полную "
               "перезагрузку (критерий П8, решение Q8 варианта A); в перечне пропущенных — ровно "
-              "S4k и S4b, посчитанная из `STAGES`",
+              "S4k, S4l и S4b, посчитанная из `STAGES`",
               stopped_result.get("success") is False
               and stopped.get("stage") == STAGE_BOTS
               and "load_bots_tool" in str(stopped.get("resume_with"))
               and stopped.get("full_reload_required") is False
               and [item.get("stage") for item in stopped.get("not_run_stages") or []]
-                  == [STAGE_FUNCTIONAL_OPTIONS, STAGE_OBJECT_MODULES]
+                  == [STAGE_FUNCTIONAL_OPTIONS,
+                  STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
+                  STAGE_OBJECT_MODULES]
               and all(item.get("status") == STATUS_NOT_RUN
                       for item in stopped.get("not_run_stages") or []),
               {k: stopped.get(k) for k in ("stage", "full_reload_required", "resume_with")}
@@ -798,18 +809,20 @@ def main() -> int:
               and "2.10" in str(stopped.get("incomplete_group")),
               {"title": stopped.get("title"),
                "incomplete_group": str(stopped.get("incomplete_group"))[:160]})
-        check("2.7 S4k и S4b не вызывались вовсе — по счётчику вызовов, а не по совпадению "
+        check("2.7 S4k, S4l и S4b не вызывались вовсе — по счётчику вызовов, а не по совпадению "
               "со статусом "
               "`not_run` (прецедент пробы V51: подмена ответа скрыла бы реальный прогон хвоста); "
               "сама S4j вызвана ровно один раз",
-              calls.get(STAGE_BOTS) == 1 and STAGE_OBJECT_MODULES not in calls,
+              calls.get(STAGE_BOTS) == 1 and STAGE_OBJECT_MODULES not in calls
+              and STAGE_FUNCTIONAL_OPTIONS_PARAMETERS not in calls,
               {"calls": calls})
         check("2.8 карточка остановки называет раздел остановки, адрес остановленной стадии и "
-              "пропущенные S4k и S4b словом формата (правило C2: пропуск читается текстом, а не "
+              "пропущенные S4k, S4l и S4b словом формата (правило C2: пропуск читается текстом, а не "
               "пустотой)",
               STOP_STAGE_SECTION_HEADER in card and STAGE_BOTS in card
               and SKIPPED_PHRASE in card and stage_title(STAGE_OBJECT_MODULES) in card
               and stage_title(STAGE_BOTS) in card
+              and stage_title(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS) in card
               and stage_title(STAGE_FUNCTIONAL_OPTIONS) in card,
               card[:200])
         after_stop = circle_counts(cur, cfg_uuid)
