@@ -112,7 +112,8 @@ from configuration_load_contract import (  # noqa: E402
     FUNCTIONAL_OPTIONS_META_TAG, FUNCTIONAL_OPTIONS_REMOVE_ORDER,
     FUNCTIONAL_OPTIONS_REPEAT_HINT, FUNCTIONAL_OPTIONS_SECTION_HEADER,
     FUNCTIONAL_OPTIONS_TABLES, STORED_META_KINDS, STAGE_BOTS, STAGE_FULL_RELOAD_ONLY,
-    STAGE_FUNCTIONAL_OPTIONS, STAGE_OBJECT_MODULES, STAGES, functional_options_defaults,
+    STAGE_FUNCTIONAL_OPTIONS, STAGE_FUNCTIONAL_OPTIONS_PARAMETERS, STAGE_OBJECT_MODULES,
+    STAGES, functional_options_defaults,
     format_functional_options_lines, stage_resume_hint, stage_title, stages_after,
 )
 from configuration_module_slots import resolve_dump_dir  # noqa: E402
@@ -1491,15 +1492,22 @@ def check_contract():
           ids.index(STAGE_FUNCTIONAL_OPTIONS) == ids.index(STAGE_BOTS) + 1,
           f"порядок: {ids}")
     check(f"`{STAGE_OBJECT_MODULES}` остаётся последней стадией (вторая транзакция текстов), "
-          f"а `{STAGE_FUNCTIONAL_OPTIONS}` стоит перед ней",
+          f"а справа у `{STAGE_FUNCTIONAL_OPTIONS}` — `{STAGE_FUNCTIONAL_OPTIONS_PARAMETERS}` "
+          "(узел V57, позиция 2.12)",
           ids[-1] == STAGE_OBJECT_MODULES
-          and ids.index(STAGE_FUNCTIONAL_OPTIONS) == len(ids) - 2, f"порядок: {ids}")
+          and ids.index(STAGE_FUNCTIONAL_OPTIONS) == len(ids) - 3
+          and ids[ids.index(STAGE_FUNCTIONAL_OPTIONS) + 1]
+              == STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
+          f"порядок: {ids}")
     check(f"`stages_after('{STAGE_BOTS}')` называет продолжением `{STAGE_FUNCTIONAL_OPTIONS}`",
           stages_after(STAGE_BOTS)[:1] == [STAGE_FUNCTIONAL_OPTIONS],
           str(stages_after(STAGE_BOTS)))
     check(f"`stages_after('{STAGE_FUNCTIONAL_OPTIONS}')` называет продолжением "
-          f"`{STAGE_OBJECT_MODULES}`",
-          stages_after(STAGE_FUNCTIONAL_OPTIONS)[:1] == [STAGE_OBJECT_MODULES],
+          f"`{STAGE_FUNCTIONAL_OPTIONS_PARAMETERS}` (узел V57), а не `{STAGE_OBJECT_MODULES}`; "
+          "последней стадией хвоста `s4b_object_modules` при этом остаётся",
+          stages_after(STAGE_FUNCTIONAL_OPTIONS)[:1]
+          == [STAGE_FUNCTIONAL_OPTIONS_PARAMETERS]
+          and stages_after(STAGE_FUNCTIONAL_OPTIONS)[-1:] == [STAGE_OBJECT_MODULES],
           str(stages_after(STAGE_FUNCTIONAL_OPTIONS)))
     check(f"у стадии `{STAGE_FUNCTIONAL_OPTIONS}` есть зеркало продолжения "
           "(`STAGE_FULL_RELOAD_ONLY` = False — стадия дозакрывается отдельным входом)",

@@ -121,7 +121,8 @@ from configuration_bots import (  # noqa: E402
 from configuration_bots_loader import read_index_records, read_loaded_module_names  # noqa: E402
 from configuration_load_contract import (  # noqa: E402
     BOTS_DIR, BOTS_META_TAG, BOTS_REMOVE_ORDER, BOTS_TABLES, FOREIGN_STAGE_TABLES,
-    STAGE_BOTS, STAGE_FULL_RELOAD_ONLY, STAGE_FUNCTIONAL_OPTIONS, STAGE_OBJECT_MODULES,
+    STAGE_BOTS, STAGE_FULL_RELOAD_ONLY, STAGE_FUNCTIONAL_OPTIONS,
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS, STAGE_OBJECT_MODULES,
     STAGE_SCHEDULED_JOBS, STAGES,
     STORED_META_KINDS, stage_resume_hint, stage_title, stages_after,
 )
@@ -1079,9 +1080,10 @@ def check_contract():
     # объектов. Прежняя проверка утверждала порядок 2.10 → модули объектов и с V56 стала бы
     # неправдой; модули объектов по-прежнему остаются последней стадией.
     check(f"`{STAGE_OBJECT_MODULES}` остаётся последней стадией (вторая транзакция текстов), "
-          f"а справа у `{STAGE_BOTS}` — `{STAGE_FUNCTIONAL_OPTIONS}` (узел V56, позиция 2.11)",
+          f"а справа у `{STAGE_BOTS}` — `{STAGE_FUNCTIONAL_OPTIONS}` (узел V56, позиция 2.11), "
+          f"за ней — `{STAGE_FUNCTIONAL_OPTIONS_PARAMETERS}` (узел V57, позиция 2.12)",
           ids[-1] == STAGE_OBJECT_MODULES
-          and ids.index(STAGE_BOTS) + 1 == len(ids) - 2
+          and ids.index(STAGE_BOTS) + 1 == len(ids) - 3
           and ids[ids.index(STAGE_BOTS) + 1] == STAGE_FUNCTIONAL_OPTIONS,
           f"порядок: {ids}")
     check(f"`stages_after('{STAGE_SCHEDULED_JOBS}')` называет продолжением `{STAGE_BOTS}`",

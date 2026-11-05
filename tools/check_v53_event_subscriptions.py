@@ -1550,11 +1550,12 @@ def check_contract():
     core_tools = list((registry.get("server_configurations_core.py") or []))
     check("вход `load_event_subscriptions_tool` внесён в реестр `EXPECTED_TOOLS` ядра "
           "(узлом V53 П5 круг ядра — 11 инструментов; с узла V54 П5 — 12; с узла V55 П5 — 13; "
-          "с узла V56 П5 — 14)",
+          "с узла V56 П5 — 14; с узла V57 П5 — 15)",
           "load_event_subscriptions_tool" in core_tools, names(core_tools))
-    check(f"число инструментов ядра — {len(core_tools)} (эталон реестра: 14, узел V56 добавил "
-          "`load_functional_options_tool`)",
-          len(core_tools) == 14, f"факт: {len(core_tools)}, эталон: 14")
+    check(f"число инструментов ядра — {len(core_tools)} (эталон реестра: 15 — узел V57 добавил "
+          "`load_functional_options_parameters_tool`; до узла V56 было 14; состав сторожит "
+          "`tools/check_mcp_tool_wiring.py`)",
+          len(core_tools) == 15, f"факт: {len(core_tools)}, эталон: 15")
 
 
 # ── контур 12: итог по корпусу и неприкосновенность чужих кругов ─────────────────────────────
