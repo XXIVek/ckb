@@ -531,6 +531,18 @@ from configuration_functional_options_parameters_loader import (
     load_functional_options_parameters,
     remove_functional_options_parameters,
 )
+# Узел V58 (стадия S4m, позиция 2.13 нормативного списка): свойства определяемых типов — тот же
+# слой, что и отдельный инструмент `load_defined_types_tool` (шаг П7); контракт стадии и
+# форматёр — в configuration_load_contract. Строки круга снимаются вместе с заголовком явным
+# `DELETE` (внешнего ключа на `configurations` в схеме нет осознанно — прецедент V20.1…V57),
+# поэтому `_remove_rows` обязан вызвать его явно: без этого force=True оставил бы в базе прежний
+# состав вида (для BP3 это 513 строк вида — замеры 1.1, 2.2 плана V58). Второй таблицы у узла
+# нет осознанно (Q1, вариант A): блок `<Type>` является колонками строки вида, поэтому порядок
+# снятия `DEFINED_TYPES_REMOVE_ORDER` тривиален и каскада, снимающего строки молча, здесь нет.
+from configuration_defined_types_loader import (
+    load_defined_types,
+    remove_defined_types,
+)
 # Узел V47 (стадия S4b): модули объектов конфигурации — вторая транзакция после фиксации
 # содержимого (Q6, граница D7). Точка входа стадии одна и отдельного инструмента у неё нет
 # (Q4.1), поэтому здесь импортируется и ответ «стадия не выполнялась» (`mark_index_unavailable`):
@@ -548,6 +560,8 @@ from configuration_load_contract import (
     CHILD_SECTION_HEADER,
     COMMON_ATTRIBUTES_REPEAT_HINT,
     COMMON_ATTRIBUTES_SECTION_HEADER,
+    DEFINED_TYPES_REPEAT_HINT,
+    DEFINED_TYPES_SECTION_HEADER,
     EXCHANGE_PLAN_REPEAT_HINT,
     EXCHANGE_PLAN_SECTION_HEADER,
     EVENT_SUBSCRIPTIONS_REPEAT_HINT,
@@ -572,6 +586,7 @@ from configuration_load_contract import (
     STAGE_BOTS,
     STAGE_CHILD_OBJECTS,
     STAGE_COMMON_ATTRIBUTES,
+    STAGE_DEFINED_TYPES,
     STAGE_EXCHANGE_PLANS,
     STAGE_EVENT_SUBSCRIPTIONS,
     STAGE_FILTER_CRITERIA,
@@ -589,6 +604,7 @@ from configuration_load_contract import (
     build_stopped_stage,
     child_objects_defaults,
     common_attributes_defaults,
+    defined_types_defaults,
     exchange_plans_defaults,
     event_subscriptions_defaults,
     filter_criteria_defaults,
@@ -963,6 +979,16 @@ def _remove_rows(cur, cfg_id, configuration_uuid=None):
     # обязательна: без неё force=True оставил бы в базе прежний состав вида.
     if configuration_uuid:
         children.update(remove_functional_options_parameters(cur, configuration_uuid))
+    # Узел V58 (стадия S4m): строки определяемых типов тоже адресуются uuid заголовка, внешнего
+    # ключа и каскада по нему в схеме нет осознанно (прецеденты V20.1…V57). Таблица круга одна —
+    # второй таблицы значений у вида нет осознанно (Q1, вариант A: блок `<Type>` и квалификаторы
+    # являются колонками строки вида), поэтому порядок снятия `DEFINED_TYPES_REMOVE_ORDER`
+    # тривиален, а каскада, который снял бы строки молча, здесь нет. Для BP3 это 513 строк
+    # (замеры 1.1, 2.2 плана V58), поэтому явная очистка здесь обязательна: без неё force=True
+    # оставил бы в базе прежний состав вида. Строки `bsl_modules` (узел V47) не снимаются —
+    # мера M5.
+    if configuration_uuid:
+        children.update(remove_defined_types(cur, configuration_uuid))
     cur.execute("DELETE FROM configurations WHERE id = %s", [cfg_id])
     children["configurations"] = cur.rowcount
     return children
@@ -1501,6 +1527,16 @@ def register_configuration(source_path, force=False, xml_path=None):
     # состояний `pending` у вида в схеме нет, поэтому недоступный индекс называется
     # предупреждением, а цели остаются `unresolved` (правило C2, Q3).
     functional_options_parameters = functional_options_parameters_defaults()
+    # Узел V58 (стадия S4m, позиция 2.13 списка): свойства определяемых типов — ответ в
+    # собственном ключе `defined_types` (правило C3). Групп `kinds` у стадии нет — это решение
+    # Q1 раздела 5 плана (вариант A), тот же, что у V50, V52, V53, V54, V55, V56 и V57: блок
+    # <Type> является колонками строки вида, поэтому состояния «записать свойства без типа» в
+    # модели нет, а порога цены замер 2.2 плана не дал — конвейер обязан записать весь круг
+    # целиком. Индекс состава, как у V56/V57, НЕ обязателен — состояний `pending` у вида в
+    # схеме нет, поэтому недоступный индекс называется предупреждением, а цели значений остаются
+    # `unresolved` (правило C2, Q3); отличие от V55, где индекс является отказом стадии,
+    # названо слоем прямо.
+    defined_types = defined_types_defaults()
 
     object_modules = object_modules_defaults()
     # Узел V48 (шаг П8, правило C2): пропущенная стадия называет причину пропуска. Без неё
@@ -1513,7 +1549,8 @@ def register_configuration(source_path, force=False, xml_path=None):
     for _empty_stage in (child_objects, session_parameters, roles, common_attributes,
                          exchange_plans, filter_criteria, event_subscriptions,
                          scheduled_jobs, bots, functional_options,
-                         functional_options_parameters, object_modules):
+                         functional_options_parameters, defined_types,
+                         object_modules):
         _empty_stage["reason"] = NOT_RUN_STOPPED_REASON
     object_modules["status"] = STATUS_NOT_RUN
     stopped_stage = stopped_stage_defaults()
@@ -2107,6 +2144,74 @@ def register_configuration(source_path, force=False, xml_path=None):
             stopped = True
             load_incomplete = True
 
+    # ── узел V58 (стадия S4m, позиция 2.13 списка): свойства определяемых типов ─────────
+    # Порядок вызова повторяет S3/S4/S4c–S4l: ПОСЛЕ коммита транзакции заголовка (своим
+    # соединением стадия не увидела бы ни незакоммиченного заголовка, ни строк индекса состава,
+    # которыми разрешаются цели значений блока `<Type>`), ключ — uuid, каталог тот же
+    # `root_source`. Стадия отдельная, а не расширение S4l (прецедент Q5 узлов V48–V57):
+    # правило C3 требует своего ключа ответа `defined_types`; порядок `STAGES` повторяет порядок
+    # нормативного списка (2.13 идёт сразу за 2.12). Отказ стадии, как у S3/S4 и S4c–S4l,
+    # записанный заголовок не отменяет (C5) — но останавливает конвейер (решение Q8 узла V48,
+    # вариант A): S4b после отказа S4m не выполняется и читается `not_run`.
+    #
+    # Конвейер просит ВЕСЬ круг: групп `kinds` у вида нет (Q1 раздела 5 плана, вариант A) —
+    # блок `<Type>` и квалификаторы являются колонками строки вида, поэтому состояния «записать
+    # свойства без типа» в модели нет, а порога цены, при котором круг стоило бы резать,
+    # замер не дал: весь круг четырёх выгрузок — 820 файлов регистрации (2 / 1 / 304 / 513)
+    # при 3,07 МБ XML и нуле прочего содержимого (замеры 1.1, 1.4, 2.2 плана V58).
+    # Отсутствующий каталог `DefinedTypes/` — не отказ, а ответ о
+    # выгрузке: `files_found = 0` с наблюдением `directory_missing` (Q9, прецедент V48/V50/V52…V57).
+    # Третьей независимой ногой круга является перечень заголовка
+    # `configurations.defined_types`, который заполняет стадия S2 (узел V43); стадия S4m его НЕ
+    # пишет и не читает (прецедент V52/V56/V57), но называет числа двух своих ног — файлов и
+    # записей индекса вида, — потому что расхождение ног обязано быть названным, а не подразумеваемым
+    # (замер 1.1 плана V58: 2 / 1 / 304 / 513 — имена заголовка, файлы круга и записи индекса
+    # совпадают во всех четырёх выгрузках, расхождений ноль). Индекс состава здесь, как у V56/V57,
+    # НЕ является обязательным входом: состояний `pending` у вида в схеме нет, поэтому недоступный
+    # индекс называется предупреждением, а цели значений остаются `unresolved`; отличие от V55, где
+    # индекс является отказом стадии (состояние `pending` отклоняют CHECK'и
+    # `bots_picture_state_known` и `bots_module_state_known`), названо слоем прямо.
+    #
+    # Разрешение цели не равно её наличию: «разрешено индексом» означает лишь «такая строка
+    # индекса есть» — существование объекта в базе этот узел не утверждает, внешних ключей на
+    # цели нет, потому что слои Catalogs, InformationRegisters, Constants и прочих видов этой
+    # позицией не загружаются (Q3).
+    #
+    # Штамп времени общий с остальными стадиями этой загрузки (M2) — `load_moment` задан выше,
+    # где начинается событие детей заголовка.
+    if not stopped:
+        try:
+            defined_types = load_defined_types(
+                root_source, configuration_uuid=row["uuid"], changed_at=load_moment)
+        except Exception as exc:  # noqa: BLE001 — отказ стадии называется, а не бросается
+            defined_types = defined_types_defaults()
+            defined_types["configuration_id"] = new_id
+            defined_types["configuration_uuid"] = row["uuid"]
+            defined_types["configuration_name"] = row["name"]
+            defined_types["status"] = STATUS_ERROR
+            defined_types["error"] = (
+                "исключение слоя свойств определяемых типов конфигурации: " + str(exc))
+            defined_types["reason"] = defined_types["error"]
+        for defined_type_warning in defined_types.get("warnings") or []:
+            warnings.append(f"определяемые типы конфигурации: {defined_type_warning}")
+        if not defined_types.get("success"):
+            # Заголовок, индекс состава, модули корня, свойства подсистем с общими модулями,
+            # параметры сеанса, роли, общие реквизиты, планы обмена, критерии отбора, подписки
+            # на события, регламентные задания, боты, функциональные опции и их параметры уже
+            # записаны, и отказ этой стадии их не отменяет (C5). Молчать нельзя по той же
+            # причине, что у V44/V46 и V48–V57: после force=True прежние строки сняты, и
+            # «загружено» без этой строки читалось бы как полный состав конфигурации.
+            warnings.append(
+                "Свойства определяемых типов конфигурации не загружены — причина названа "
+                "строкой «Стадия не выполнена» в разделе «"
+                + DEFINED_TYPES_SECTION_HEADER
+                + "» карточки. Чем продолжить: "
+                + f"{DEFINED_TYPES_REPEAT_HINT} (configuration_uuid={row['uuid']})."
+            )
+            stopped_stage = _stop_here(STAGE_DEFINED_TYPES, defined_types)
+            stopped = True
+            load_incomplete = True
+
 
     # ── узел V47 (стадия S4b): модули объектов конфигурации ────────────────────────────
     # Вторая транзакция ПОСЛЕ фиксации содержимого конфигурации (решение Q6, граница D7
@@ -2267,6 +2372,17 @@ def register_configuration(source_path, force=False, xml_path=None):
         # целей перечня `<Use>` без строки параметра в ответе нет (Q1, вариант A); ссылки
         # `Location` в ответе нет осознанно — у вида её нет (замер 2 плана V57).
         "functional_options_parameters": functional_options_parameters,
+        # узел V58: машинная часть стадии S4m (позиция 2.13 списка) — полная; ответ лежит в
+        # собственном ключе `defined_types`, а не внутри `functional_options_parameters` или
+        # `functional_options` (правило C3). Текст раздела даёт общий форматёр контракта — тот
+        # же, что отдаёт отдельный инструмент `load_defined_types_tool` (шаг П7). Групп `kinds`
+        # в ответе нет — это решение Q1 раздела 5 плана (вариант A), а не пропуск: блок `<Type>`
+        # и квалификаторы являются колонками строки вида; отдельной таблицы значений в ответе
+        # нет осознанно (Q1, вариант A); перечень заголовка `configurations.defined_types`
+        # (колонку TEXT[] пишет стадия S2 узла V43) стадия не пишет и не перечитывает —
+        # прецедент V52/V56/V57; в ответе называются две ноги, которые узел действительно
+        # читал: файлы круга и записи индекса состава вида (замер 1.1 плана V58 — 820/820).
+        "defined_types": defined_types,
         # узел V47: машинная часть стадии S4b — полная (тот же закрытый контракт, который
         # читают проба П4 и проверка П5); текст раздела даёт общий форматёр контракта.
         # `load_incomplete`/`incomplete_groups` — признак того, что состав в БД неполный

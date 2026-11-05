@@ -191,13 +191,30 @@ DEFAULT_TARGETS = [
 # названо планом раздела 2: у параметра нет ссылки `Location`, а цели `<Use>` ведут на объекты
 # других видов метаданных, поэтому разрешение идёт по всем строкам индекса состава.
 # Элемент перечня — `<xr:Item xsi:type="xr:MDObjectRef">`, а не `<xr:Object>` (замер 2.1).
+# Узел V58 (П5, 05.11.2026) добавил load_defined_types_tool: core 15 → 16. Причина та же
+# (решение оператора Q5 узла V48 — свой вход на каждую позицию нормативного списка): файлы
+# регистрации вида `DefinedTypes/` (позиция 2.13) меняются, а заголовок и индекс состава — нет.
+# Стадия S4m конвейера и инструмент вызывают одну и ту же функцию слоя
+# (src/configuration_defined_types_loader.load_defined_types); закрытый словарь
+# defined_types_defaults() и текст раздела даёт configuration_load_contract. Групп `kinds` НЕТ —
+# решение Q1 раздела 5 плана узла V58 (вариант A, тот же, что у V50, V52, V53, V54, V55, V56 и
+# V57): блок `<Type>` и его квалификаторы являются колонками строки вида (Q1, вариант A — вторая
+# таблица значений не заведена), а порога цены замер не дал (весь круг четырёх выгрузок — 820
+# файлов регистрации, 3,07 МБ XML и 17 544 значения типа при нуле прочего содержимого). Индекс
+# состава, как у V56/V57, НЕ обязателен: состояний `pending` у вида в схеме нет, поэтому
+# недоступный индекс называется наблюдением `index_not_provided` и предупреждением, а цели
+# остаются `unresolved` (в отличие от V55, где индекс обязателен). Разрешение цели значения идёт
+# по всем строкам индекса состава, потому что цель — объект другого вида (`Catalog.*`,
+# `InformationRegister.*`), а свой круг вида отбирает точным `object_type = 'DefinedType'`.
 EXPECTED_TOOLS = {
     "server_configurations_core.py": [
         "delete_external_report_tool", "load_1c_catalog_tool",
         "load_bots_tool",
         "load_common_attributes_tool",
         "load_configuration_object_properties_tool",
-        "load_configuration_root_modules_tool", "load_external_object_file_tool",
+        "load_configuration_root_modules_tool",
+        "load_defined_types_tool",
+        "load_external_object_file_tool",
         "load_event_subscriptions_tool",
         "load_exchange_plans_tool",
         "load_filter_criteria_tool",

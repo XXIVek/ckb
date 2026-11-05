@@ -329,6 +329,32 @@ from configuration_functional_options_parameters import (
     TARGETS_TABLE_NAME as FUNCTIONAL_OPTION_PARAMETER_TARGETS_TABLE,
     state_columns as functional_options_parameters_state_columns,
 )
+# Узел V58 (05.11.2026, позиция 2.13 нормативного списка — определяемые типы корня
+# конфигурации, `defined_types`): имена каталога, таблицы и метки вида, словари состояний,
+# ключи сводки и нулевой словарь сводки приходят импортом из слоя разбора
+# (`src/configuration_defined_types.py`), а не переписываются здесь — тот же порядок, что у
+# V48…V57. Таблица у вида ОДНА (Q1, вариант A — решение оператора от 05.11.2026 по
+# прецеденту V48/V50/V52: блок `<Type>` хранится колонками строки вида), поэтому второй
+# таблицы круга в импорте нет осознанно, а не потому, что её забыли. Разбор ничего из
+# контракта не импортирует, цикл односторонний.
+# Словарей ЗНАЧЕНИЙ свойств здесь нет намеренно: CHECK на них в схеме нет по решению Q7
+# (вариант A, прецедент узла V50) — словарь четырёх тегов замкнут 820 файлами круга при
+# отсутствии XSD (замер 1.5), и незнакомое значение остаётся значением с состоянием
+# `unknown_value` и именем виновника в `unknown_property_names`, а не отказом записи.
+from configuration_defined_types import (
+    CIRCLE_DISCREPANCIES as DEFINED_TYPES_CIRCLE_DISCREPANCIES,
+    COUNT_KEYS as DEFINED_TYPES_COUNT_KEYS,
+    DIR_NAME as DEFINED_TYPES_DIR,
+    OBJECT_KIND_TAG as DEFINED_TYPES_META_TAG,
+    OBSERVATION_KINDS as DEFINED_TYPES_OBSERVATION_KINDS,
+    RESOLVE_COUNT_KEYS as DEFINED_TYPES_RESOLVE_COUNT_KEYS,
+    RESOLVE_STATES as DEFINED_TYPES_RESOLVE_STATES,
+    STATE_VOCABULARIES as DEFINED_TYPES_STATE_VOCABULARIES,
+    SUMMARY_KEYS as DEFINED_TYPES_SUMMARY_KEYS,
+    TABLE_NAME as DEFINED_TYPES_TABLE,
+    TYPE_CLASS_VALUES as DEFINED_TYPES_VALUE_CLASS_VALUES,
+    zero_counts as defined_types_zero_counts,
+)
 from current_revision import CONFIGURATION_VERSIONED_TABLES
 
 # ── стадии конвейера: один перечень на контракт, карточку и проверку ───────────────
@@ -481,6 +507,21 @@ STAGE_FUNCTIONAL_OPTIONS = "s4k_functional_options"
 # стоило бы резать, замер 1.4 не дал (весь круг четырёх выгрузок — 14 файлов регистрации и 34
 # цели применения, 0 байт прочего содержимого).
 STAGE_FUNCTIONAL_OPTIONS_PARAMETERS = "s4l_functional_options_parameters"
+# Узел V58 (05.11.2026, позиция 2.13 нормативного списка — определяемые типы корня
+# конфигурации, план docs/CONFIGURATION_DEFINED_TYPES_PLAN.md): свойства вида — отдельная
+# стадия S4m, а не семнадцатый вид стадии S4. Причина та же, что у V48…V57 (правило C3):
+# ответ каждой стадии обязан лежать в своём ключе `defined_types`, а разбивать чужой ключ
+# значило бы переименовывать контракт соседнего узла. 2.13 идёт сразу за 2.12, поэтому
+# литера `s4m` стоит между S4l и S4b — порядок нормативного списка держит `STAGES`, а не
+# порядок литер (прецеденты V52…V57). S4b остаётся последней стадией, потому что является
+# второй транзакцией загрузки (Q6 узла V46), а не позицией списка.
+# Групп запроса (`kinds`) у вида НЕТ — это решение, а не упущение (Q1 раздела 5 плана V58,
+# вариант A по прецеденту Q10 узла V50, Q5 узлов V52, V54, V55, V56, V57 и Q8 узла V53):
+# блок `<Type>` является колонками строки вида (Q1), поэтому частичная запись круга
+# описывала бы состав, которого в выгрузке нет, а порога цены, при котором круг стоило бы
+# резать, замер 2.2 не дал (весь круг четырёх выгрузок — 820 файлов регистрации и 17 544
+# значения, прочего содержимого ноль).
+STAGE_DEFINED_TYPES = "s4m_defined_types"
 # Узел V47 (28.10.2026): тексты модулей объектов конфигурации. Номер S4b, а не S5:
 # S5 остаётся за планируемой стадией анализа (дополнение оператора 23.10.2026), которой
 # в `STAGES` нет. Стадия идёт сразу за S4 и является второй транзакцией загрузки (Q6,
@@ -532,6 +573,11 @@ STAGES: Tuple[Tuple[str, str], ...] = (
     # потому что является второй транзакцией загрузки (Q6 узла V46), а не позицией списка.
     (STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
      "Свойства параметров функциональных опций (FunctionalOptionsParameters, позиция 2.12)"),
+    # Узел V58 (позиция 2.13 списка, решение Q1 вариант A): 2.13 идёт сразу за 2.12, литера
+    # `s4m` в коде свободна — перенумерации прежних стадий нет. S4b остаётся последней,
+    # потому что является второй транзакцией загрузки (Q6 узла V46), а не позицией списка.
+    (STAGE_DEFINED_TYPES,
+     "Свойства определяемых типов (DefinedTypes, позиция 2.13)"),
     (STAGE_OBJECT_MODULES, "Модули объектов конфигурации (тексты Ext/, вторая транзакция)"),
 )
 
@@ -709,6 +755,12 @@ STAGE_FULL_RELOAD_ONLY: Dict[str, bool] = {
     # входа, хотя продолжение у неё есть (слоем `load_functional_options_parameters` и точкой
     # входа группы `load_functional_options_parameters_tool` оба обеспечены этим же шагом П5).
     STAGE_FUNCTIONAL_OPTIONS_PARAMETERS: False,
+    # Узел V58 (позиция 2.13, шаг П5 — урок П8 узлов V51–V57): ключ словаря и ветка
+    # `stage_resume_hint` вносятся ОДНИМ вызовом. Разрыв между ними маскировался бы значением
+    # по умолчанию в `build_stopped_stage`: стадия без ключа читается стадией без отдельного
+    # входа, хотя продолжение у неё есть (слоем `load_defined_types` он обеспечен с шага П6,
+    # точкой входа группы `load_defined_types_tool` — шагом П7).
+    STAGE_DEFINED_TYPES: False,
     STAGE_OBJECT_MODULES: True,
 }
 
@@ -778,6 +830,16 @@ STAGE_INCOMPLETE_GROUPS: Dict[str, str] = {
     STAGE_FUNCTIONAL_OPTIONS_PARAMETERS:
         "свойства параметров функциональных опций (позиция 2.12 нормативного "
         "списка, её свойства файла регистрации и круг целей применения блока <Use>)",
+    # Узел V58 (шаг П5): группа называется позицией нормативного списка и её содержимым — по
+    # образцу записей S4c…S4l. У определяемого типа нет форм, макетов, команд, модулей и
+    # каталогов содержимого (замер 1.2 плана V58: записей индекса ровно по числу файлов,
+    # псевдозаписей ноль), но есть блок `<Type>` (17 544 значения на корпус, замер 2.2) и блок
+    # `InternalInfo` (820/820 файлов, замер 1.3), поэтому группа названа её свойствами файла
+    # регистрации и кругом целей значений блока <Type>: без записи остановка на S4m оставила бы
+    # ответ без машиночитаемого признака неполноты.
+    STAGE_DEFINED_TYPES:
+        "свойства определяемых типов (позиция 2.13 нормативного списка, её свойства файла "
+        "регистрации, блок InternalInfo и блок <Type> с кругом целей значений)",
     STAGE_OBJECT_MODULES: "модули объектов конфигурации (группа C модели V38, Ext/)",
 }
 
@@ -871,6 +933,8 @@ def stage_resume_hint(stage_id: str) -> str:
         return FUNCTIONAL_OPTIONS_REPEAT_HINT
     if stage_id == STAGE_FUNCTIONAL_OPTIONS_PARAMETERS:
         return FUNCTIONAL_OPTIONS_PARAMETERS_REPEAT_HINT
+    if stage_id == STAGE_DEFINED_TYPES:
+        return DEFINED_TYPES_REPEAT_HINT
     if stage_id == STAGE_OBJECT_MODULES:
         return OBJECT_MODULES_RELOAD_HINT
     return "полная перезагрузка load_1c_catalog_tool(source_path=…, force=True)"
@@ -1916,6 +1980,110 @@ FUNCTIONAL_OPTIONS_PARAMETERS_CIRCLE_BOUNDARY = (
 )
 
 
+# ── узел V58 (стадия S4m, позиция 2.13 нормативного списка) ──────────────────────────
+# Круг таблиц стадии объявлен ДО текстов карточки и ДО `STORED_META_KINDS` — тот же порядок,
+# что у записей V49…V57: `defined_types` зарегистрирована в круге версионности тем же шагом
+# (`CONFIGURATION_VERSIONED_TABLES`, src/current_revision.py), а `CHILD_TABLES` строится из
+# `CONFIGURATION_VERSIONED_TABLES` минус `FOREIGN_STAGE_TABLES` — без этой константы стадия S4
+# снимала и анализировала бы 820 строк чужого вида (замеры 1.1 плана V58: 2 / 1 / 304 / 513
+# файлов регистрации во всех четырёх выгрузках). Тот же приём, что у записей V48…V57.
+#
+# Круг — ОДНА таблица, и это решение, а не упущение (Q1, вариант A — решение оператора от
+# 05.11.2026 по прецедентам `session_parameters` V48, `common_attributes` V50,
+# `filter_criteria` V52): блок `<Type>` — единственное содержательное свойство вида
+# (820/820 файлов несут его, замер 2.1), и он хранится колонками строки вида
+# (`type_raw`/`types`/`type_multiplicity`/`type_parse_state`/`type_qualifiers`). Второй
+# таблицы `defined_type_values` узел не заводит: строка значения существовала бы только через
+# id строки вида, а обратный запрос («в каких определяемых типах встречается цель
+# `Catalog.X`») читается containment-оператором по `types` — GIN-индексом
+# `idx_defined_types_types_gin` (тот же приём, что V48/V50/V52). Порога цены, при котором
+# круг стоило бы резать, замер 2.2 не дал (максимум 657 значений в файле, 17 544 на круг).
+# Таблиц детей у вида нет, и это названо, а не обойено: форм, макетов, команд, модулей и
+# каталогов содержимого у него нет ни файлами, ни строками индекса состава (замер 1.2 —
+# записей индекса ровно по числу файлов, псевдозаписей ноль), поэтому общими таблицами
+# `forms`/`form_ext`/`commands`/`templates`/`bsl_modules` круг не расширяется — как у V50,
+# V53, V54, V55, V56, V57.
+DEFINED_TYPES_TABLES: Tuple[str, ...] = (DEFINED_TYPES_TABLE,)
+
+# Порядок снятия круга совпадает с кругом: таблицы детей и каскадных внешних ключей у вида нет,
+# поэтому порядка «сначала дети» (мера M7 узлов V50, V52, V53, V54, V56) здесь держать нечего,
+# и снятое число не может разойтись с каскадом. Константа заведена осознанно: ответ стадии
+# обязан называть круг снятия списком таблиц, а не одним числом (прецедент `BOTS_TABLES` V55).
+DEFINED_TYPES_REMOVE_ORDER: Tuple[str, ...] = (DEFINED_TYPES_TABLE,)
+
+
+# ── тексты стадии S4m (узел V58, шаг П5, позиция 2.13 списка) ─────────────────────────
+# Заголовок раздела, подсказка о повторе и граница круга объявлены ДО `CHILD_NOT_IMPLEMENTED`
+# и ДО констант круга: текст незакрытой части ссылается на раздел, где читается отказ стадии,
+# а держать два написания одного заголовка нельзя (прецеденты V48…V57). Имена каталога,
+# таблицы вида и метки метаданных приходят импортом из разбора — второго перечня в проекте нет.
+# Граница называется и при успехе: «строки записаны» не равно «об определяемых типах сохранено
+# всё».
+DEFINED_TYPES_SECTION_HEADER = (
+    "СВОЙСТВА ОПРЕДЕЛЯЕМЫХ ТИПОВ КОНФИГУРАЦИИ (узел V58, позиция 2.13)"
+)
+
+# Что обязан сказать ответ о повторе стадии. Отдельная точка входа группы —
+# `load_defined_types_tool` (шаг П5 узла, внесена в реестр сервера этим же шагом —
+# `tools/check_mcp_tool_wiring.py` сторожит состав). Обещать инструмент, которого в реестре
+# нет, — значит дать обещание, которое сервер не выполняет (прецеденты V48…V57, урок П8
+# узлов V51–V57).
+DEFINED_TYPES_REPEAT_HINT = (
+    "Повторить стадию можно отдельным входом группы "
+    "load_defined_types_tool(source_path=…) без перезагрузки конфигурации "
+    "(узел V58, шаг П5) либо полной перезагрузкой "
+    "load_1c_catalog_tool(source_path=…, force=True)"
+)
+
+# Граница круга держится замеров разделов 1–2 плана V58 и решений Q1–Q4, Q6, Q7. Отличие от
+# узлов V48/V50/V52 называется прямо: те узлы встречали значение `cfg:DefinedType.*` в чужих
+# блоках `<Type>` и оставляли его классом `defined_type_ref` без ключей цели, потому что вида
+# в выгрузке не было (замер V48 2.4.4); узел V58 загружает сам вид, а чужие слои не
+# переразрешает (мера M5, Q3).
+DEFINED_TYPES_CIRCLE_BOUNDARY = (
+    f"круг узла — файлы регистрации вида {DEFINED_TYPES_META_TAG} из каталога "
+    f"{DEFINED_TYPES_DIR}/ (позиция 2.13 списка), подтверждённые записями индекса состава "
+    "того же вида (`DefinedType.<Имя>`) и перечнем заголовка "
+    "`configurations.defined_types` (ТРИ ноги круга, расхождения "
+    "`index_only`/`file_only`/`uuid_mismatch` называются ответом; нога перечня заголовка "
+    "стадией не перезаписывается и сверяется проверкой узла). Вид есть во всех четырёх "
+    "выгрузках эталонного набора — 2 / 1 / 304 / 513 файла регистрации, и записей индекса "
+    "ровно по числу файлов с совпадающими `uuid` (замеры 1.1, 1.2): расхождений круга нет, и "
+    "нули названы числом, а не молчанием. Случай «каталога вида нет» корпусом не дан — он "
+    "проверяется фикстурой постоянной проверки узла, а не наблюдением этой выгрузки. "
+    f"В `{DEFINED_TYPES_TABLE}` идут четыре свойства файла регистрации (`Name`, `Synonym`, "
+    "`Comment`, `Type`) колонками `object_name`/`full_name`, `synonym` (jsonb-карта языков) "
+    "и `comment`, состояние разбора `properties_state` с перечнем незнакомых тегов "
+    "`unknown_property_names` (Q7, вариант A по прецеденту узла V50: XSD вида нет, корпус 820 "
+    "файлов словарь не замыкает, поэтому незнакомое называется, а не отвергается записью), "
+    "блок `InternalInfo` четырьмя значениями (`generated_name`, `type_category`, `type_id`, "
+    "`value_id`) с состоянием `internal_info_state` (Q4 — значения хранятся, потому что "
+    "связывают имя вида с идентификатором из разбора бинарных внешних объектов, узел V25; "
+    "ключом они не становятся — 1154 различных идентификатора на 1640 слотов, замер 1.3), и "
+    "блок `<Type>` колонками `type_raw`/`types`/`type_multiplicity`/`type_parse_state`/"
+    "`type_qualifiers` (Q1, вариант A — второй таблицы нет). Классы значений замкнуты "
+    "словарём слоя и отличаются от словаря V48/V50/V52 (Q3): `ref_value` 11 385, "
+    "`object_value` 4 906, `record_set` 950, `value_manager` 106, `primitive` 197 на 17 544 "
+    "значения (замер 2.3). Разрешение цели значения идёт по СТРОКАМ ИНДЕКСА состава этой "
+    "конфигурации (правило V43): `exact` 17 341, `no_target` 197 (примитивы `xs:*`), "
+    "`unresolved` 6 (все шесть — `BusinessProcessRoutePoint.*`, вида нет в индексе состава — "
+    "замер 2.5, развилка Q6). Адрес выводится из ФОРМЫ значения срезом суффикса `RecordSet`/"
+    "`ValueManager`/`Object`/`Ref`, поэтому 2 419 выведенных адресов и 2 413 разрешённых — "
+    "два разных числа, и оба называются (раздел 2.5). Внешних ключей на цели нет осознанно "
+    "(Q3, вариант A по прецедентам Q3 узлов V50, V52, V53, V55, V56): слои справочников, "
+    "регистров и прочих видов (группы A–H модели V38) этой позицией не загружаются, поэтому "
+    "цель называется состоянием, а не фактом существования. Форм, макетов, команд, модулей и "
+    "каталогов содержимого у вида нет ни в одной выгрузке (замер 1.2), поэтому общих таблиц "
+    "детей у узла нет осознанно, а тексты `bsl_modules` (узел V47) стадия не читает и не "
+    "снимает (мера M5); каталог вида плоский — появление подкаталога или файла не-XML "
+    "называется наблюдениями `unexpected_dir`/`unexpected_file`. Пустого блока `<Type>` и "
+    "пустых блоков квалификаторов корпус не давал ни разу (замеры 2.1, 2.2), но состояния "
+    "`absent` и `empty_value` в словарях держатся границей разбора. Пустой блок "
+    "квалификаторов состоянием строки не становится и называется наблюдением "
+    "`empty_qualifier_block` (прецедент `DayTimes` узла V54); контейнер `<v8:TypeSet>` "
+    "корпусом не дан (0 файлов, M4) и называется наблюдением `type_set_container`"
+)
+
 # Что из содержимого дочерних объектов стадия S4 НЕ загружает — определение перенесено
 # в это место узлом V50 (шаг П8): текст ссылается на заголовок раздела S4e, объявленного
 # рядом с кругом таблиц вида, поэтому заголовок обязан идти раньше текста (прецедент
@@ -1980,7 +2148,13 @@ CHILD_NOT_IMPLEMENTED = (
     "блока <Use> двумя таблицами с формой адреса цели (объект целиком, измерение регистра, "
     "ресурс регистра сведений, реквизит справочника, табличная часть); ссылки Location у вида "
     "нет — в отличие от круга 2.11, а форм, макетов, команд, модулей и каталогов содержимого "
-    "у вида нет ни в одной выгрузке — замер 1.2 плана V57) "
+    "у вида нет ни в одной выгрузке — замер 1.2 плана V57), свойства определяемых типов — "
+    "позиция 2.13 нормативного списка (узел V58, стадия S4m, раздел «"
+    + DEFINED_TYPES_SECTION_HEADER
+    + "» ниже; для этого вида закрыты его свойства файла регистрации, блок `InternalInfo` "
+    "четырьмя идентификаторами с состоянием и блок <Type> колонками строки вида — второй "
+    "таблицы значений у узла нет осознанно (Q1, вариант A), а форм, макетов, команд, модулей "
+    "и каталогов содержимого у вида нет ни в одной выгрузке — замер 1.2 плана V58) "
     "и тексты модулей объектов "
     "конфигурации — шесть слотов Ext/ (узел V47, стадия S4b, раздел «"
     "МОДУЛИ ОБЪЕКТОВ КОНФИГУРАЦИИ» ниже); не реализованы реквизиты и "
@@ -2072,6 +2246,19 @@ STORED_META_KINDS: Dict[str, Dict[str, Any]] = {
         "tables": FUNCTIONAL_OPTION_PARAMETERS_TABLES,
         "section": FUNCTIONAL_OPTIONS_PARAMETERS_SECTION_HEADER,
     },
+    # Узел V58 (шаг П5): вид 2.13 тем же порядком — без строки `DefinedType` вид остался бы в
+    # перечне «содержимое в БД не раскладывается», хотя слой S4m пишет его свойства, блок
+    # `InternalInfo` и блок `<Type>` (прецеденты V55, V56, V57; дефект назван
+    # `_v54_p5_stage_probe.py`). Круг — ОДНА таблица (`DEFINED_TYPES_TABLES`, Q1 вариант A):
+    # второй таблицы значений у вида нет, и в отличие от вида 2.12 здесь нет и таблицы
+    # применения — цели блока `<Type>` являются колонками строки вида (ключи `target_*`
+    # записи jsonb), поэтому второй записью круг не расширяется. Метка вида точная:
+    # `DefinedType` (замер 1.1 — записи индекса состава `DefinedType.<Имя>`).
+    DEFINED_TYPES_META_TAG: {
+        "node": "V58", "stage": "S4m", "position": "2.13",
+        "tables": DEFINED_TYPES_TABLES,
+        "section": DEFINED_TYPES_SECTION_HEADER,
+    },
 }
 
 # Таблицы, чьи строки остаются нетронутыми, когда группа не запрошена: ответ обязан назвать
@@ -2100,11 +2287,18 @@ STORED_META_KINDS: Dict[str, Dict[str, Any]] = {
 # (замеры 1.1 и 2.1 плана V57). `functional_option_parameter_targets` в
 # `CONFIGURATION_VERSIONED_TABLES` нет осознанно (своей цепи ревизий у таблицы нет — Q2,
 # вариант A), поэтому в круге загрузки её держит именно эта константа, а не круг версионности.
+# Узел V58 (шаг П4) добавляет круг стадии S4m тем же порядком и раньше, чем стадия входит в
+# `STAGES` (шаг П5): таблица `defined_types` уже зарегистрирована в круге версионности
+# (`CONFIGURATION_VERSIONED_TABLES`, `src/current_revision.py`, шаги П1/П4), и без этой строки
+# стадия S4 снимала и анализировала бы 820 строк чужого вида (замеры 1.1 плана V58: 2 / 1 /
+# 304 / 513 файлов регистрации во всех четырёх выгрузках корпуса). Второй таблицы у узла нет
+# осознанно (Q1, вариант A): блок `<Type>` является колонками строки вида, поэтому круг
+# держится одной таблицей — как `bots` узла V55.
 FOREIGN_STAGE_TABLES: Tuple[str, ...] = (
     SESSION_PARAMETER_TABLES + ROLE_TABLES + COMMON_ATTRIBUTES_TABLES
     + EXCHANGE_PLAN_TABLES + FILTER_CRITERIA_TABLES + EVENT_SUBSCRIPTIONS_TABLES
     + SCHEDULED_JOBS_TABLES + BOTS_TABLES + FUNCTIONAL_OPTIONS_TABLES
-    + FUNCTIONAL_OPTION_PARAMETERS_TABLES
+    + FUNCTIONAL_OPTION_PARAMETERS_TABLES + DEFINED_TYPES_TABLES
 )
 
 CHILD_TABLES: Tuple[str, ...] = tuple(
@@ -5606,5 +5800,264 @@ def format_functional_options_parameters_lines(result: Dict[str, Any],
     for warning in result.get("warnings") or []:
         lines.append(f"{indent}⚠️ {warning}")
     lines.append(f"{indent}{FUNCTIONAL_OPTIONS_PARAMETERS_CIRCLE_BOUNDARY}")
+    return lines
+
+
+def defined_types_defaults() -> Dict[str, Any]:
+    """Закрытый контракт стадии S4m с нулями (C1, C2, C3; узел V58, шаг П5).
+
+    Словарь плоский — тот же, что возвращает слой `load_defined_types` и что собирает сводка
+    разбора `collect_defined_types` (один словарь на разбор и на ответ — приём `SUMMARY_KEYS`
+    загрузчиков V46/V48…V57); нулевая часть строится импортом `zero_counts()` слоя разбора,
+    потому что второй перечень состояний нарушил бы и сверку с CHECK живой схемы (П6), и
+    обещание C1. Конвейер вкладывает словарь в свой ключ `defined_types` без переименования
+    (C3). Групп `kinds` в контракте нет — это решение Q1 раздела 5 плана V58 (вариант A), а не
+    пропуск: блок `<Type>` является колонками строки вида, поэтому состояния «записать свойства
+    без типа» в модели нет, а порога цены замер 2.2 не дал (820 файлов и 17 544 значения на
+    весь круг).
+
+    Отдельно обязаны быть названы (план V58, разделы 1–2, 5, 8) — иначе нули читаются как
+    «в конфигурации определяемых типов нет»:
+
+    * числа по таблицам (`removed_by_table`/`written_by_table`) — списком таблиц круга снятия
+      (`DEFINED_TYPES_REMOVE_ORDER`), а не одним числом: ответ обязан называть, каким кругом
+      он работал, даже когда круг — одна таблица (прецедент `BOTS_TABLES` V55);
+    * словари состояний по всем колонкам `DEFINED_TYPES_STATE_VOCABULARIES` — строки
+      `counts_by_*` строятся comprehension'ом по словарю разбора (C1);
+    * `counts_by_class` и `counts_by_container` — распределение значений блока `<Type>` по
+      классам и по форме контейнера: без них `ref_value` и `object_value` стали бы одним
+      свойством, а `<v8:TypeSet>` — молчанием (замеры 2.3, M4);
+    * `resolve_exact`/`resolve_no_target`/`resolve_unresolved` — состояния разрешения цели
+      значения («не разрешено индексом» и «цели нет по определению» — разные ответы,
+      прецедент V48/V50/V52);
+    * `distinct_target_addresses` — число РАЗРЕШЁнных различных адресов целей; выведенных из
+      формы значения адресов больше (2 419 против 2 413, раздел 2.5), и обе величины называются
+      форматаром раздельно, потому что смешение читалось бы как «шесть целей потеряно»;
+    * `types_total`/`max_values_per_file` — распределение, а не итог: 657 значений в одном
+      файле и 657 по разным файлам — разные выгрузки (замер 2.2);
+    * `rows_with_qualifiers` — число СТРОК вида с квалификаторами (182), а не число блоков
+      (191): строка одна на файл, и девять файлов несут по два блока (раздел 2.2);
+    * `row_problems` — число самопроверок строки (`row_problems()` слоя повторяет CHECK'ы
+      схемы): нуль обязан быть назван, потому что «самопроверок нет» и «самопроверок не
+      считали» — разные ответы;
+    * расхождения ног круга — ДВУМЯ ключами: словарём `counts_by_circle_discrepancy` (числа по
+      замкнутому словарю `index_only`/`file_only`/`uuid_mismatch`) и списками тех же имён
+      (виновники поимённо). Пустой список — «расхождений нет» (замеры 1.1, 1.2 дают полное
+      совпадение трёх ног на 820 файлов), а отсутствующий ключ — «мы не смотрели» (C1, C2);
+    * `observations` — словарь наблюдений по закрытому перечню `OBSERVATION_KINDS` слоя:
+      `directory_missing` (корпусом не дан — проверяется фикстурой П6), `unexpected_dir`,
+      `unexpected_file`, `type_set_container`, `empty_qualifier_block`, `index_not_provided`;
+    * `failures`/`duplicate_names`/`examples` — виновники поимённо, а не только счётчики.
+    """
+    return {
+        "status": STATUS_NOT_RUN,
+        "success": False,
+        "error": None,
+        "reason": None,
+        "stage": STAGE_DEFINED_TYPES,
+        "configuration_id": None,
+        "configuration_uuid": None,
+        "configuration_name": None,
+        "tables": list(DEFINED_TYPES_REMOVE_ORDER),
+        "directory": DEFINED_TYPES_DIR,
+        "state_columns": list(DEFINED_TYPES_STATE_VOCABULARIES),
+        "rows_written": 0,
+        "defined_types_written": 0,
+        "removed_previous": 0,
+        "removed_by_table": {table: 0 for table in DEFINED_TYPES_REMOVE_ORDER},
+        "written_by_table": {table: 0 for table in DEFINED_TYPES_REMOVE_ORDER},
+        "index_available": False,
+        "index_kind_records": 0,
+        "statistics_refreshed": 0,
+        # Словари наблюдений и расхождений — по закрытым перечням слоя разбора: нулевой ключ
+        # отличается от отсутствующего (C1, C2).
+        "counts_by_circle_discrepancy": {
+            state: 0 for state in DEFINED_TYPES_CIRCLE_DISCREPANCIES},
+        "index_only": [],
+        "file_only": [],
+        "uuid_mismatch": [],
+        "duplicate_names": [],
+        "failures": [],
+        "examples": [],
+        # Числа круга, словари состояний, классы, контейнеры, состояния разрешения и
+        # наблюдения — ОДНИМ словарём слоя разбора (его же заполняет `collect_defined_types`):
+        # второй перечень состояний разошёлся бы с CHECK живой схемы (П6).
+        **defined_types_zero_counts(),
+        "warnings": [],
+    }
+
+
+
+def format_defined_types_lines(result: Dict[str, Any], indent: str = "") -> List[str]:
+    """Строки отчёта стадии S4m — числа по замкнутым словарям, а не только ненулевые (C1;
+    узел V58, шаг П5).
+
+    Формат тот же, что у `format_functional_options_parameters_lines` (V57) и
+    `format_bots_lines` (V55): словарь состояний печатается по перечню слоя comprehension'ом,
+    поэтому состояние с нулём видно в ответе, а не пропадает; виновники (отказанные файлы,
+    расхождения ног, неразрешённые цели) перечисляются поимённо, потому что счётчик без имени
+    не говорит, что чинить.
+
+    Границы, которые форматар обязан назвать текстом (план V58, разделы 2, 5, 8):
+
+    * `unresolved` ≠ «типа нет»: у цели `unresolved` адрес есть — строки индекса состава данной
+      выгрузки нет (замер 2.5: шесть `BusinessProcessRoutePoint.*`), а `no_target` — это
+      примитив `xs:*`, у которого цели нет по определению (197 значений);
+    * `derived_target_addresses` и `distinct_target_addresses` печатаются раздельно (2 419
+      против 2 413) — иначе разница читается как потерянные строки (раздел 2.5);
+    * `rows_with_qualifiers` (182) и число блоков квалификаторов (191) — разные величины:
+      строка одна на файл, девять файлов несут по два блока `Length/Precision` (раздел 2.2);
+    * пустой каталог вида — НЕ отказ: `files_found = 0` с наблюдением `directory_missing`
+      (Q9, вариант A). Корпус такой выгрузки не даёт (вид есть во всех четырёх — 2 / 1 / 304 /
+      513 файла), поэтому случай проверяется фикстурой постоянной проверки узла;
+    * индекс состава, не участвовавший в разборе, — предупреждение с наблюдением
+      `index_not_provided` (отличие от V55, где `pending` отклоняется CHECK'ом и недоступный
+      индекс является отказом стадии);
+    * текст границы круга (что узел НЕ делает: чужие слои `<Type>` с `cfg:DefinedType.*` не
+      переразрешает — мера M5; тексты `bsl_modules` узла V47 не читает и не снимает; existence
+      целей не утверждает — Q3) печатается последней строкой.
+    """
+    lines: List[str] = []
+    if result.get("status") not in (STATUS_OK, STATUS_SKIPPED):
+        error = result.get("error") or result.get("reason") or "стадия не выполнялась"
+        lines.append(f"{indent}⚠️ {STAGE_DEFINED_TYPES}: {error}")
+        for failure in result.get("failures") or []:
+            lines.append(f"{indent}  ⚠️ {failure}")
+        return lines
+    if result.get("status") == STATUS_SKIPPED:
+        lines.append(
+            f"{indent}{STAGE_DEFINED_TYPES}: {result.get('reason') or 'вид не запрошен'}")
+        return lines
+
+    lines.append(
+        f"{indent}{STAGE_DEFINED_TYPES}: конфигурация id="
+        f"{result.get('configuration_id')} uuid={result.get('configuration_name')}, "
+        f"строк {int(result.get('defined_types_written') or 0)} "
+        f"(снято прежних {int(result.get('removed_previous') or 0)}), "
+        f"файлов найдено {int(result.get('files_found') or 0)}, "
+        f"разобрано {int(result.get('files_parsed') or 0)}, "
+        f"отказов {int(result.get('files_failed') or 0)}"
+    )
+    lines.append(
+        f"{indent}  по таблицам: "
+        + ", ".join(
+            f"{table}:снято="
+            f"{int((result.get('removed_by_table') or {}).get(table) or 0)}/записано="
+            f"{int((result.get('written_by_table') or {}).get(table) or 0)}"
+            for table in DEFINED_TYPES_REMOVE_ORDER)
+        + f"; статистика обновлена: {int(result.get('statistics_refreshed') or 0)}"
+    )
+    if int(result.get("files_failed") or 0):
+        lines.append(f"{indent}  ⚠️ отказавшие файлы: "
+                     + "; ".join(str(item) for item in (result.get("failures") or [])[:10]))
+    if result.get("duplicate_names"):
+        lines.append(f"{indent}  ⚠️ повторные имена вида внутри выгрузки: "
+                     + "; ".join(str(item)
+                                 for item in (result.get("duplicate_names") or [])[:10]))
+
+    vocabulary = DEFINED_TYPES_STATE_VOCABULARIES
+
+    def counts_of(column: str) -> Dict[str, int]:
+        return result.get("counts_by_" + column) or {}
+
+    def state_line(column: str) -> str:
+        counts = counts_of(column)
+        return column + ": " + ", ".join(
+            f"{state}={int(counts.get(state) or 0)}" for state in vocabulary[column])
+
+    lines.append(
+        f"{indent}Свойства файла регистрации — " + state_line("properties_state")
+        + "; незнакомые имена свойств — "
+        + (", ".join(f"{name}={count}" for name, count in
+                     sorted((result.get("unknown_properties") or {}).items())) or "нет")
+        + "; " + state_line("internal_info_state")
+        + " — блок `InternalInfo` хранится четырьмя значениями с состоянием (Q4): он связывает "
+          "имя вида с идентификатором разбора бинарных внешних объектов (узел V25), но ключом "
+          "не является, потому что 1 154 различных идентификатора приходятся на 1 640 слотов "
+          "(замер 1.3)")
+    lines.append(
+        f"{indent}Блок `<Type>`: состояний разбора — "
+        + ", ".join(f"{state}={int(counts_of('type_parse_state').get(state) or 0)}"
+                    for state in vocabulary["type_parse_state"])
+        + "; кратности — "
+        + ", ".join(f"{state}={int(counts_of('type_multiplicity').get(state) or 0)}"
+                    for state in vocabulary["type_multiplicity"])
+        + f"; значений {int(result.get('types_total') or 0)} (максимум в одном файле "
+          f"{int(result.get('max_values_per_file') or 0)})"
+    )
+    class_counts = result.get("counts_by_class") or {}
+    container_counts = result.get("counts_by_container") or {}
+    lines.append(
+        f"{indent}  классов значения — "
+        + ", ".join(f"{value}={int(class_counts.get(value) or 0)}"
+                    for value in DEFINED_TYPES_VALUE_CLASS_VALUES)
+        + "; форм контейнера — "
+        + (", ".join(f"{form}={int(count)}" for form, count in sorted(container_counts.items()))
+           or "нет")
+    )
+    lines.append(
+        f"{indent}  разрешений цели значения — "
+        + ", ".join(f"{state}={int(result.get(key) or 0)}" for key, state in
+                    zip(DEFINED_TYPES_RESOLVE_COUNT_KEYS, DEFINED_TYPES_RESOLVE_STATES))
+        + f"; адресов целей выведено {int(result.get('derived_target_addresses') or 0)}, "
+          f"подтверждено индексом состава {int(result.get('distinct_target_addresses') or 0)} — "
+          "разница является целью, у которой адрес выведен из формы значения, но строки индекса "
+          "состава данной выгрузки нет (`unresolved`), и это НЕ потерянные строки; `no_target` "
+          "— примитивы `xs:*`, у которых цели нет по определению (раздел 2.5 плана)"
+    )
+    if result.get("unresolved_targets"):
+        lines.append(f"{indent}  ⚠️ неразрешённых целей: "
+                     f"{int(result.get('unresolved_targets_total') or 0)} — примеры: "
+                     + "; ".join(str(item) for item in result["unresolved_targets"]))
+    lines.append(
+        f"{indent}Квалификаторы: строк вида с квалификаторами "
+        f"{int(result.get('rows_with_qualifiers') or 0)} — число блоков квалификаторов больше "
+        "(191 против 182 по замеру 2.2), потому что строка одна на файл, а файл может нести "
+        "два блока `Length`/`Precision`; содержимое блоков лежит колонкой `type_qualifiers` "
+        "строки вида (Q1, вариант A), отдельной таблицы и словаря состояний квалификаторов у "
+        "узла нет осознанно — пустой блок называется наблюдением `empty_qualifier_block`"
+    )
+    lines.append(
+        f"{indent}Самопроверок строки (повтор CHECK'ов схемы слоем разбора без PostgreSQL): "
+        f"{int(result.get('row_problems') or 0)} — нуль обязан быть назван, потому что "
+        "«самопроверок нет» и «самопроверок не считали» являются разными ответами"
+    )
+    for example in result.get("examples") or []:
+        lines.append(f"{indent}  ⚠️ {example.get('source_path')}: "
+                     + "; ".join(str(item)
+                                 for item in (example.get("warnings") or [])[:3]))
+
+    discrepancy_counts = result.get("counts_by_circle_discrepancy") or {}
+    lines.append(
+        f"{indent}Сверка круга с индексом состава (записей вида в индексе "
+        f"{int(result.get('index_kind_records') or 0)}): "
+        + ", ".join(f"{state}={int(discrepancy_counts.get(state) or 0)}"
+                    for state in DEFINED_TYPES_CIRCLE_DISCREPANCIES)
+    )
+    for key in ("index_only", "file_only", "uuid_mismatch"):
+        if result.get(key):
+            lines.append(f"{indent}  ⚠️ {key}: "
+                         + "; ".join(str(item) for item in (result.get(key) or [])[:10]))
+
+    observations = result.get("observations") or {}
+    lines.append(
+        f"{indent}Наблюдения круга: "
+        + ", ".join(f"{kind}={int(observations.get(kind) or 0)}"
+                    for kind in DEFINED_TYPES_OBSERVATION_KINDS)
+        + " — отсутствующий каталог вида является состоянием выгрузки, а не отказом стадии (Q9, "
+          "вариант A); `type_set_container` и `empty_qualifier_block` корпусом не даны и "
+          "называются наблюдением, а не состоянием строки (M4, прецедент `DayTimes` V54)"
+    )
+    if not result.get("index_available"):
+        lines.append(
+            f"{indent}Индекс состава этой конфигурации не прочитан — сверка файлов с перечнем и "
+            "разрешение целей значения невозможны: «цели нет в перечне» и «перечень не "
+            "загружен» являются разными ответами (правило C2, Q3). Отличие от V55 названо "
+            "слоем: состояний `pending` в схеме вида нет, поэтому недоступный индекс является "
+            "предупреждением, а не отказом стадии"
+        )
+    for warning in result.get("warnings") or []:
+        lines.append(f"{indent}⚠️ {warning}")
+    lines.append(f"{indent}{DEFINED_TYPES_CIRCLE_BOUNDARY}")
     return lines
 

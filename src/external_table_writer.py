@@ -161,6 +161,17 @@ from configuration_functional_options_parameters import (
     TARGETS_TABLE_NAME as FUNCTIONAL_OPTION_PARAMETER_TARGETS_TABLE,
     TABLE_NAME as FUNCTIONAL_OPTION_PARAMETERS_TABLE,
 )
+# Узел V58 (определяемые типы, шаг П4, 05.11.2026, позиция 2.13 нормативного списка): имя
+# таблицы задаёт слой разбора (`src/configuration_defined_types.py`), а не писатель — тот же
+# порядок, что у V48–V57. Второго перечня таблиц в проекте нет: таблица у вида ОДНА (Q1,
+# вариант A — решение оператора от 05.11.2026 по прецеденту V48/V50/V52: блок `<Type>`
+# хранится колонками строки вида), таблиц детей у вида нет ни файлами, ни индексом состава
+# (замер 1.2 плана V58). Постоянная проверка узла
+# (`tools/check_v58_defined_types.py`, шаг П6) сверяет с живой схемой именно это имя. Цикла
+# импортов нет: разбор вида не импортирует писателей.
+from configuration_defined_types import (
+    TABLE_NAME as DEFINED_TYPES_TABLE,
+)
 
 # Ревизионные колонки в спецификациях версионированных писателей (M1). Порядок -
 # тот же, что в DDL (шаг 1 src/generate_ddl.py): integer / timestamp / text / boolean.
@@ -3110,6 +3121,85 @@ class FunctionalOptionParameterTargetRowWriter(TableRowWriter):
     }
 
 
+# Строка определяемого типа конфигурации (узел V58, 05.11.2026, позиция 2.13
+# нормативного списка — `DefinedTypes/<Имя>.xml`, таблица `defined_types`,
+# миграция `migrate_v58_defined_types.sql`).
+#
+# Модель хранения — решение оператора Q1 (вариант A, прецеденты `session_parameters` V48,
+# `common_attributes` V50, `filter_criteria` V52): блок `<Type>` — единственное содержательное
+# свойство вида (820/820 файлов), и он хранится колонками строки вида
+# (`type_raw`/`types`/`type_multiplicity`/`type_parse_state`/`type_qualifiers`), а НЕ второй
+# таблицей `defined_type_values`. Второй таблицы узел не заводит осознанно: строка значения
+# существовала бы только через id строки вида, а запросы узла («какие значения типа у вида»,
+# «какие виды ссылаются на объект X») читаются одной строкой — GIN-индекс `
+# idx_defined_types_types_gin` отвечает на второй вопрос containment-запросом по `types`.
+# Порога цены, при котором круг стоило бы резать, замер 2.2 не дал: максимум 657 значений в
+# файле, 17 544 на весь круг.
+#
+# Колонки, смысл которых не выводится из имени:
+#   * ключом цепочки состояний является (configuration_uuid, object_name, revision_no), а НЕ
+#     `object_uuid`: 573 различных имени на 820 файлов, 247 имён и 243 uuid встречаются минимум
+#     в двух выгрузках (`_v58_m1_check.py`, замер 1.3) — тот же урок, что V47, V48, V53, V55;
+#   * `full_name` совпадает с `object_name`: иерархии раскладки у вида нет (замер 1.1 — записи
+#     индекса состава имеют верхний уровень и имя `DefinedType.<Имя>`). Колонка заведена для
+#     единой формы чтения детей конфигурации (прецеденты V50, V54, V55, V56);
+#   * `generated_name`, `type_category`, `type_id`, `value_id` — четыре значения блока
+#     `InternalInfo`; ключом они не становятся (1154 различных идентификатора на 1640 слотов —
+#     замер 1.3), но связывают имя вида с идентификатором из разбора бинарных внешних объектов
+#     (узел V25: без `.cf` имена типов остаются `<v8:TypeId>`); форма значения CHECK'ом не
+#     закреплена, её называют разбор (`ValueError` до записи) и проверка П6;
+#   * `internal_info_state` — состояние блока, а НЕ признак его отсутствия: «блока нет» и
+#     «блок есть, но значений нет» различаются состоянием `absent` и предупреждением разбора
+#     (прецеденты `picture_state` V55, `handler_state` V53);
+#   * `types` — `jsonb_array`: записи значений в закрытом словаре слоя `TYPE_ENTRY_KEYS`
+#     (ключи цели — только у `exact`, `reason` — только у `unknown_form`). Словарь записей
+#     CHECK'ом не выражается (замер V48 2.5: CHECK по элементу массива PostgreSQL отклоняет),
+#     поэтому форму контейнера и состояние разрешения называет запись;
+#   * `type_qualifiers` — `jsonb_nullable`: квалификаторы составного типа «как есть»
+#     (размещение по отдельным значениям составного типа не замерялось; по корпусу — 191 блок
+#     в 182 файлах, девять файлов несут по два блока — раздел 2.2). Пустой блок остаётся
+#     пустым значением колонки и называется наблюдением разбора, состоянием он не становится
+#     (прецедент `DayTimes` узла V54);
+#   * `source_path` — путь относительно КОРНЯ выгрузки (`DefinedTypes/<Имя>.xml`), а не
+#     каталога вида (поправка V46).
+
+
+class DefinedTypesRowWriter(TableRowWriter):
+    """Строка определяемого типа (таблица `defined_types`, узел V58, позиция 2.13).
+
+    Обязательных колонок без значения у разбора нет: файл без `<Name>` нечем ключить, а файл
+    без атрибута `uuid` не является ссылкой на объект метаданных (правило R3) — оба называются
+    отказом разбора файла, а не NULL-колонкой; форма `InternalInfo` вне замера 820/820 тоже
+    отказ файла (`read_internal_info` поднимает `ValueError`), а не половина строки. Писатель
+    поэтому ничего не подставляет. `synonym` — `jsonb_nullable`, а не `jsonb_object`: «свойства
+    в выгрузке нет» и «свойство есть, но пустое» — разные состояния (тот же контракт, что V48,
+    V50, V52, V53, V54).
+    """
+
+    TABLE = DEFINED_TYPES_TABLE
+    COLUMNS = versioned_columns({
+        "configuration_uuid": "uuid",
+        "object_uuid": "uuid",
+        "object_name": "text",
+        "full_name": "text",
+        "synonym": "jsonb_nullable",
+        "comment": "text",
+        "generated_name": "text",
+        "type_category": "text",
+        "type_id": "text",
+        "value_id": "text",
+        "internal_info_state": "text",
+        "properties_state": "text",
+        "unknown_property_names": "text_array_nullable",
+        "type_raw": "text",
+        "type_multiplicity": "text",
+        "type_parse_state": "text",
+        "types": "jsonb_array",
+        "type_qualifiers": "jsonb_nullable",
+        "source_path": "text",
+    })
+
+
 CONFIGURATION_OBJECT_WRITERS = {
 
     "subsystems": SubsystemsRowWriter,
@@ -3224,6 +3314,18 @@ CONFIGURATION_OBJECT_WRITERS = {
     # родителя.
     FUNCTIONAL_OPTION_PARAMETERS_TABLE: FunctionalOptionsParametersRowWriter,
     FUNCTIONAL_OPTION_PARAMETER_TARGETS_TABLE: FunctionalOptionParameterTargetRowWriter,
+    # Узел V58 (определяемые типы, шаг П4, 05.11.2026, позиция 2.13 нормативного списка):
+    # ОДНА таблица вида, версионируемая общей цепью (configuration_uuid, object_name,
+    # revision_no — M1: 247 имён и 243 uuid вида встречаются минимум в двух выгрузках,
+    # _v58_m1_check.py). Второй записи в реестре нет осознанно и это названо, а не обойено
+    # молча: блок `<Type>` хранится колонками строки вида (Q1, вариант A — решение оператора
+    # от 05.11.2026 по прецеденту V48/V50/V52), второй таблицы `defined_type_values` узел не
+    # заводит; таблиц детей у вида нет ни файлами, ни строками индекса состава (замер 1.2
+    # плана), поэтому круг не расширяется общими таблицами `forms`/`form_ext`/`commands` — как
+    # у V53, V54, V55, V56, V57. Безцепочечных таблиц у узла нет, поэтому `defined_types`
+    # входит в круг версионности (src/current_revision.py) и не входит в исключение
+    # `CONFIGURATION_UNVERSIONED_TABLES`.
+    DEFINED_TYPES_TABLE: DefinedTypesRowWriter,
 }
 
 
