@@ -227,7 +227,7 @@ def dump_index(entries) -> str:
 
 
 DUMP_ROOT = Path(r"C:\1C_LLM\LoadDoc\Configurations\XML_files")
-DDL_FILE = ROOT / "migrate_v56_functional_options.sql"
+DDL_FILE = ROOT / "sql" / "migrate_v56_functional_options.sql"
 
 
 def build_fixtures(root: Path) -> Dict[str, Tuple[str, str]]:

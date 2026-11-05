@@ -278,7 +278,7 @@ def main():
             if key == "fixture":
                 continue
             print("  %-32s %s" % (key, json.dumps(value, ensure_ascii=False)))
-    pathlib.Path("_v46f_group_child.json").write_text(
+    (pathlib.Path(__file__).resolve().parents[2] / "_scratch" / "_v46f_group_child.json").write_text(
         json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
     print("\nJSON: _v46f_group_child.json")
 

@@ -33,9 +33,9 @@ import configuration_object_properties as props  # noqa: E402
 
 BASE = Path(r"C:\1C_LLM\LoadDoc\Configurations\XML_files")
 FIXTURE_JSON = {
-    "MinCfg": ROOT / "_v46_props_mincfg.json",
-    "BGU2": ROOT / "_v46_props_bgu2.json",
-    "BP3": ROOT / "_v46_props_bp3.json",
+    "MinCfg": Path(__file__).with_name("_v46_props_mincfg.json"),
+    "BGU2": Path(__file__).with_name("_v46_props_bgu2.json"),
+    "BP3": Path(__file__).with_name("_v46_props_bp3.json"),
 }
 # Набор файлов фикстуры — файлы регистрации ВЕРХНЕГО уровня каталога вида плюс все общие
 # модули с сэмплом 300 для BGU2 (`sampled_per_kind` в фикстуре). Сверять разбор с фикстурой

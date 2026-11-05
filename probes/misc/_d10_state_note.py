@@ -40,7 +40,7 @@ from ibcmd_bridge import (_context_note, CONFIG_STATE_APPLIED, CONFIG_STATE_FAIL
 
 IB_BP3 = os.path.join(ROOT, "_ibcmd_work", "ib_bp3")
 CF_BP3 = r"C:\1C_LLM\LoadDoc\Configurations\BP3_1Cv8.cf"
-LOG = os.path.join(ROOT, "_d10_state_note.txt")
+LOG = os.path.join(ROOT, "_scratch", "_d10_state_note.txt")
 TMP = os.path.join(ROOT, "_ibcmd_work", "_d10_tmp")
 
 # Факт разбора без имён типов — как у объекта, живущего на стандартных типах.

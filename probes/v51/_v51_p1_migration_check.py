@@ -28,9 +28,9 @@ except Exception:
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DB_PRE = "v51_pre_check"
 DB_NEW = "v51_scratch"
-MIGRATION = os.path.join(ROOT, "migrate_v51_exchange_plans.sql")
+MIGRATION = os.path.join(ROOT, "sql", "migrate_v51_exchange_plans.sql")
 STEPS = ("src/ddl_external_report.sql", "src/ddl_enrichment.sql",
-         "create_1c_configurations_db.sql")
+         "sql/create_1c_configurations_db.sql")
 PSQL = r"C:\Postgres\bin\psql.exe"
 ENV = {**os.environ, "PGPASSWORD": "Sta090860", "PGCLIENTENCODING": "UTF8"}
 

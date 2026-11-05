@@ -31,7 +31,7 @@ SRC = r"C:\1C_LLM\LoadDoc\БП3"
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 WORK = os.path.join(ROOT, "_ibcmd_work")
 IB = os.path.join(WORK, "ib1")
-OUT = os.path.join(ROOT, "_ibcmd_probe_out.txt")
+OUT = os.path.join(ROOT, "_scratch", "_ibcmd_probe_out.txt")
 
 ERF = os.path.join(SRC, "СравнениеУСНИ90_2.erf")
 EPF = os.path.join(SRC, "ВнестиИзъятьСуммуККМ_БП3.epf")

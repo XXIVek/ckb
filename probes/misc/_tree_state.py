@@ -23,7 +23,7 @@ with get_cursor() as cur:
 
 lines = [f"{row['id']} | lvl{row['question'].count(':')} | {row['question']} | "
          f"{row['tags']} | {row['n']}" for row in rows]
-Path(__file__).with_name("_tree_state.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+(Path(__file__).resolve().parents[2] / "_scratch" / "_tree_state.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
 print(f"карточек: {len(rows)}")
 
 
@@ -33,5 +33,5 @@ with get_cursor() as cur:
 
 lines = [f"{row['id']} | lvl{row['question'].count(':')} | {row['question']} | "
          f"{row['tags']} | {row['n']}" for row in rows]
-Path(__file__).with_name("_tree_state.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+(Path(__file__).resolve().parents[2] / "_scratch" / "_tree_state.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
 print(f"карточек: {len(rows)}")

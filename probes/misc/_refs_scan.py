@@ -37,5 +37,5 @@ for token, count in sorted(counter.items(), key=lambda kv: (-kv[1], kv[0])):
     lines.append(f"{count:3} | {token}")
     for address in sorted(where[token])[:6]:
         lines.append(f"       в: {address}")
-Path(__file__).with_name("_refs_scan.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+(Path(__file__).resolve().parents[2] / "_scratch" / "_refs_scan.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
 print(f"токенов: {len(counter)}")

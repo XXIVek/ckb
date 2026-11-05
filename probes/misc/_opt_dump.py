@@ -28,5 +28,5 @@ with get_cursor() as cur:
         aliases = ", ".join(a["alias_name"] for a in cur.fetchall())
         PARTS.append(f"### id={row['id']} {row['question']}\n"
                      f"теги: {row['tags']} · алиасы: {aliases}\n{row['answer']}\n")
-Path(__file__).with_name("_opt_dump.txt").write_text("\n\n".join(PARTS), encoding="utf-8")
+(Path(__file__).resolve().parents[2] / "_scratch" / "_opt_dump.txt").write_text("\n\n".join(PARTS), encoding="utf-8")
 print(f"карточек: {len(PARTS)}")

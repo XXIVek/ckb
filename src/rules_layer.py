@@ -1077,7 +1077,12 @@ def artifact_exists(token, root=None):
     # имени по кругу доказательств, а не сравнение с одним каталогом.
     if "/" not in token and token.endswith((".py", ".sql")):
         probes = root / "probes"
-        return probes.is_dir() and bool(list(probes.glob("*/" + token)))
+        if probes.is_dir() and list(probes.glob("*/" + token)):
+            return True
+        # Узел ROOT-FILES (06.11.2026): поставка схемы — DDL-загрузка, аддитивные миграции и
+        # SQL-сверки — лежит в `sql/`. Правило называет их так же, как в день замера, голым
+        # именем; ответ даёт существование файла, а не угадывание каталога.
+        return (root / "sql" / token).is_file()
     return False
 
 

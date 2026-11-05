@@ -49,8 +49,11 @@ try:
 except Exception:
     pass
 
-SOURCE = ROOT / "_v54_p8_stop_probe.py"
-TARGET = ROOT / "_v55_p8_stop_probe.py"
+# исходник-образец и порождённый зонд — в круге доказательств узлов (probes/vNN/),
+# а не в корне: вывод генерации есть измеритель узла, он переживает прогон рядом с зондом
+HERE = Path(__file__).resolve().parent
+SOURCE = HERE.parents[1] / "v54" / "_v54_p8_stop_probe.py"
+TARGET = HERE / "_v55_p8_stop_probe.py"
 
 # Порядок важен: сначала длинные имена, потом общие (иначе `scheduled_jobs` съест составное
 # `v_current_scheduled_jobs`, а `SCHEDULED_JOBS_TABLE` — составное `SCHEDULED_JOBS_TABLES`).

@@ -20,8 +20,8 @@ sys.path.insert(0, str(ROOT))
 import configuration_child_properties as cp  # noqa: E402
 from _v43_gen_sql import block_bootstrap, block_migration_pairs  # noqa: E402
 
-BOOTSTRAP = ROOT / "create_1c_configurations_db.sql"
-MIGRATION = ROOT / "migrate_v43_configuration_child_arrays.sql"
+BOOTSTRAP = ROOT / "sql" / "create_1c_configurations_db.sql"
+MIGRATION = ROOT / "sql" / "migrate_v43_configuration_child_arrays.sql"
 MARKER = "-- Узел V43 (22.10.2026)"
 ANCHOR = "    content JSONB,\n"
 

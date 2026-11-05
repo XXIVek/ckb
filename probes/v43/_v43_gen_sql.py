@@ -23,8 +23,8 @@ sys.path.insert(0, str(ROOT / "src"))
 import configuration_child_properties as cp  # noqa: E402
 
 TYPE_SQL = "TEXT[]"
-PROBE_FILE = ROOT / "_v43_types.txt"
-OUT_FILE = ROOT / "_v43_sql_blocks.txt"
+PROBE_FILE = ROOT / "_scratch" / "_v43_types.txt"
+OUT_FILE = ROOT / "_scratch" / "_v43_sql_blocks.txt"
 
 
 def probe_types():

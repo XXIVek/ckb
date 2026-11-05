@@ -462,7 +462,7 @@ def group_c():
 # ─── группа D: соответствие строки разбора схеме (миграция V55) ──────────────
 REVISION_COLUMNS = {"id", "configuration_uuid", "created_at", "revision_no", "changed_at",
                     "changed_by", "is_committed"}
-MIGRATION = ROOT / "migrate_v55_bots.sql"
+MIGRATION = ROOT / "sql" / "migrate_v55_bots.sql"
 
 
 def ddl_columns():

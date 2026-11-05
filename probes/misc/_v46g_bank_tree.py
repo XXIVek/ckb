@@ -28,7 +28,7 @@ sys.path.insert(0, ".")
 sys.path.insert(0, "src")
 import _v46f_group_child_probe as probe  # noqa: E402
 
-OUT = pathlib.Path("_v46g_tree.txt")
+OUT = pathlib.Path(__file__).resolve().parents[2] / "_scratch" / "_v46g_tree.txt"
 TARGET = "БанкИКасса"
 FIXTURE = "BP3"
 IDENT_RE = re.compile(r"^[A-Za-zА-Яа-яЁё_][A-Za-z0-9_А-Яа-яЁё]*$")

@@ -38,7 +38,7 @@ BP3_CF = r"C:\1C_LLM\LoadDoc\Configurations\BP3_1Cv8.cf"
 ERF_BASE = r"C:\1C_LLM\LoadDoc\Test11_CompareRegUSN\СравнениеУСНИ90_2.erf"
 ERF_V26 = os.path.join(BASE, "_ibcmd_work", "v36_edit_probe", "v26",
                        "СравнениеУСНИ90_2_v26.erf")
-OUT = os.path.join(BASE, "_d8_ib_bp3_with_bp3.txt")
+OUT = os.path.join(BASE, "_scratch", "_d8_ib_bp3_with_bp3.txt")
 
 LATIN_PROPS = ("Name", "MainDataCompositionSchema", "DataCompositionSchema",
                "DefaultForm", "AutoUseDataSeparation")

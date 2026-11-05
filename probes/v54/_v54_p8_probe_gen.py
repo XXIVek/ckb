@@ -29,8 +29,11 @@ try:
 except Exception:
     pass
 
-SOURCE = ROOT / "_v53_p8_stop_probe.py"
-TARGET = ROOT / "_v54_p8_stop_probe.py"
+# исходник-образец и порождённый зонд — в круге доказательств узлов (probes/vNN/),
+# а не в корне: вывод генерации есть измеритель узла, он переживает прогон рядом с зондом
+HERE = Path(__file__).resolve().parent
+SOURCE = HERE.parents[1] / "v53" / "_v53_p8_stop_probe.py"
+TARGET = HERE / "_v54_p8_stop_probe.py"
 
 # Порядок важен: сначала длинные имена, потом общие (иначе `event_subscriptions` съест
 # составное `event_subscriptions_defaults`).

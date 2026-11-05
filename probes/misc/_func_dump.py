@@ -18,5 +18,5 @@ with get_cursor() as cur:
         row = cur.fetchone()
         PARTS.append(f"### id={row['id']} {row['question']}\n{row['answer']}\n" if row
                      else f"### {snippet_id} — СТРОКИ НЕТ")
-Path(__file__).with_name("_func_dump.txt").write_text("\n\n".join(PARTS), encoding="utf-8")
+(Path(__file__).resolve().parents[2] / "_scratch" / "_func_dump.txt").write_text("\n\n".join(PARTS), encoding="utf-8")
 print(f"карточек: {len(PARTS)}")

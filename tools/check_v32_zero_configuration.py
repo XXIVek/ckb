@@ -215,8 +215,8 @@ TEXT_TYPES = {"text", "character varying", "varchar"}
 # update_url / vendor_url / config_url). 1200 символов — больше любого из этих лимитов; у jsonb
 # лимита нет, и проверка называет это прямым запросом.
 LONG_TEXT_LEN = 1200
-DDL_BOOTSTRAP = ROOT / "create_1c_configurations_db.sql"
-V39_MIGRATION = ROOT / "migrate_v39_multilang_configuration_text.sql"
+DDL_BOOTSTRAP = ROOT / "sql" / "create_1c_configurations_db.sql"
+V39_MIGRATION = ROOT / "sql" / "migrate_v39_multilang_configuration_text.sql"
 
 # ─── узел V42 (21.10.2026): словарь свойств корня замкнут ───
 #
@@ -229,7 +229,7 @@ V39_MIGRATION = ROOT / "migrate_v39_multilang_configuration_text.sql"
 # С узла V42: словарь покрывает все 55 свойств (проверка «словарь = число свойств фикстуры»
 # ниже), пять колонок сняты `migrate_v42_configuration_header_fields.sql`, признаки мобильного
 # интерфейса лежат в jsonb парами `{"functionality": …, "use": "true"|"false"}`.
-V42_MIGRATION = ROOT / "migrate_v42_configuration_header_fields.sql"
+V42_MIGRATION = ROOT / "sql" / "migrate_v42_configuration_header_fields.sql"
 V42_REMOVED_COLUMNS = (
     "app_module_id", "session_module_id", "data_proc_module_id",
     "ext_conn_module_id", "mobile_functionality",
@@ -302,7 +302,7 @@ V42_BOOLEAN_COLUMNS = (
 # поэтому ожидаемый состав таблицы читается здесь из него, а не переписан руками: 48 имён,
 # разложенных по трём местам порознь, обязательно разъезжаются (тот же класс дефекта, что
 # собственный `max(revision_no)` в модуле-вызывателе до узла V19).
-V43_MIGRATION = ROOT / "migrate_v43_configuration_child_arrays.sql"
+V43_MIGRATION = ROOT / "sql" / "migrate_v43_configuration_child_arrays.sql"
 V43_CHILD_COLUMNS = tuple(header_array_columns())
 # Состав таблицы после V43 = состав V42 + 48 перечней. Множество V42 сохранено как замер
 # своего дня: раздел обязан ловить и возврат снятых V42-колонок, и пропажу любого перечня V43.

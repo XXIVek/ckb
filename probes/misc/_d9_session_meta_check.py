@@ -45,7 +45,7 @@ from _d4_dcs_compile_probe import resolve_meta_name  # noqa: E402
 ERF_BASE = r"C:\1C_LLM\LoadDoc\БП3\СравнениеУСНИ90_2.erf"
 ERF_V26 = (r"C:\1C_LLM\LoadDoc\Edit_V26_СравнениеУСНИ90_2"
            r"\СравнениеУСНИ90_2_v26.edited.erf")
-OUT = os.path.join(BASE, "_d9_session_meta_check.txt")
+OUT = os.path.join(BASE, "_scratch", "_d9_session_meta_check.txt")
 NAMES = ("Перечисление.СтатусыРасходовУСН", "РегистрНакопления.РасходыПриУСН")
 
 _lines = []

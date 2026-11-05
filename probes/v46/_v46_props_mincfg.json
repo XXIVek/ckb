@@ -1,0 +1,219 @@
+{
+ "fixture": "C:\\1C_LLM\\LoadDoc\\Configurations\\XML_files\\MinCfg",
+ "sampled_per_kind": null,
+ "files_parsed": 4,
+ "parse_errors": [],
+ "parse_errors_total": 0,
+ "kinds_total": 2,
+ "kinds_parsed": 2,
+ "counts": {
+  "distinct_property_names": 17,
+  "common_properties": 3,
+  "child_element_tags": 0,
+  "child_uuid_values": 0,
+  "child_uuid_collisions": 0,
+  "meta_uuid_duplicates": 0
+ },
+ "common_properties": [
+  "Comment",
+  "Name",
+  "Synonym"
+ ],
+ "single_kind_properties": {
+  "CommonModules": [
+   "ClientManagedApplication",
+   "ClientOrdinaryApplication",
+   "ExternalConnection",
+   "Global",
+   "Privileged",
+   "ReturnValuesReuse",
+   "Server",
+   "ServerCall"
+  ],
+  "Subsystems": [
+   "Content",
+   "Explanation",
+   "IncludeHelpInContents",
+   "IncludeInCommandInterface",
+   "Picture",
+   "UseOneCommand"
+  ]
+ },
+ "kinds": {
+  "CommonModules": {
+   "objects": 3,
+   "kind_tags": {
+    "CommonModule": 3
+   },
+   "props_total": 11,
+   "props_not_common": [
+    "ClientManagedApplication",
+    "ClientOrdinaryApplication",
+    "ExternalConnection",
+    "Global",
+    "Privileged",
+    "ReturnValuesReuse",
+    "Server",
+    "ServerCall"
+   ],
+   "filled_true": {
+    "Name": 3,
+    "Synonym": 3,
+    "Comment": 3,
+    "Global": 3,
+    "ClientManagedApplication": 3,
+    "Server": 3,
+    "ExternalConnection": 3,
+    "ClientOrdinaryApplication": 3,
+    "ServerCall": 3,
+    "Privileged": 3,
+    "ReturnValuesReuse": 3
+   },
+   "filled_false": {},
+   "child_tags": {}
+  },
+  "Subsystems": {
+   "objects": 1,
+   "kind_tags": {
+    "Subsystem": 1
+   },
+   "props_total": 9,
+   "props_not_common": [
+    "Content",
+    "Explanation",
+    "IncludeHelpInContents",
+    "IncludeInCommandInterface",
+    "Picture",
+    "UseOneCommand"
+   ],
+   "filled_true": {
+    "Name": 1,
+    "Synonym": 1,
+    "Comment": 1,
+    "IncludeHelpInContents": 1,
+    "IncludeInCommandInterface": 1,
+    "UseOneCommand": 1,
+    "Explanation": 1,
+    "Picture": 1,
+    "Content": 1
+   },
+   "filled_false": {},
+   "child_tags": {}
+  }
+ },
+ "child_uuid_collisions": {},
+ "meta_uuid_duplicates": {},
+ "index": {
+  "success": true,
+  "rows": 325,
+  "segments": {
+   "Resource": 3,
+   "Attribute": 7,
+   "TabularSection": 5,
+   "Form": 59,
+   "Template": 10,
+   "EnumValue": 2,
+   "Command": 4,
+   "URLTemplate": 26,
+   "Dimension": 3,
+   "IntegrationServiceChannel": 4,
+   "Operation": 36
+  },
+  "depth_hist": {
+   "0": 77,
+   "1": 161,
+   "2": 87
+  },
+  "counts": {
+   "entries_total": 325,
+   "metadata_direct": 237,
+   "metadata_nested": 88,
+   "root_entries": 77,
+   "child_entries": 248,
+   "max_depth": 2,
+   "depth_hist": {
+    "0": 77,
+    "1": 161,
+    "2": 87
+   },
+   "types": {
+    "AccountingRegister": 4,
+    "AccumulationRegister": 4,
+    "Bot": 4,
+    "BusinessProcess": 3,
+    "CalculationRegister": 3,
+    "Catalog": 4,
+    "ChartOfAccounts": 3,
+    "ChartOfCalculationTypes": 3,
+    "ChartOfCharacteristicTypes": 3,
+    "CommandGroup": 1,
+    "CommonAttribute": 2,
+    "CommonCommand": 6,
+    "CommonForm": 19,
+    "CommonModule": 6,
+    "CommonPicture": 4,
+    "CommonTemplate": 4,
+    "Configuration": 10,
+    "Constant": 4,
+    "DataProcessor": 12,
+    "DefinedType": 2,
+    "Document": 3,
+    "DocumentJournal": 2,
+    "DocumentNumerator": 2,
+    "Enum": 4,
+    "EventSubscription": 2,
+    "ExchangePlan": 28,
+    "ExternalDataSource": 1,
+    "FilterCriterion": 6,
+    "FunctionalOption": 2,
+    "FunctionalOptionsParameter": 2,
+    "HTTPService": 28,
+    "InformationRegister": 5,
+    "IntegrationService": 6,
+    "Interface": 4,
+    "Language": 1,
+    "Report": 8,
+    "Role": 4,
+    "ScheduledJob": 4,
+    "Sequence": 6,
+    "SessionParameter": 2,
+    "SettingsStorage": 53,
+    "Style": 1,
+    "StyleItem": 1,
+    "Subsystem": 2,
+    "Task": 3,
+    "WSReference": 2,
+    "WebService": 38,
+    "WebSocketClient": 2,
+    "XDTOPackage": 2
+   },
+   "id_forms": {
+    "uuid": 192,
+    "composite": 132,
+    "suffixed": 1
+   },
+   "id_suffixes": {
+    "N": 132,
+    "c": 1
+   },
+   "by_xml_parent": {
+    "ConfigVersions": {
+     "total": 237,
+     "with_config_version": 237,
+     "without_config_version": 0
+    },
+    "Metadata": {
+     "total": 88,
+     "with_config_version": 0,
+     "without_config_version": 88
+    }
+   },
+   "config_versions": 237,
+   "config_versions_missing": 88,
+   "config_versions_bad_form": 0,
+   "parent_unresolved": 0,
+   "unknown_attributes": {},
+   "unknown_elements": {}
+  }
+ }
+}

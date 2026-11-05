@@ -63,7 +63,7 @@ from configuration_common_attributes import (  # noqa: E402
 )
 
 DUMP_ROOT = Path(r"C:\1C_LLM\LoadDoc\Configurations\XML_files")
-DDL_FILE = ROOT / "migrate_v50_common_attributes.sql"
+DDL_FILE = ROOT / "sql" / "migrate_v50_common_attributes.sql"
 
 # Ожидаемые числа — раздел 2 плана docs/CONFIGURATION_COMMON_ATTRIBUTES_PLAN.md
 # (`_v50_p0_probe.py`, `_v50_p0_index_probe.py`): файлы 2/0/7/7; цели применения

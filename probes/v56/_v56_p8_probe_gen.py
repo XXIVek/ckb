@@ -54,7 +54,9 @@ except Exception:
     pass
 
 SOURCE = ROOT / "_scratch" / "_v55_p8_stop_probe.head.py"
-TARGET = ROOT / "_v56_p8_stop_probe.py"
+# порождённый зонд — в круге доказательств узла (probes/v56/), а не в корне;
+# черновик-образец читается из _scratch/ — это вывод предыдущего замера
+TARGET = Path(__file__).resolve().parent / "_v56_p8_stop_probe.py"
 
 # Порядок важен: сначала длинные имена, потом общие (иначе `BOTS_TABLE` съест составное
 # `BOTS_TABLES`, а `bots` — составное `bots_defaults`).

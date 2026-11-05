@@ -75,6 +75,6 @@ with get_cursor() as cur:
         lines.append("--- ИХ INDEX/LINKS РАЗДЕЛЫ ---")
         lines.append(answer[answer.find("===LINKS"):])
 
-(Path(__file__).resolve().parents[2] / "_l3_probe.txt").write_text("\n".join(lines) + "\n",
+(Path(__file__).resolve().parents[2] / "_scratch" / "_l3_probe.txt").write_text("\n".join(lines) + "\n",
                                                               encoding="utf-8")
 print(f"записано строк: {len(lines)}")

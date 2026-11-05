@@ -431,7 +431,7 @@ def main():
     finally:
         conn.close()
     text = "\n".join(out)
-    pathlib.Path("_v46d_run.txt").write_text(text, encoding="utf-8")
+    (pathlib.Path(__file__).resolve().parents[2] / "_scratch" / "_v46d_run.txt").write_text(text, encoding="utf-8")
     print(text)
 
 

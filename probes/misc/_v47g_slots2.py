@@ -1,5 +1,6 @@
 import json
-d = json.load(open("_v40_slots_table.json", encoding="utf-8"))
+from pathlib import Path
+d = json.load(open(Path(__file__).with_name("_v40_slots_table.json"), encoding="utf-8"))
 print("== object_module slots (kind_index -> slot, files) ==")
 for r in sorted(d["rows"], key=lambda x: (x["kind_index"], x["slot"])):
     if r["slot_class"] != "object_module": continue

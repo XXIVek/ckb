@@ -291,7 +291,7 @@ def main():
               bool(q("SELECT indexname FROM pg_indexes WHERE tablename = 'external_report' "
                      "AND indexname = 'idx_external_report_origin_sha256'")))
         ddl = read_text(ROOT / "src" / "generate_ddl.py")
-        migration = read_text(ROOT / "migrate_v31_provenance.sql")
+        migration = read_text(ROOT / "sql" / "migrate_v31_provenance.sql")
         writer = read_text(ROOT / "src" / "external_table_writer.py")
         check("один словарь колонок: DDL-источник, миграция и писатели называют те же имена",
               all(all(column in text for column in PROVENANCE_COLUMNS)

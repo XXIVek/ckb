@@ -1,5 +1,6 @@
 import json
-d = json.load(open("_v40_slots_table.json", encoding="utf-8"))
+from pathlib import Path
+d = json.load(open(Path(__file__).with_name("_v40_slots_table.json"), encoding="utf-8"))
 print("keys:", list(d.keys()))
 rows = d.get("rows") or d.get("slot_families") or []
 print("type rows:", type(rows), len(rows) if hasattr(rows, "__len__") else "")

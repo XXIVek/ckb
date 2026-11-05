@@ -47,7 +47,7 @@ def main() -> int:
             cur.execute("SELECT answer FROM knowledge_snippets WHERE question=%s", (addr,))
             row = cur.fetchone()
             answer = (row["answer"] or "") if row else ""
-            Path(ROOT / "_v53_p5_layer_card.txt").write_text(answer, encoding="utf-8")
+            Path(ROOT / "_scratch" / "_v53_p5_layer_card.txt").write_text(answer, encoding="utf-8")
             print(f"\n=== {addr} ({len(answer)} симв.) выписана в _v53_p5_layer_card.txt ===")
         for pat in PATTERNS:
             cur.execute(

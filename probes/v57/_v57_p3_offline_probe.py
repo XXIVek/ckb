@@ -136,7 +136,7 @@ CORPUS_MAX_TARGETS = 20
 CORPUS_KINDS = {"Catalog": 4, "InformationRegister": 30}
 
 DUMP_ROOT = Path(r"C:\1C_LLM\LoadDoc\Configurations\XML_files")
-DDL_FILE = ROOT / "migrate_v57_functional_options_parameters.sql"
+DDL_FILE = ROOT / "sql" / "migrate_v57_functional_options_parameters.sql"
 DUMPS = ("MinCfg", "KomMag", "BGU2", "BP3")
 
 FAILURES: list = []

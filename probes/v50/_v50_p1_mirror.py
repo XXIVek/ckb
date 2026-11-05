@@ -17,8 +17,8 @@ import os
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-MIGRATION = os.path.join(ROOT, "migrate_v50_common_attributes.sql")
-TARGET = os.path.join(ROOT, "create_1c_configurations_db.sql")
+MIGRATION = os.path.join(ROOT, "sql", "migrate_v50_common_attributes.sql")
+TARGET = os.path.join(ROOT, "sql", "create_1c_configurations_db.sql")
 
 # Маркеры блоков миграции (шапка numbered-notes в шаг 2 не переносится: модель
 # описана один раз — в шапке миграции и в разделе 4 плана).

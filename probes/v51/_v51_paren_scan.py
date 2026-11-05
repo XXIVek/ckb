@@ -226,7 +226,7 @@ def main(argv):
         print(f"=== трассировка глубины {path} строки {start}..{end} ===")
         trace(path, start, end)
         return 0
-    paths = args or ["migrate_v51_exchange_plans.sql"]
+    paths = args or ["sql/migrate_v51_exchange_plans.sql"]
     bad = 0
     for path in paths:
         print(f"=== {path} ===")

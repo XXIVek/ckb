@@ -76,7 +76,7 @@ from configuration_meta_parser import (CONFIGURATION_FIELDS,  # noqa: E402
 from external_db import transaction  # noqa: E402
 
 XML_ROOT = r"C:\1C_LLM\LoadDoc\Configurations\XML_files"
-MIGRATION = ROOT / "migrate_v42_configuration_header_fields.sql"
+MIGRATION = ROOT / "sql" / "migrate_v42_configuration_header_fields.sql"
 DEFAULT_CASE = "MinCfg"
 
 PASSED, FAILED, SKIPPED, INFO = [], [], [], []
