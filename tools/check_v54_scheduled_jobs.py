@@ -106,6 +106,7 @@ except Exception:  # noqa: BLE001 — перекодировка вывода н
     pass
 
 from configuration_load_contract import (  # noqa: E402
+    is_last_stage,
     SCHEDULED_JOBS_REMOVE_ORDER, SCHEDULED_JOBS_TABLES, STAGE_EVENT_SUBSCRIPTIONS,
     STAGE_FILTER_CRITERIA, STAGE_FULL_RELOAD_ONLY, STAGE_OBJECT_MODULES,
     STAGE_SCHEDULED_JOBS, STAGES, STORED_META_KINDS, stage_resume_hint, stage_title,
@@ -1007,23 +1008,26 @@ def check_contract():
           ids.index(STAGE_SCHEDULED_JOBS) == ids.index(STAGE_EVENT_SUBSCRIPTIONS) + 1,
           f"порядок: {ids}")
     check(f"`{STAGE_OBJECT_MODULES}` остаётся последней стадией (вторая транзакция текстов)",
-          ids[-1] == STAGE_OBJECT_MODULES and ids.index(STAGE_SCHEDULED_JOBS) < len(ids) - 1,
+          is_last_stage(STAGE_OBJECT_MODULES)
+          and STAGE_SCHEDULED_JOBS in ids[:-1],
           f"порядок: {ids}")
     check(f"`stages_after('{STAGE_EVENT_SUBSCRIPTIONS}')` называет продолжением "
           f"`{STAGE_SCHEDULED_JOBS}`",
           stages_after(STAGE_EVENT_SUBSCRIPTIONS)[:1] == [STAGE_SCHEDULED_JOBS],
           str(stages_after(STAGE_EVENT_SUBSCRIPTIONS)))
-    check(f"у стадии `{STAGE_SCHEDULED_JOBS}` есть зеркало продолжения "
-          "(`STAGE_FULL_RELOAD_ONLY` = False — стадия дозакрывается отдельным входом)",
-          STAGE_FULL_RELOAD_ONLY.get(STAGE_SCHEDULED_JOBS) is False,
+    check(f"у стадии `{STAGE_SCHEDULED_JOBS}` отдельного входа дозагрузки БОЛЬШЕ НЕТ: продолжение только "
+          "полной перезагрузкой единой точки входа (узел TOOL-DROP, 05.11.2026) — "
+          "зеркало STAGE_FULL_RELOAD_ONLY обязано называть это состоянием",
+          STAGE_FULL_RELOAD_ONLY.get(STAGE_SCHEDULED_JOBS) is True,
           str(STAGE_FULL_RELOAD_ONLY.get(STAGE_SCHEDULED_JOBS)))
     title = stage_title(STAGE_SCHEDULED_JOBS)
     hint = stage_resume_hint(STAGE_SCHEDULED_JOBS)
     check("заголовок стадии называет позицию 2.9 и каталог вида",
           "2.9" in title and DIR_NAME in title, title)
-    check("подсказка продолжения называет отдельный вход `load_scheduled_jobs_tool` и "
-          "полную перезагрузку",
-          "load_scheduled_jobs_tool" in hint and "load_1c_catalog_tool" in hint, _brief(hint))
+    check("подсказка продолжения называет полную перезагрузку единой точки входа "
+          "(отдельный вход позиции снят узлом TOOL-DROP, 05.11.2026)",
+          "load_1c_catalog_tool" in hint and "TOOL-DROP" in hint,
+          f"подсказка: {hint[:300]}")
     check("круг записи — две таблицы вида в порядке иерархии (сначала вид, затем расписание)",
           tuple(SCHEDULED_JOBS_TABLES) == (TABLE_NAME, SCHEDULES_TABLE),
           str(SCHEDULED_JOBS_TABLES))

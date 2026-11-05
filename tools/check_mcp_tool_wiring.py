@@ -207,20 +207,15 @@ DEFAULT_TARGETS = [
 # по всем строкам индекса состава, потому что цель — объект другого вида (`Catalog.*`,
 # `InformationRegister.*`), а свой круг вида отбирает точным `object_type = 'DefinedType'`.
 EXPECTED_TOOLS = {
+    # Узел TOOL-DROP (05.11.2026): реестр 16 → 3. Сняты тринадцать позиционных входов
+    # дозагрузки (их имена — в DELETED_TOOLS ниже), осталась единая точка входа загрузки
+    # каталога, разбор бинарного .erf/.epf и удаление внешнего объекта. Стадии конвейера
+    # S3/S4/S4b…S4m при этом не меняются: они вызываются из register_configuration, а не
+    # из регистра MCP; порядок стадий держится реестром STAGES по нормативному списку.
     "server_configurations_core.py": [
-        "delete_external_report_tool", "load_1c_catalog_tool",
-        "load_bots_tool",
-        "load_common_attributes_tool",
-        "load_configuration_object_properties_tool",
-        "load_configuration_root_modules_tool",
-        "load_defined_types_tool",
+        "delete_external_report_tool",
+        "load_1c_catalog_tool",
         "load_external_object_file_tool",
-        "load_event_subscriptions_tool",
-        "load_exchange_plans_tool",
-        "load_filter_criteria_tool",
-        "load_functional_options_parameters_tool",
-        "load_functional_options_tool",
-        "load_roles_tool", "load_scheduled_jobs_tool", "load_session_parameters_tool",
     ],
     "server_configurations_enrichment.py": [
         "add_config_aliases_tool", "add_config_cross_reference_tool", "add_config_snippet_tool",
@@ -271,6 +266,26 @@ EXPECTED_TOOLS = {
 # упоминать их как снятые (история), но живая карточка состояния always/optional/checks назвать
 # их не вправе — это сторожит tools/check_search_rules_sync.py.
 DELETED_TOOLS = [
+    # --- узел TOOL-DROP (05.11.2026): тринадцать позиционных входов дозагрузки ---
+    # Сняты только MCP-обёртки: стадии конвейера (S3, S4, S4b…S4m) и их функции слоя
+    # (src/configuration_*_loader.py) продолжают вызываться из register_configuration тем же
+    # кодом, что и прежде. Причина снятия — решение оператора от 05.11.2026: точка входа
+    # загрузки должна быть одна, повтор позиции делается полной перезагрузкой
+    # load_1c_catalog_tool(force=True). Прежнее обоснование (Q5.2 узла V48 «свой вход на
+    # каждую позицию») снятым не является — оно остаётся историей узла V48 в журнале слоя.
+    "load_bots_tool",
+    "load_common_attributes_tool",
+    "load_configuration_object_properties_tool",
+    "load_configuration_root_modules_tool",
+    "load_defined_types_tool",
+    "load_event_subscriptions_tool",
+    "load_exchange_plans_tool",
+    "load_filter_criteria_tool",
+    "load_functional_options_parameters_tool",
+    "load_functional_options_tool",
+    "load_roles_tool",
+    "load_scheduled_jobs_tool",
+    "load_session_parameters_tool",
     # --- узел RULE-LAYER (24.10.2026): инструменты чтения правил ---
     "get_load_config_rules_tool",
     "get_load_rules_tool",

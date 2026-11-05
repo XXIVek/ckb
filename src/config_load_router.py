@@ -38,6 +38,7 @@ from configuration_load_contract import (
     BOTS_SECTION_HEADER,
     CHILD_SECTION_HEADER,
     COMMON_ATTRIBUTES_SECTION_HEADER,
+    DEFINED_TYPES_SECTION_HEADER,
     EXCHANGE_PLAN_SECTION_HEADER,
     EVENT_SUBSCRIPTIONS_SECTION_HEADER,
     FILTER_CRITERIA_SECTION_HEADER,
@@ -53,6 +54,7 @@ from configuration_load_contract import (
     format_bots_lines,
     format_child_object_lines,
     format_common_attributes_lines,
+    format_defined_types_lines,
     format_exchange_plans_lines,
     format_event_subscriptions_lines,
     format_filter_criteria_lines,
@@ -582,6 +584,21 @@ def _stage_section_lines(result):
         lines.extend(
             format_functional_options_parameters_lines(
                 functional_options_parameters_part, indent="   "))
+    # Узел V58 (стадия S4m, позиция 2.13 списка): свойства определяемых типов. Раздел
+    # печатается и при отказе стадии, и при `not_run` — по той же причине, что у S3/S4/S4c–S4l:
+    # «загружено» без него читалось бы как «состав конфигурации в БД есть весь». Ответ стадии
+    # лежит в собственном ключе `defined_types` (правило C3); текст даёт общий форматёр
+    # контракта — тот же, что отдаёт отдельный инструмент `load_defined_types_tool` (шаг П7).
+    # Блока «группы круга не запрашивались» у форматёра нет: групп `kinds` у вида нет по
+    # решению Q1 раздела 5 плана (вариант A) — блок `<Type>` является колонками строки вида,
+    # и обещать их значило бы обещать вход, которого нет. ДВА числа адресов целей печатаются
+    # раздельно (2 419 выведено из формы значения, 2 413 подтверждено индексом — раздел 2.5),
+    # потому что разница читалась бы как потерянные строки. Второго раздела у вида нет:
+    # подкаталогов, форм, макетов и модулей у позиции 2.13 нет (замер 1.2).
+    defined_types_part = result.get("defined_types") or {}
+    if defined_types_part:
+        lines.append(f"{DEFINED_TYPES_SECTION_HEADER}:")
+        lines.extend(format_defined_types_lines(defined_types_part, indent="   "))
     # Узел V47 (стадия S4b): модули объектов конфигурации — вторая транзакция загрузки
     # (Q6, граница D7). Раздел печатается и при отказе стадии, и при `not_run` (индекс
     # состава не разобран — круг не определён): «конфигурация загружена» без него

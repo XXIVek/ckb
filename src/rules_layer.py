@@ -1070,6 +1070,14 @@ def artifact_exists(token, root=None):
     for candidate in (root / token, root / "tools" / token, root / "src" / token):
         if candidate.exists():
             return True
+    # Узел ROOT-RESTRUCTURE (05.11.2026): круг доказательств узлов лежит в `probes/<узел>/`.
+    # Карточка правила называет измеритель коротким именем — так оно было записано в день
+    # замера, и перепись исторической строки новым путём стёрла бы, как выглядел замер.
+    # Вопрос проверки не изменился: существует ли названный файл. Отвечает на него поиск по
+    # имени по кругу доказательств, а не сравнение с одним каталогом.
+    if "/" not in token and token.endswith((".py", ".sql")):
+        probes = root / "probes"
+        return probes.is_dir() and bool(list(probes.glob("*/" + token)))
     return False
 
 

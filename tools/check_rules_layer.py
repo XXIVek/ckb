@@ -705,7 +705,7 @@ def check_edit_code_trigger(marker, by_address, category):
           f"[{marker}] {address}: карточка называет измеритель покрытия `_journal_code_history.py`",
           "требование писать узел журнала ничем не измеряется, поэтому пропущенный узел вскрывается "
           "только на следующей правке регистра — ровно тот дефект, который замер закрывает")
-    check((PROJECT_ROOT / "_journal_code_history.py").exists(),
+    check(RL.artifact_exists("_journal_code_history.py", PROJECT_ROOT),
           "[JOURNAL-COVERAGE] измеритель `_journal_code_history.py` существует в репозитории",
           "карточки четырёх слоёв ссылаются на инструмент, которого нет: ссылка в никуда там же, "
           "где и снятый инструмент, названный живым")

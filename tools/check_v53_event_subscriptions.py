@@ -1501,15 +1501,16 @@ def check_contract():
     check("заголовок стадии называет позицию 2.8 и каталог вида (текст ответа ссылается на "
           "нормативный список, а не на выдуманное имя)",
           "2.8" in title and DIR_NAME in title, f"заголовок: {title}")
-    check(f"`STAGE_FULL_RELOAD_ONLY[{STAGE_EVENT_SUBSCRIPTIONS}]` — False: узел повторяется "
-          f"своим входом, а не полной перезагрузкой",
-          STAGE_FULL_RELOAD_ONLY.get(STAGE_EVENT_SUBSCRIPTIONS) is False,
-          f"факт: {STAGE_FULL_RELOAD_ONLY.get(STAGE_EVENT_SUBSCRIPTIONS)}")
+    check(f"у стадии `{STAGE_EVENT_SUBSCRIPTIONS}` отдельного входа дозагрузки БОЛЬШЕ НЕТ: продолжение только "
+          "полной перезагрузкой единой точки входа (узел TOOL-DROP, 05.11.2026) — "
+          "зеркало STAGE_FULL_RELOAD_ONLY обязано называть это состоянием",
+          STAGE_FULL_RELOAD_ONLY.get(STAGE_EVENT_SUBSCRIPTIONS) is True,
+          str(STAGE_FULL_RELOAD_ONLY.get(STAGE_EVENT_SUBSCRIPTIONS)))
     hint = stage_resume_hint(STAGE_EVENT_SUBSCRIPTIONS)
-    check("подсказка продолжения называет `load_event_subscriptions_tool` без перезагрузки "
-          "конфигурации (иначе ответ обещал бы инструмент, которым круг не повторить)",
-          "load_event_subscriptions_tool" in hint and "без перезагрузки" in hint,
-          f"подсказка: {hint}")
+    check("подсказка продолжения называет полную перезагрузку единой точки входа "
+          "(отдельный вход позиции снят узлом TOOL-DROP, 05.11.2026)",
+          "load_1c_catalog_tool" in hint and "TOOL-DROP" in hint,
+          f"подсказка: {hint[:300]}")
     check(f"круг стадии `EVENT_SUBSCRIPTIONS_TABLES` — ровно две таблицы пары "
           f"({names(list(EVENT_SUBSCRIPTIONS_TABLES))})",
           set(EVENT_SUBSCRIPTIONS_TABLES) == {TABLE_NAME, SOURCES_TABLE}

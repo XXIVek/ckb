@@ -632,7 +632,8 @@ def load_event_subscriptions(source_path: str,
             f"состоянии `unresolved` (число "
             f"{int(result.get('handlers_unresolved_total') or 0)}): это «нечем разрешить», а "
             "не «модуля нет в конфигурации» (правило C2). Загружите свойства общих модулей "
-            "точкой входа load_configuration_object_properties_tool(source_path=…) и "
+            "полной загрузкой load_1c_catalog_tool(source_path=…, force=True) — этот круг "
+            "пишет стадия S4 — и "
             "повторите стадию"
         )
     for observation, detail in (collected.get("observations") or []):

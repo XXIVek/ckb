@@ -1065,7 +1065,7 @@ def delete_configuration(cfg_id=None, uuid_val=None):
             "У снятой строки заголовка пуст uuid: строки модулей предопределённых программ "
             "(четыре таблицы группы C, узел V44) адресуются именно uuid, поэтому по этой "
             "строке они не снимались и могли остаться в базе. Их снимает только загрузка по "
-            "uuid (`load_configuration_root_modules_tool`) либо явный DELETE по "
+            "uuid (стадия S3 конвейера `load_1c_catalog_tool`) либо явный DELETE по "
             "`configuration_uuid` — проверить их наличие иначе, чем запросом к этим таблицам, "
             "нельзя."
         )
@@ -1428,10 +1428,10 @@ def register_configuration(source_path, force=False, xml_path=None):
                 )
                 + ". Текущая загрузка заполняет их заново на стадии модулей "
                 "предопределённых программ (узел V45, S3) — результат в разделе "
-                "`root_modules` ответа; отдельная точка входа "
-                "`load_configuration_root_modules_tool` остаётся для случая «изменились "
-                "только файлы Ext/» (решение V45: заголовок не меняется, заново разбирать "
-                "индекс состава не нужно)."
+                "`root_modules` ответа; отдельная точка входа этой позиции снята узлом "
+                "TOOL-DROP (05.11.2026), поэтому случай «изменились только файлы Ext/» "
+                "требует полной перезагрузки `load_1c_catalog_tool(source_path=…, "
+                "force=True)`."
             )
         if replaced["bound_external_objects"]:
             warnings.append(

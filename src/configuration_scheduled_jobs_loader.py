@@ -221,7 +221,7 @@ def read_common_module_names(cur, configuration_uuid: str) -> Dict[str, Any]:
         info["reason"] = (
             f"в {COMMON_MODULES_VIEW} нет общих модулей для configuration_uuid="
             f"{configuration_uuid}: свойства общих модулей этой конфигурации не загружены "
-            "точкой входа load_configuration_object_properties_tool, поэтому разрешить "
+            "полной загрузкой load_1c_catalog_tool (стадия S4), поэтому разрешить "
             "обработчик нечем"
         )
         return {"names": set(), **info}
@@ -848,7 +848,8 @@ def load_scheduled_jobs(source_path: str,
             f"Перечень общих модулей: {modules_info['reason']} — все {result['methods_total']} "
             "обработчиков остались в состоянии `unresolved`: это «нечем разрешить», а не "
             "«модуля нет в конфигурации» (правило C2). Загружите свойства общих модулей "
-            "точкой входа load_configuration_object_properties_tool(source_path=…) и "
+            "полной загрузкой load_1c_catalog_tool(source_path=…, force=True) — этот круг "
+            "пишет стадия S4 — и "
             "повторите стадию"
         )
     if not texts_info["available"] and texts_info.get("reason"):

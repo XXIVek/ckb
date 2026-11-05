@@ -120,6 +120,7 @@ from configuration_bots import (  # noqa: E402
 )
 from configuration_bots_loader import read_index_records, read_loaded_module_names  # noqa: E402
 from configuration_load_contract import (  # noqa: E402
+    is_last_stage,
     BOTS_DIR, BOTS_META_TAG, BOTS_REMOVE_ORDER, BOTS_TABLES, FOREIGN_STAGE_TABLES,
     STAGE_BOTS, STAGE_FULL_RELOAD_ONLY, STAGE_FUNCTIONAL_OPTIONS,
     STAGE_FUNCTIONAL_OPTIONS_PARAMETERS, STAGE_OBJECT_MODULES,
@@ -1082,9 +1083,8 @@ def check_contract():
     check(f"`{STAGE_OBJECT_MODULES}` остаётся последней стадией (вторая транзакция текстов), "
           f"а справа у `{STAGE_BOTS}` — `{STAGE_FUNCTIONAL_OPTIONS}` (узел V56, позиция 2.11), "
           f"за ней — `{STAGE_FUNCTIONAL_OPTIONS_PARAMETERS}` (узел V57, позиция 2.12)",
-          ids[-1] == STAGE_OBJECT_MODULES
-          and ids.index(STAGE_BOTS) + 1 == len(ids) - 3
-          and ids[ids.index(STAGE_BOTS) + 1] == STAGE_FUNCTIONAL_OPTIONS,
+          is_last_stage(STAGE_OBJECT_MODULES)
+          and stages_after(STAGE_BOTS)[:1] == [STAGE_FUNCTIONAL_OPTIONS],
           f"порядок: {ids}")
     check(f"`stages_after('{STAGE_SCHEDULED_JOBS}')` называет продолжением `{STAGE_BOTS}`",
           stages_after(STAGE_SCHEDULED_JOBS)[:1] == [STAGE_BOTS],
@@ -1093,17 +1093,19 @@ def check_contract():
           "(узел V56), а не модули объектов",
           stages_after(STAGE_BOTS)[:1] == [STAGE_FUNCTIONAL_OPTIONS],
           str(stages_after(STAGE_BOTS)))
-    check(f"у стадии `{STAGE_BOTS}` есть зеркало продолжения (`STAGE_FULL_RELOAD_ONLY` = "
-          "False — стадия дозакрывается отдельным входом)",
-          STAGE_FULL_RELOAD_ONLY.get(STAGE_BOTS) is False,
+    check(f"у стадии `{STAGE_BOTS}` отдельного входа дозагрузки БОЛЬШЕ НЕТ: продолжение только "
+          "полной перезагрузкой единой точки входа (узел TOOL-DROP, 05.11.2026) — "
+          "зеркало STAGE_FULL_RELOAD_ONLY обязано называть это состоянием",
+          STAGE_FULL_RELOAD_ONLY.get(STAGE_BOTS) is True,
           str(STAGE_FULL_RELOAD_ONLY.get(STAGE_BOTS)))
     title = stage_title(STAGE_BOTS)
     hint = stage_resume_hint(STAGE_BOTS)
     check("заголовок стадии называет позицию 2.10 и каталог вида",
           "2.10" in title and DIR_NAME in title, _brief(title))
-    check("подсказка продолжения называет отдельный вход `load_bots_tool` и полную "
-          "перезагрузку", "load_bots_tool" in hint and "load_1c_catalog_tool" in hint,
-          _brief(hint))
+    check("подсказка продолжения называет полную перезагрузку единой точки входа "
+          "(отдельный вход позиции снят узлом TOOL-DROP, 05.11.2026)",
+          "load_1c_catalog_tool" in hint and "TOOL-DROP" in hint,
+          f"подсказка: {hint[:300]}")
     check(f"круг записи стадии — одна таблица вида `{TABLE_NAME}` (M3)",
           tuple(BOTS_TABLES) == (TABLE_NAME,), str(BOTS_TABLES))
     check("круг снятия совпадает с кругом записи: каскадных внешних ключей в таблицу нет, "

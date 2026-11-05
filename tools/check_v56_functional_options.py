@@ -108,6 +108,7 @@ from configuration_functional_options import (  # noqa: E402
 )
 from configuration_functional_options_loader import read_index_records  # noqa: E402
 from configuration_load_contract import (  # noqa: E402
+    is_last_stage,
     FOREIGN_STAGE_TABLES, FUNCTIONAL_OPTIONS_CIRCLE_BOUNDARY, FUNCTIONAL_OPTIONS_DIR,
     FUNCTIONAL_OPTIONS_META_TAG, FUNCTIONAL_OPTIONS_REMOVE_ORDER,
     FUNCTIONAL_OPTIONS_REPEAT_HINT, FUNCTIONAL_OPTIONS_SECTION_HEADER,
@@ -1495,7 +1496,8 @@ def check_contract():
           f"а справа у `{STAGE_FUNCTIONAL_OPTIONS}` — `{STAGE_FUNCTIONAL_OPTIONS_PARAMETERS}` "
           "(узел V57, позиция 2.12)",
           ids[-1] == STAGE_OBJECT_MODULES
-          and ids.index(STAGE_FUNCTIONAL_OPTIONS) == len(ids) - 3
+          and stages_after(STAGE_FUNCTIONAL_OPTIONS)[:1] == [STAGE_FUNCTIONAL_OPTIONS_PARAMETERS]
+          and is_last_stage(STAGE_OBJECT_MODULES)
           and ids[ids.index(STAGE_FUNCTIONAL_OPTIONS) + 1]
               == STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
           f"порядок: {ids}")
@@ -1509,18 +1511,19 @@ def check_contract():
           == [STAGE_FUNCTIONAL_OPTIONS_PARAMETERS]
           and stages_after(STAGE_FUNCTIONAL_OPTIONS)[-1:] == [STAGE_OBJECT_MODULES],
           str(stages_after(STAGE_FUNCTIONAL_OPTIONS)))
-    check(f"у стадии `{STAGE_FUNCTIONAL_OPTIONS}` есть зеркало продолжения "
-          "(`STAGE_FULL_RELOAD_ONLY` = False — стадия дозакрывается отдельным входом)",
-          STAGE_FULL_RELOAD_ONLY.get(STAGE_FUNCTIONAL_OPTIONS) is False,
+    check(f"у стадии `{STAGE_FUNCTIONAL_OPTIONS}` отдельного входа дозагрузки БОЛЬШЕ НЕТ: продолжение только "
+          "полной перезагрузкой единой точки входа (узел TOOL-DROP, 05.11.2026) — "
+          "зеркало STAGE_FULL_RELOAD_ONLY обязано называть это состоянием",
+          STAGE_FULL_RELOAD_ONLY.get(STAGE_FUNCTIONAL_OPTIONS) is True,
           str(STAGE_FULL_RELOAD_ONLY.get(STAGE_FUNCTIONAL_OPTIONS)))
     title = stage_title(STAGE_FUNCTIONAL_OPTIONS)
     hint = stage_resume_hint(STAGE_FUNCTIONAL_OPTIONS)
     check("заголовок стадии называет позицию 2.11 и каталог вида",
           "2.11" in title and DIR_NAME in title, _brief(title))
-    check("подсказка продолжения называет отдельный вход `load_functional_options_tool` и "
-          "полную перезагрузку",
-          "load_functional_options_tool" in hint and "load_1c_catalog_tool" in hint,
-          _brief(hint))
+    check("подсказка продолжения называет полную перезагрузку единой точки входа "
+          "(отдельный вход позиции снят узлом TOOL-DROP, 05.11.2026)",
+          "load_1c_catalog_tool" in hint and "TOOL-DROP" in hint,
+          f"подсказка: {hint[:300]}")
     check("подсказка продолжения равна константе круга (текст один, а не пересказ)",
           hint == FUNCTIONAL_OPTIONS_REPEAT_HINT, _brief(hint))
     check(f"круг записи стадии — две таблицы (`{TABLE_NAME}`, `{CONTENT_TABLE_NAME}`) — Q1, "
@@ -1649,16 +1652,15 @@ def read_repo_text(rel_path):
 def check_tool_registration():
     section("Контур 8.1 — регистрация отдельного входа в реестре MCP")
     server_text = read_repo_text("server_configurations_core.py")
-    check(f"`{TOOL_NAME}` объявлен инструментом сервера "
-          "`server_configurations_core.py` (`@mcp.tool()` — реестр, а не память)",
-          f"def {TOOL_NAME}(" in server_text and "@mcp.tool" in server_text,
-          _brief(f"def {TOOL_NAME}(: {'есть' if f'def {TOOL_NAME}(' in server_text else 'нет'}"
-                 f", @mcp.tool: {'есть' if '@mcp.tool' in server_text else 'нет'})"))
+    check(f"{TOOL_NAME} БОЛЬШЕ НЕ объявлен инструментом сервера `server_configurations_core.py` "
+          "(снят узлом TOOL-DROP, 05.11.2026)",
+          f"def {TOOL_NAME}(" not in server_text,
+          _brief("def %s(: %s" % (TOOL_NAME, "ЕСТЬ" if f"def {TOOL_NAME}(" in server_text else "нет")))
     wiring_text = read_repo_text("tools/check_mcp_tool_wiring.py")
-    check(f"`{TOOL_NAME}` внесён в `EXPECTED_TOOLS` файла "
-          "`tools/check_mcp_tool_wiring.py` — состав реестра сторожит она, а не обещание "
-          "подсказки продолжения",
-          TOOL_NAME in wiring_text, f"файл: {ROOT / 'tools/check_mcp_tool_wiring.py'}")
+    check(f"{TOOL_NAME} числится снятым в `DELETED_TOOLS` файла `tools/check_mcp_tool_wiring.py` "
+          "— состав реестра сторожит она, а не обещание подсказки продолжения",
+          TOOL_NAME in wiring_text.split("DELETED_TOOLS = [")[1],
+          f"файл: {ROOT / 'tools/check_mcp_tool_wiring.py'}")
     loader_text = read_repo_text("src/configuration_functional_options_loader.py")
     check("отдельный вход реализован слоем `src/configuration_functional_options_loader.py` "
           "(`load_functional_options`)",

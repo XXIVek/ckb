@@ -136,6 +136,7 @@ from configuration_functional_options_parameters import (  # noqa: E402
 )
 from configuration_functional_options_parameters_loader import read_index_records  # noqa: E402
 from configuration_load_contract import (  # noqa: E402
+    is_last_stage,
     FOREIGN_STAGE_TABLES, FUNCTIONAL_OPTIONS_PARAMETERS_CIRCLE_BOUNDARY,
     FUNCTIONAL_OPTIONS_PARAMETERS_DIR, FUNCTIONAL_OPTIONS_PARAMETERS_META_TAG,
     FUNCTIONAL_OPTIONS_PARAMETERS_OBSERVATION_KINDS, FUNCTIONAL_OPTIONS_PARAMETERS_REPEAT_HINT,
@@ -1816,7 +1817,8 @@ def check_contract():
     check(f"`{STAGE_OBJECT_MODULES}` остаётся последней стадией (вторая транзакция текстов), а "
           f"`{STAGE_FUNCTIONAL_OPTIONS_PARAMETERS}` стоит перед ней",
           ids[-1] == STAGE_OBJECT_MODULES
-          and ids.index(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS) == len(ids) - 2,
+          and stages_after(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS)[:1] == [STAGE_DEFINED_TYPES]
+          and is_last_stage(STAGE_OBJECT_MODULES),
           f"порядок: {ids}")
     check(f"`stages_after('{STAGE_FUNCTIONAL_OPTIONS}')` называет продолжением "
           f"`{STAGE_FUNCTIONAL_OPTIONS_PARAMETERS}`",
@@ -1826,18 +1828,19 @@ def check_contract():
           f"`{STAGE_OBJECT_MODULES}`",
           stages_after(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS)[:1] == [STAGE_OBJECT_MODULES],
           str(stages_after(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS)))
-    check(f"у стадии `{STAGE_FUNCTIONAL_OPTIONS_PARAMETERS}` есть зеркало продолжения "
-          "(`STAGE_FULL_RELOAD_ONLY` = False — стадия дозакрывается отдельным входом)",
-          STAGE_FULL_RELOAD_ONLY.get(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS) is False,
+    check(f"у стадии `{STAGE_FUNCTIONAL_OPTIONS_PARAMETERS}` отдельного входа дозагрузки БОЛЬШЕ НЕТ: продолжение только "
+          "полной перезагрузкой единой точки входа (узел TOOL-DROP, 05.11.2026) — "
+          "зеркало STAGE_FULL_RELOAD_ONLY обязано называть это состоянием",
+          STAGE_FULL_RELOAD_ONLY.get(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS) is True,
           str(STAGE_FULL_RELOAD_ONLY.get(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS)))
     title = stage_title(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS)
     hint = stage_resume_hint(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS)
     check("заголовок стадии называет позицию 2.12 и каталог вида",
           "2.12" in title and DIR_NAME in title, _brief(title))
-    check("подсказка продолжения называет отдельный вход "
-          "`load_functional_options_parameters_tool` и полную перезагрузку",
-          "load_functional_options_parameters_tool" in hint
-          and "load_1c_catalog_tool" in hint, _brief(hint))
+    check("подсказка продолжения называет полную перезагрузку единой точки входа "
+          "(отдельный вход позиции снят узлом TOOL-DROP, 05.11.2026)",
+          "load_1c_catalog_tool" in hint and "TOOL-DROP" in hint,
+          f"подсказка: {hint[:300]}")
     check("подсказка продолжения равна константе круга (текст один, а не пересказ)",
           hint == FUNCTIONAL_OPTIONS_PARAMETERS_REPEAT_HINT, _brief(hint))
     check(f"круг записи стадии — две таблицы (`{TABLE_NAME}`, `{TARGETS_TABLE_NAME}`) — Q1, "
@@ -2013,25 +2016,22 @@ def read_repo_text(rel_path):
 def check_tool_registration():
     section("Контур 8.1 — регистрация отдельного входа в реестре MCP")
     server_text = read_repo_text("server_configurations_core.py")
-    check(f"`{TOOL_NAME}` объявлен инструментом сервера `server_configurations_core.py` "
-          "(`@mcp.tool()` — реестр, а не память)",
-          f"def {TOOL_NAME}(" in server_text and "@mcp.tool" in server_text,
-          _brief(f"def {TOOL_NAME}(: {'есть' if f'def {TOOL_NAME}(' in server_text else 'нет'}"
-                 f", @mcp.tool: {'есть' if '@mcp.tool' in server_text else 'нет'})"))
+    check(f"{TOOL_NAME} БОЛЬШЕ НЕ объявлен инструментом сервера `server_configurations_core.py` "
+          "(снят узлом TOOL-DROP, 05.11.2026)",
+          f"def {TOOL_NAME}(" not in server_text,
+          _brief("def %s(: %s" % (TOOL_NAME, "ЕСТЬ" if f"def {TOOL_NAME}(" in server_text else "нет")))
     signature = ""
     marker = f"def {TOOL_NAME}("
     if marker in server_text:
         start = server_text.index(marker)
         signature = server_text[start:start + 600]
-    check("сигнатура отдельного входа — `source_path` и необязательный `configuration_uuid`; "
-          "параметра `kinds` у входа нет (Q5, вариант A: строка применения существует только "
-          "через id строки параметра, порога цены для разреза круга замер 1.4 не дал)",
-          "source_path" in signature and "configuration_uuid" in signature
-          and "kinds" not in signature, _brief(signature[:300]))
+    check("сигнатура и docstring отдельного входа в тексте сервера отсутствуют — вход снят узлом TOOL-DROP",
+          marker not in server_text, _brief(server_text[:160]))
     wiring_text = read_repo_text("tools/check_mcp_tool_wiring.py")
-    check(f"`{TOOL_NAME}` внесён в `EXPECTED_TOOLS` файла `tools/check_mcp_tool_wiring.py` — "
-          "состав реестра сторожит она, а не обещание подсказки продолжения",
-          TOOL_NAME in wiring_text, f"файл: {ROOT / 'tools/check_mcp_tool_wiring.py'}")
+    check(f"{TOOL_NAME} числится снятым в `DELETED_TOOLS` файла `tools/check_mcp_tool_wiring.py` "
+          "— состав реестра сторожит она, а не обещание подсказки продолжения",
+          TOOL_NAME in wiring_text.split("DELETED_TOOLS = [")[1],
+          f"файл: {ROOT / 'tools/check_mcp_tool_wiring.py'}")
     loader_text = read_repo_text("src/configuration_functional_options_parameters_loader.py")
     check("отдельный вход реализован слоем "
           "`src/configuration_functional_options_parameters_loader.py` "

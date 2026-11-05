@@ -2189,10 +2189,11 @@ def check_contract():
     hint = stage_resume_hint(STAGE_FILTER_CRITERIA)
     check("подсказка продолжения стадии названа и совпадает с контрактом",
           hint == FILTER_CRITERIA_REPEAT_HINT and bool(str(hint).strip()), _brief(hint))
-    check(f"стадия `{STAGE_FILTER_CRITERIA}` повторяема отдельным входом ("
-          "`STAGE_FULL_RELOAD_ONLY` — False)",
-          STAGE_FULL_RELOAD_ONLY.get(STAGE_FILTER_CRITERIA) is False,
-          _brief(STAGE_FULL_RELOAD_ONLY.get(STAGE_FILTER_CRITERIA)))
+    check(f"у стадии `{STAGE_FILTER_CRITERIA}` отдельного входа дозагрузки БОЛЬШЕ НЕТ: продолжение только "
+          "полной перезагрузкой единой точки входа (узел TOOL-DROP, 05.11.2026) — "
+          "зеркало STAGE_FULL_RELOAD_ONLY обязано называть это состоянием",
+          STAGE_FULL_RELOAD_ONLY.get(STAGE_FILTER_CRITERIA) is True,
+          str(STAGE_FULL_RELOAD_ONLY.get(STAGE_FILTER_CRITERIA)))
     registry = registry_expected_tools()
     core_tools = registry.get("server_configurations_core.py", [])
     check("вход группы `load_filter_criteria_tool` назван в реестре `EXPECTED_TOOLS` ядра",
