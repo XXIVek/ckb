@@ -292,6 +292,28 @@ OBJECT_VERSIONED_TABLES = (
 # строками индекса состава (замер 1.2 плана — записей индекса ровно по числу файлов,
 # псевдозаписей и блока `ChildObjects` ноль), поэтому круг стадии S4k не расширяется общими
 # таблицами `forms`/`form_ext`/`commands` — как у V53, V54, V55.
+# Узел V57 (04.11.2026, позиция 2.12 нормативного списка — параметры функциональных опций,
+# `functional_option_parameters`, миграция
+# `migrate_v57_functional_options_parameters.sql`) добавляет в круг ОДНУ таблицу. Ключ
+# цепочки — (configuration_uuid, object_name), как у V48…V56: имя вида уникально внутри
+# выгрузки (14 файлов дают 14 различных имён — замер 1.1 плана), но uuid и имя вида
+# повторяются между конфигурациями: 5 общих uuid и 5 общих имён, все десять случаев — пара
+# BGU2/BP3 (замер раздела 1.3 плана docs/CONFIGURATION_FUNCTIONAL_OPTIONS_PARAMETERS_PLAN.md)
+# — граница конфигурации в ключе обязательна по той же причине, что у остальных видов (M1).
+# `functional_option_parameter_targets` в круг НЕ вносится осознанно и это названо, а не
+# обойено молча: своей цепи ревизий у строк применения нет (Q2, вариант A по прецедентам
+# `common_attribute_targets` V50, `filter_criterion_content` V52, `event_subscription_sources`
+# V53, `scheduled_job_schedules` V54 и `functional_option_content` V56) — их ключ начинается с
+# `functional_option_parameter_id`, то есть со ссылки на конкретную ревизию строки вида; запись
+# в этом реестре означала бы цепь, которой у таблицы нет. Безцепочечная таблица названа
+# исключением `CONFIGURATION_UNVERSIONED_TABLES` (src/external_table_writer.py), а её витрина
+# `v_current_functional_option_parameter_targets` строится связкой по этому id (имя не
+# порождается этим реестром). Таблиц детей у вида нет: форм, макетов, команд и модулей у него
+# нет ни файлами, ни строками индекса состава (замер 1.2 плана — записей индекса ровно по
+# числу файлов, псевдозаписей и каталогов содержимого ноль), поэтому круг стадии S4l не
+# расширяется общими таблицами `forms`/`form_ext`/`commands` — как у V53, V54, V55, V56.
+# Отличие от вида 2.11 названо планом (раздел 1.2): имена таблиц круга 2.11 являются
+# префиксом имён таблиц 2.12, поэтому круг держится точными именами, а не началом имени.
 CONFIGURATION_VERSIONED_TABLES = (
     "subsystems", "subsystem_content", "common_modules", "common_module_sources",
     "session_parameters",
@@ -303,7 +325,9 @@ CONFIGURATION_VERSIONED_TABLES = (
     "scheduled_jobs",
     "bots",
     "functional_options",
+    "functional_option_parameters",
 )
+
 
 VERSIONED_TABLES = OBJECT_VERSIONED_TABLES + CONFIGURATION_VERSIONED_TABLES
 

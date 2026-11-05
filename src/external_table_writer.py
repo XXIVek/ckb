@@ -149,6 +149,18 @@ from configuration_functional_options import (
     CONTENT_TABLE_NAME as FUNCTIONAL_OPTION_CONTENT_TABLE,
     TABLE_NAME as FUNCTIONAL_OPTIONS_TABLE,
 )
+# Узел V57 (параметры функциональных опций, шаг П4, 04.11.2026, позиция 2.12 нормативного
+# списка): имена двух таблиц круга задаёт слой разбора
+# (`src/configuration_functional_options_parameters.py`), а не писатель — тот же порядок,
+# что у V48–V56. Второго перечня таблиц в проекте нет: проба шага (`_v57_p4_writer_probe.py`)
+# и постоянная проверка узла (`tools/check_v57_functional_options_parameters.py`, шаг П6)
+# сверяют с живой схемой именно эти имена. Имя таблицы вида отличается от имени таблицы
+# вида-соседа (2.11) не префиксом, а целиком — поэтому круг держится точным именем, а не
+# началом (раздел 1.2 плана V57). Цикла импортов нет: разбор вида не импортирует писателей.
+from configuration_functional_options_parameters import (
+    TARGETS_TABLE_NAME as FUNCTIONAL_OPTION_PARAMETER_TARGETS_TABLE,
+    TABLE_NAME as FUNCTIONAL_OPTION_PARAMETERS_TABLE,
+)
 
 # Ревизионные колонки в спецификациях версионированных писателей (M1). Порядок -
 # тот же, что в DDL (шаг 1 src/generate_ddl.py): integer / timestamp / text / boolean.
@@ -417,6 +429,24 @@ class TableRowWriter:
             if isinstance(value, (bytes, bytearray)):
                 return bytes(value) or None
             return str(value).encode("utf-8") or None
+        if kind == "text_empty_kept":
+            # Узел V57 (шаг П4; колонки `target_object_type` и `target_address_form` таблицы
+            # `functional_option_parameter_targets`): пустая строка здесь является ЗНАЧЕНИЕМ
+            # СОСТОЯНИЯ, а не отсутствием значения. CHECK
+            # `functional_option_parameter_targets_name_matches_resolve_state` требует, чтобы
+            # у состояния `empty_value` адрес цели был пустой строкой, а
+            # `functional_option_parameter_targets_resolve_matches_ref` и
+            # `..._targets_type_matches_name` — чтобы пустым оставались вид цели и форма
+            # адреса; обе колонки объявлены NOT NULL. Вид `text` превратил бы `''` в NULL, и
+            # вставка корректной строки выгрузки упала бы на NOT NULL по вине писателя —
+            # отказ, которого в выгрузке нет (тот же класс дефекта, что каст `uuid[]` узла
+            # V51: тип значения задаёт писатель, а не догадка вызывающего). `None` при этом
+            # остаётся NULL: «колонку не заполнили» и «значение пустое по состоянию» —
+            # разные ответы (правило C2). Пробелы по краям снимаются — их в адресе цели
+            # выгрузка не даёт (замер 2.1 плана V57: 34 адреса без обрамляющих пробелов).
+            if value is None:
+                return None
+            return str(value).strip()
         raise ValueError(f"Неизвестный вид колонки: {kind}")
 
     @classmethod
@@ -2957,7 +2987,131 @@ class FunctionalOptionContentRowWriter(TableRowWriter):
     }
 
 
+class FunctionalOptionsParametersRowWriter(TableRowWriter):
+    """Строка параметра функциональных опций (таблица `functional_option_parameters`,
+    узел V57, позиция 2.12 нормативного списка).
+
+    Спецификация повторяет закрытый словарь свойств разбора
+    (`FUNCTIONAL_OPTIONS_PARAMETER_PROPERTIES`, замер 2 плана V57: четыре тега `Name`,
+    `Synonym`, `Comment`, `Use` во всех 14 файлах трёх выгрузок). Обязательных колонок без
+    значения у разбора нет: файл без `<Name>` нечем ключить, а файл без атрибута `uuid` не
+    является ссылкой на объект метаданных (правило R3) — оба называются отказом разбора
+    файла, а не NULL-колонкой, поэтому писатель ничего не подставляет. `synonym` —
+    `jsonb_nullable`, а не `jsonb_object`: «свойства в выгрузке нет» и «свойство есть, но
+    пустое» — разные состояния (тот же контракт, что V48, V50, V53–V56).
+
+    Словарь значений СВОЙСТВ здесь намеренно НЕ замкнут ни писателем, ни CHECK'ом (Q7,
+    вариант A; отличие от V56 названо планом): словарь держат 14 файлов, XSD вида нет ни
+    одним файлом (замер 1.5). Незнакомый тег или значение остаются состоянием
+    `unknown_tag`/`unknown_value` с именем виновника в `unknown_property_names` — колонки
+    `properties_state` и `unknown_property_names` и есть контракт записи, а не косметика.
+
+    Тег `Use` в строке вида держится только состоянием (`use_state`) и счётчиком
+    (`targets_count`): кратная часть круга — вторая таблица пары
+    (`functional_option_parameter_targets`), и состояние перечня обязано выводиться из её
+    строк (CHECK `functional_option_parameters_use_state_matches_targets`), а не из догадки
+    писателя.
+    """
+
+    TABLE = FUNCTIONAL_OPTION_PARAMETERS_TABLE
+    COLUMNS = versioned_columns({
+        "configuration_uuid": "uuid",
+        "object_uuid": "uuid",
+        "object_name": "text",
+        "full_name": "text",
+        "synonym": "jsonb_nullable",
+        "comment": "text",
+        "use_state": "text",
+        "targets_count": "int",
+        "properties_state": "text",
+        "unknown_property_names": "text_array_nullable",
+        "source_path": "text",
+    })
+
+
+class FunctionalOptionParameterTargetRowWriter(TableRowWriter):
+    """Строка места применения параметра функциональных опций (таблица
+    `functional_option_parameter_targets`, узел V57, блок `<Use>` позиции 2.12).
+
+    Таблица НЕ версионируется своей цепочкой — та же форма, что `common_attribute_targets`
+    узла V50, `filter_criterion_content` V52, `event_subscription_sources` V53,
+    `scheduled_job_schedules` V54 и `functional_option_content` V56 (Q2, вариант A): ключ
+    начинается с `functional_option_parameter_id`, то есть со ссылки на КОНКРЕТНУЮ ревизию
+    строки параметра. Текущность строки выводится витриной
+    `v_current_functional_option_parameter_targets` связкой, а не поиском максимума по
+    собственной цепи. Запись в реестре `CONFIGURATION_OBJECT_WRITERS` при этом есть
+    намеренно: реестр выбирает писателя по таблице, а её отсутствие означало бы выбор
+    класса по имени. Исключение названо константой
+    `CONFIGURATION_UNVERSIONED_TABLES`, а не молча.
+
+    Колонки, смысл которых не выводится из имени:
+
+      * `functional_option_parameter_id` подставляет вызывающий слой (стадия П5) из id,
+        полученного `FunctionalOptionsParametersRowWriter.insert_ids`; в контракте разбора
+        для этой связи служит `parameter_full_name` (`PARAMETER_LINK_KEY`), и колонкой
+        строки вида он не становится намеренно — иначе строка применения могла бы
+        ссылаться на имя вместо ревизии (прецедент `option_full_name` узла V56,
+        `attribute_full_name` V50, `role_name` V49);
+      * `configuration_uuid` повторяет значение строки вида осознанно: запрос «в каких
+        параметрах участвует это измерение регистра» идёт по строкам применения, и без
+        колонки он требовал бы связки с таблицей вида и с её витриной на каждом шаге;
+      * `parameter_object_uuid` / `parameter_full_name` — указатель на параметр в форме
+        индекса состава (`FunctionalOptionsParameter.<Имя>`): он остаётся читаемым и тогда,
+        когда строка вида снята (перезагрузка индекса), то есть отвечает на вопрос «о каком
+        параметре шла речь»;
+      * `ordinal` — позиция записи перечня `<Use>` в файле. Порядок писатель не меняет: он
+        и есть обещание смысловой сборки перечня обратно; уникальный ключ
+        `(functional_option_parameter_id, ordinal)` читает повтор позицией как ошибку
+        разбора, а не как вторую строку (замер 2.1: дублей цели внутри файла корпус не
+        давал);
+      * `item_tag` — локальное имя элемента перечня КАК В ВЫГРУЗКЕ (`Item` — 34 записи из
+        34). Иное имя остаётся именем, а не подставляется наблюдаемым: CHECK на него не
+        кладётся по тому же основанию, что `target_tag` узла V56 (M7);
+      * `item_type_attr` / `item_type_state` — значение атрибута `xsi:type` как в выгрузке
+        и его состояние (`md_object_ref` / `other_form` / `absent`): «не проверяли» и «не
+        разрешилось» — разные ответы (шаг П3 узла V55, M6).
+    """
+
+    TABLE = FUNCTIONAL_OPTION_PARAMETER_TARGETS_TABLE
+    COLUMNS = {
+        "functional_option_parameter_id": "int",
+        "configuration_uuid": "uuid",
+        "parameter_object_uuid": "uuid",
+        "parameter_full_name": "text",
+        "ordinal": "int",
+        "item_tag": "text",
+        "item_type_attr": "text",
+        "item_type_state": "text",
+        # `text_empty_kept`, а не `text`: у состояния `empty_value` адрес цели, вид цели и
+        # форма адреса держатся ПУСТЫМИ СТРОКАМИ при NOT NULL на этих колонках (CHECK'и
+        # `..._targets_name_matches_resolve_state`, `..._targets_resolve_matches_ref`,
+        # `..._targets_type_matches_name`, `..._targets_form_matches_name`). Обычный `text`
+        # превратил бы `''` в NULL, и корректная строка выгрузки была бы отклонена
+        # писателем. Форма адреса при этом несёт знание: `object` — значение привязано к
+        # объекту целиком, `dimension`/`register_resource`/`attribute`/`tabular_section` —
+        # к его срезу; без колонки `InformationRegister.X` и
+        # `InformationRegister.X.Dimension.Y` стали бы одним свойством (M5, вариант C
+        # отклонён Q1).
+        "target_full_name": "text_empty_kept",
+        "target_object_type": "text_empty_kept",
+        "target_address_form": "text_empty_kept",
+        # ссылка строки индекса состава ЭТОЙ конфигурации: псевдозаписи
+        # `Form`/`Help`/`Picture` uuid не имеют (граница колонки `uuid` таблицы
+        # `configuration_objects`, узел V33), поэтому `object_id` хранится текстом.
+        # Внешнего ключа на цель нет осознанно: слои `InformationRegisters`, `Catalogs` и
+        # прочие (группы A–H модели V38) этой позицией не загружаются (Q3, прецедент Q3
+        # узлов V50/V52/V53/V55/V56). `target_unresolved_path` остаётся NULL при `exact` —
+        # CHECK согласует состояние со ссылкой и остатком пути, поэтому «не разрешено» и
+        # «не читалось» различимы запросом.
+        "target_object_id": "text",
+        "target_object_uuid": "uuid",
+        "target_unresolved_path": "text",
+        "target_resolve_state": "text",
+    }
+
+
 CONFIGURATION_OBJECT_WRITERS = {
+
     "subsystems": SubsystemsRowWriter,
     "subsystem_content": SubsystemContentRowWriter,
     "common_modules": CommonModulesRowWriter,
@@ -3050,7 +3204,28 @@ CONFIGURATION_OBJECT_WRITERS = {
     # `v_current_functional_option_content` связкой по числовому id родителя.
     FUNCTIONAL_OPTIONS_TABLE: FunctionalOptionsRowWriter,
     FUNCTIONAL_OPTION_CONTENT_TABLE: FunctionalOptionContentRowWriter,
+    # Узел V57 (параметры функциональных опций, шаг П4, 04.11.2026, позиция 2.12
+    # нормативного списка): две таблицы круга — строка параметра и строки его перечня
+    # `<Use>` (Q1, вариант A — решение оператора; прецедент V50/V56: строка применения не
+    # существует без строки вида, а строка вида пишется и с пустым перечнем, потому что
+    # пустой перечень является состоянием `empty_content`, а не отсутствием строк). Таблиц
+    # детей у вида нет намеренно и это названо, а не обойено молча: форм, макетов, команд и
+    # модулей у вида нет ни файлами, ни строками индекса состава (замер 1.2 плана V57 —
+    # записей индекса ровно по числу файлов, псевдозаписей и каталогов содержимого ноль),
+    # поэтому второй записью общей таблицы круг не расширяется — как у V53, V54, V55, V56.
+    # Круг держится точными именами таблиц, а не началом: соседний вид 2.11 даёт таблицы
+    # `functional_options`/`functional_option_content`, чьи имена являются префиксом имён
+    # таблиц 2.12 (раздел 1.2 плана) — префиксное совпадение сделало бы один круг чужим.
+    # Строка применения не имеет своей цепи ревизий и названа исключением
+    # `CONFIGURATION_UNVERSIONED_TABLES` (Q2, вариант A); каскад
+    # `functional_option_parameter_targets_parameter_fkey` (`ON DELETE CASCADE`) остаётся
+    # средством снятия строк применения вместе с ревизией вида, а текущность читается
+    # витриной `v_current_functional_option_parameter_targets` связкой по числовому id
+    # родителя.
+    FUNCTIONAL_OPTION_PARAMETERS_TABLE: FunctionalOptionsParametersRowWriter,
+    FUNCTIONAL_OPTION_PARAMETER_TARGETS_TABLE: FunctionalOptionParameterTargetRowWriter,
 }
+
 
 # Таблицы, чей писатель зарегистрирован общим реестром, но своей ЦЕПИ РЕВИЗИЙ у таблицы
 # нет (узел V49, Q2 вариант A). Существование списка — не поблажка: до V49 круг писателей
@@ -3102,11 +3277,26 @@ CONFIGURATION_OBJECT_WRITERS = {
 # применения вместе с ревизией вида, а текущность читается витриной
 # `v_current_functional_option_content` связкой по числовому id родителя (прецеденты
 # `v_current_common_attribute_targets`, `v_current_filter_criterion_content`).
+# Узел V57 добавляет в список `functional_option_parameter_targets` по тому же основанию
+# (Q2, вариант A): ключ строки применения начинается с `functional_option_parameter_id` —
+# ссылки на конкретную ревизию строки параметра функциональных опций (замер 2.1 плана
+# docs/CONFIGURATION_FUNCTIONAL_OPTIONS_PARAMETERS_PLAN.md: 34 цели на весь круг, максимум 20
+# в одном файле — цены, при которой собственная цепь стоила бы того же, что у соседей, здесь
+# нет, но модель версионности одна: держатель состояния — строка вида, а не строка
+# применения). Отличие круга 2.12 от круга 2.11 названо планом (раздел 1.2): перечень
+# `<Use>` кратен и читается в обе стороны — «где применяется этот параметр» и «в каких
+# параметрах участвует это измерение регистра», — поэтому состояние разрешения цели обязано
+# оставаться строкой применения, а не property вида. Каскад
+# `functional_option_parameter_targets_parameter_fkey` (`ON DELETE CASCADE`) остаётся средством
+# снятия строк применения вместе с ревизией вида, а текущность читается витриной
+# `v_current_functional_option_parameter_targets` связкой по числовому id родителя.
 CONFIGURATION_UNVERSIONED_TABLES = ("role_rights", "common_attribute_targets",
                                     "filter_criterion_content",
                                     "event_subscription_sources",
                                     "scheduled_job_schedules",
-                                    "functional_option_content")
+                                    "functional_option_content",
+                                    "functional_option_parameter_targets")
+
 
 
 class ConfigCrossReferenceRowWriter(TableRowWriter):

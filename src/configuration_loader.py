@@ -517,6 +517,20 @@ from configuration_functional_options_loader import (
     load_functional_options,
     remove_functional_options,
 )
+# Узел V57 (стадия S4l, позиция 2.12 нормативного списка): свойства параметров функциональных
+# опций — тот же слой, что и отдельный инструмент `load_functional_options_parameters_tool`
+# (шаг П5); контракт стадии и форматёр — в configuration_load_contract. Строки круга снимаются
+# вместе с заголовком явным `DELETE` (внешнего ключа на `configurations` в схеме нет осознанно —
+# прецедент V20.1…V56), поэтому `_remove_rows` обязан вызвать его явно: без этого force=True
+# оставил бы в базе прежний состав вида (для BP3 это 7 строк параметра и 26 строк применения —
+# замеры 1.1, 2.1 плана V57). Порядок снятия держит `FUNCTIONAL_OPTION_PARAMETERS_REMOVE_ORDER`:
+# применение идёт раньше строки вида, иначе FK
+# `functional_option_parameter_targets_parameter_fkey` с `ON DELETE CASCADE` снял бы строки
+# молча, и число в ответе было бы неправдой (M7).
+from configuration_functional_options_parameters_loader import (
+    load_functional_options_parameters,
+    remove_functional_options_parameters,
+)
 # Узел V47 (стадия S4b): модули объектов конфигурации — вторая транзакция после фиксации
 # содержимого (Q6, граница D7). Точка входа стадии одна и отдельного инструмента у неё нет
 # (Q4.1), поэтому здесь импортируется и ответ «стадия не выполнялась» (`mark_index_unavailable`):
@@ -540,6 +554,8 @@ from configuration_load_contract import (
     EVENT_SUBSCRIPTIONS_SECTION_HEADER,
     FILTER_CRITERIA_REPEAT_HINT,
     FILTER_CRITERIA_SECTION_HEADER,
+    FUNCTIONAL_OPTIONS_PARAMETERS_REPEAT_HINT,
+    FUNCTIONAL_OPTIONS_PARAMETERS_SECTION_HEADER,
     FUNCTIONAL_OPTIONS_REPEAT_HINT,
     FUNCTIONAL_OPTIONS_SECTION_HEADER,
     NOT_RUN_STOPPED_REASON,
@@ -560,6 +576,7 @@ from configuration_load_contract import (
     STAGE_EVENT_SUBSCRIPTIONS,
     STAGE_FILTER_CRITERIA,
     STAGE_FUNCTIONAL_OPTIONS,
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
     STAGE_INCOMPLETE_GROUPS,
     STAGE_OBJECT_MODULES,
     STAGE_ROLES,
@@ -576,6 +593,7 @@ from configuration_load_contract import (
     event_subscriptions_defaults,
     filter_criteria_defaults,
     functional_options_defaults,
+    functional_options_parameters_defaults,
     roles_defaults,
     root_modules_defaults,
     scheduled_jobs_defaults,
@@ -936,6 +954,15 @@ def _remove_rows(cur, cfg_id, configuration_uuid=None):
     # очистка здесь обязательна: без неё force=True оставил бы в базе прежний состав вида.
     if configuration_uuid:
         children.update(remove_functional_options(cur, configuration_uuid))
+    # Узел V57 (стадия S4l): строки параметров функциональных опций и их применения тоже
+    # адресуются uuid заголовка, внешнего ключа и каскада по нему в схеме нет осознанно
+    # (прецеденты V20.1…V56). Порядок держит `FUNCTIONAL_OPTION_PARAMETERS_REMOVE_ORDER` —
+    # сначала `functional_option_parameter_targets`, иначе FK строки применения с
+    # `ON DELETE CASCADE` снял бы строки молча, и число в ответе было бы неправдой (M7). Для
+    # BP3 это 7 + 26 строк (замеры 1.1, 2.1 плана V57), поэтому явная очистка здесь
+    # обязательна: без неё force=True оставил бы в базе прежний состав вида.
+    if configuration_uuid:
+        children.update(remove_functional_options_parameters(cur, configuration_uuid))
     cur.execute("DELETE FROM configurations WHERE id = %s", [cfg_id])
     children["configurations"] = cur.rowcount
     return children
@@ -1463,6 +1490,17 @@ def register_configuration(source_path, force=False, xml_path=None):
     # обязателен — состояний `pending` у вида в схеме нет, поэтому недоступный индекс
     # называется предупреждением, а адреса и цели остаются `unresolved` (правило C2, Q3).
     functional_options = functional_options_defaults()
+    # Узел V57 (стадия S4l, позиция 2.12 списка): свойства параметров функциональных опций —
+    # ответ в собственном ключе `functional_options_parameters` (правило C3). Групп `kinds` у
+    # стадии нет — это решение Q5 раздела 6 плана (вариант A), тот же, что у V50, V52, V53,
+    # V54, V55 и V56: строка применения существует только через id строки параметра (Q1,
+    # вариант A), поэтому конвейер обязан записать весь круг целиком, а раздельной дозагрузки
+    # группами у вида нет ни у стадии, ни у отдельного входа. Отличия от V56 названы слоем: у
+    # вида нет ссылки `Location` (есть только перечень `<Use>`), а инварианты пары «вид ↔
+    # применение» проверяются разбором до записи. Индекс состава, как у V56, НЕ обязателен —
+    # состояний `pending` у вида в схеме нет, поэтому недоступный индекс называется
+    # предупреждением, а цели остаются `unresolved` (правило C2, Q3).
+    functional_options_parameters = functional_options_parameters_defaults()
 
     object_modules = object_modules_defaults()
     # Узел V48 (шаг П8, правило C2): пропущенная стадия называет причину пропуска. Без неё
@@ -1474,7 +1512,8 @@ def register_configuration(source_path, force=False, xml_path=None):
     # `error`: «не выполнялась» и «отказала после начала работы» различаются именно так.
     for _empty_stage in (child_objects, session_parameters, roles, common_attributes,
                          exchange_plans, filter_criteria, event_subscriptions,
-                         scheduled_jobs, bots, functional_options, object_modules):
+                         scheduled_jobs, bots, functional_options,
+                         functional_options_parameters, object_modules):
         _empty_stage["reason"] = NOT_RUN_STOPPED_REASON
     object_modules["status"] = STATUS_NOT_RUN
     stopped_stage = stopped_stage_defaults()
@@ -2008,6 +2047,66 @@ def register_configuration(source_path, force=False, xml_path=None):
             stopped = True
             load_incomplete = True
 
+    # ── узел V57 (стадия S4l, позиция 2.12 списка): свойства параметров функциональных опций ─
+    # Порядок вызова повторяет S3/S4/S4c–S4k: ПОСЛЕ коммита транзакции заголовка (своим
+    # соединением стадия не увидела бы ни незакоммиченного заголовка, ни строк индекса состава,
+    # которыми разрешаются цели перечня `<Use>`), ключ — uuid, каталог тот же `root_source`.
+    # Стадия отдельная, а не расширение S4k (прецедент Q5 узлов V48–V56): правило C3 требует
+    # своего ключа ответа `functional_options_parameters`; порядок `STAGES` повторяет порядок
+    # нормативного списка (2.12 идёт сразу за 2.11). Отказ стадии, как у S3/S4 и S4c–S4k,
+    # записанный заголовок не отменяет (C5) — но останавливает конвейер (решение Q8 узла V48,
+    # вариант A): S4b после отказа S4l не выполняется и читается `not_run`.
+    #
+    # Конвейер просит ВЕСЬ круг: групп `kinds` у вида нет (Q5 раздела 6 плана, вариант A) —
+    # строка применения существует только через id строки параметра (Q1, вариант A). Отсутствие
+    # каталога `FunctionalOptionsParameters/` — не отказ, а ответ о выгрузке: `files_found = 0`
+    # с наблюдением `directory_missing` (KomMag вида не имеет ни файлами, ни строками индекса —
+    # замер 1.1). Перечня заголовка `configurations.functional_options_parameters` стадия не
+    # пишет (его заполняет S2), но называет число записей индекса вида и расхождение с числом
+    # файлов — третья нога круга (замер 1.1). Отличие от V56 названо позицией: ссылки
+    # `Location` у вида нет, есть только перечень `<Use>`.
+    #
+    # Штамп времени общий с остальными стадиями этой загрузки (M2) — `load_moment` задан выше,
+    # где начинается событие детей заголовка. Строки применения метку не несут: своей цепи
+    # ревизий у них нет (Q2, вариант A), их текущность читается витриной связкой по
+    # `functional_option_parameter_id`.
+    if not stopped:
+        try:
+            functional_options_parameters = load_functional_options_parameters(
+                root_source, configuration_uuid=row["uuid"], changed_at=load_moment)
+        except Exception as exc:  # noqa: BLE001 — отказ стадии называется, а не бросается
+            functional_options_parameters = functional_options_parameters_defaults()
+            functional_options_parameters["configuration_id"] = new_id
+            functional_options_parameters["configuration_uuid"] = row["uuid"]
+            functional_options_parameters["configuration_name"] = row["name"]
+            functional_options_parameters["status"] = STATUS_ERROR
+            functional_options_parameters["error"] = (
+                "исключение слоя свойств параметров функциональных опций конфигурации: "
+                + str(exc))
+            functional_options_parameters["reason"] = functional_options_parameters["error"]
+        for parameter_warning in functional_options_parameters.get("warnings") or []:
+            warnings.append(
+                f"параметры функциональных опций конфигурации: {parameter_warning}")
+        if not functional_options_parameters.get("success"):
+            # Заголовок, индекс состава, модули корня, свойства подсистем с общими модулями,
+            # параметры сеанса, роли, общие реквизиты, планы обмена, критерии отбора, подписки
+            # на события, регламентные задания, боты и функциональные опции уже записаны, и
+            # отказ этой стадии их не отменяет (C5). Молчать нельзя по той же причине, что у
+            # V44/V46 и V48–V56: после force=True прежние строки сняты, и «загружено» без этой
+            # строки читалось бы как полный состав конфигурации.
+            warnings.append(
+                "Свойства параметров функциональных опций конфигурации не загружены — причина "
+                "названа строкой «Стадия не выполнена» в разделе «"
+                + FUNCTIONAL_OPTIONS_PARAMETERS_SECTION_HEADER
+                + "» карточки. Чем продолжить: "
+                + f"{FUNCTIONAL_OPTIONS_PARAMETERS_REPEAT_HINT} "
+                + f"(configuration_uuid={row['uuid']})."
+            )
+            stopped_stage = _stop_here(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
+                                      functional_options_parameters)
+            stopped = True
+            load_incomplete = True
+
 
     # ── узел V47 (стадия S4b): модули объектов конфигурации ────────────────────────────
     # Вторая транзакция ПОСЛЕ фиксации содержимого конфигурации (решение Q6, граница D7
@@ -2160,6 +2259,14 @@ def register_configuration(source_path, force=False, xml_path=None):
         # нет — это решение Q4 раздела 6 плана (вариант A), а не пропуск; целей перечня без
         # строки опции в ответе нет (Q1, вариант A).
         "functional_options": functional_options,
+        # узел V57: машинная часть стадии S4l (позиция 2.12 списка) — полная; ответ лежит в
+        # собственном ключе `functional_options_parameters`, а не внутри `functional_options`
+        # или `bots` (правило C3). Текст раздела даёт общий форматёр контракта — тот же, что
+        # отдаёт отдельный инструмент `load_functional_options_parameters_tool` (шаг П5). Групп
+        # `kinds` в ответе нет — это решение Q5 раздела 6 плана (вариант A), а не пропуск;
+        # целей перечня `<Use>` без строки параметра в ответе нет (Q1, вариант A); ссылки
+        # `Location` в ответе нет осознанно — у вида её нет (замер 2 плана V57).
+        "functional_options_parameters": functional_options_parameters,
         # узел V47: машинная часть стадии S4b — полная (тот же закрытый контракт, который
         # читают проба П4 и проверка П5); текст раздела даёт общий форматёр контракта.
         # `load_incomplete`/`incomplete_groups` — признак того, что состав в БД неполный

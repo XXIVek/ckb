@@ -41,6 +41,7 @@ from configuration_load_contract import (
     EXCHANGE_PLAN_SECTION_HEADER,
     EVENT_SUBSCRIPTIONS_SECTION_HEADER,
     FILTER_CRITERIA_SECTION_HEADER,
+    FUNCTIONAL_OPTIONS_PARAMETERS_SECTION_HEADER,
     FUNCTIONAL_OPTIONS_SECTION_HEADER,
     OBJECT_MODULES_SECTION_HEADER,
     ROLES_SECTION_HEADER,
@@ -56,6 +57,7 @@ from configuration_load_contract import (
     format_event_subscriptions_lines,
     format_filter_criteria_lines,
     format_functional_options_lines,
+    format_functional_options_parameters_lines,
     format_object_module_lines,
     format_roles_lines,
     format_root_modules_lines,
@@ -562,6 +564,24 @@ def _stage_section_lines(result):
         lines.append(f"{FUNCTIONAL_OPTIONS_SECTION_HEADER}:")
         lines.extend(
             format_functional_options_lines(functional_options_part, indent="   "))
+    # Узел V57 (стадия S4l, позиция 2.12 списка): свойства параметров функциональных опций.
+    # Раздел печатается и при отказе стадии, и при `not_run` — по той же причине, что у
+    # S3/S4/S4c–S4k: «загружено» без него читалось бы как «состав конфигурации в БД есть
+    # весь». Ответ стадии лежит в собственном ключе `functional_options_parameters`, а не
+    # внутри `functional_options` или `bots` (правило C3); текст даёт общий форматёр контракта
+    # — тот же, что отдаёт отдельный инструмент `load_functional_options_parameters_tool`
+    # (шаг П5). Блока «группы круга не запрашивались» у форматёра нет: групп `kinds` у вида
+    # нет по решению Q5 раздела 6 плана (вариант A), и обещать их значило бы обещать вход,
+    # которого нет. Цели перечня `<Use>` без строки параметра в разделе не перечисляются:
+    # строка применения существует только через id строки вида (Q1, вариант A). Блок `Location`
+    # отсутствует осознанно — в отличие от круга 2.11 адреса носителя у вида нет (замер 2
+    # плана V57), вместо него печатается форма адреса цели.
+    functional_options_parameters_part = result.get("functional_options_parameters") or {}
+    if functional_options_parameters_part:
+        lines.append(f"{FUNCTIONAL_OPTIONS_PARAMETERS_SECTION_HEADER}:")
+        lines.extend(
+            format_functional_options_parameters_lines(
+                functional_options_parameters_part, indent="   "))
     # Узел V47 (стадия S4b): модули объектов конфигурации — вторая транзакция загрузки
     # (Q6, граница D7). Раздел печатается и при отказе стадии, и при `not_run` (индекс
     # состава не разобран — круг не определён): «конфигурация загружена» без него

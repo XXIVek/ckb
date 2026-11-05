@@ -133,6 +133,12 @@ OPTION_VIEW = current_view(TABLE_NAME)
 CONTENT_VIEW = "v_current_functional_option_content"
 INDEX_TABLE = "configuration_objects"
 HEADER_NAME_COLUMN = "functional_options"   # перечень заголовка (стадия S2, узел V43)
+# Чужой круг соседнего узла V57 (параметры функциональных опций, позиция 2.12). Имена
+# названы списком, а не суженным LIKE: маска `functional_option%` захватывает и их, и
+# граница круга узла должна читаться составом чужих таблиц, а не удачным совпадением
+# префикса (прецедент — соседние круги V48…V56 в `FOREIGN_TABLES` ниже).
+PARAMETER_CIRCLE_TABLES = ("functional_option_parameters",
+                           "functional_option_parameter_targets")
 
 # Колонки, которые принадлежат цепи ревизий (узел V19), а не узлу V56: их заполняет не
 # разбор, и сравнивать их с ключом строки разбора — значит требовать от слоя чужого.
@@ -267,8 +273,10 @@ CORPUS_TOTALS = {
     "unresolved_total": 0, "orphans": 0, "outside_views": 0,
 }
 
-# Чужие круги (соседние узлы V48…V55 и круг модулей V47): прогон проверки читающий, и
+# Чужие круги (соседние узлы V48…V57 и круг модулей V47): прогон проверки читающий, и
 # ни одна их строка не имеет права измениться. Числа берутся до и после обхода.
+# Круг V57 добавлен узлом V57: его таблицы появились в схеме, и прогон V56 обязан
+# назвать их чужими, а не промолчать о них.
 FOREIGN_TABLES = (
     "session_parameters", "roles", "role_rights", "role_restriction_templates",
     "common_attributes", "common_attribute_targets", "exchange_plans",
@@ -276,7 +284,7 @@ FOREIGN_TABLES = (
     "event_subscriptions", "event_subscription_sources", "scheduled_jobs",
     "scheduled_job_schedules", "bots", "bsl_modules", "configuration_objects",
     "configurations",
-)
+) + PARAMETER_CIRCLE_TABLES
 
 PASSED: list = []
 FAILED: list = []
@@ -421,15 +429,25 @@ def check_schema(cur):
               f"факт: {len(columns)}")
 
     # Круг узла — ровно две таблицы (Q1, вариант A): обход схемы по маске вида обязан дать
-    # их обе и ничего больше — ни таблицы параметров (`FunctionalOptionsParameter` — другой
-    # вид, позиция 2.12, узел V57), ни таблицы словей (`functional_options_*`).
+    # их обе и ничего больше — ни таблицы словей (`functional_options_*` от другого вида),
+    # ни чужого круга. Границу чужого круга называет список `PARAMETER_CIRCLE_TABLES`, а не
+    # подстановка в LIKE: соседний узел V57 (параметры функциональных опций, позиция 2.12)
+    # назвал свои таблицы `functional_option_parameter*`, и широкая маска `functional_option%`
+    # их захватывает. Отсутствия этих таблиц в базе отказом узла не является: круг V56 от
+    # их наличия или отсутствия не меняется.
     kind_tables = [str(r["table_name"]) for r in q(
         cur, "SELECT table_name FROM information_schema.tables WHERE table_name LIKE %s "
              "ORDER BY table_name", ("functional_option%",))]
-    check("таблиц вида по маске `functional_option%` — ровно две (Q1 вариант A: свойства "
-          "вида и перечень применения)",
-          kind_tables == sorted([TABLE_NAME, CONTENT_TABLE_NAME]),
+    foreign_found = sorted(t for t in kind_tables if t in PARAMETER_CIRCLE_TABLES)
+    node_tables = sorted(t for t in kind_tables if t not in PARAMETER_CIRCLE_TABLES)
+    check("таблиц вида по маске `functional_option%` без чужого круга V57 — ровно две "
+          "(Q1 вариант A: свойства вида и перечень применения)",
+          node_tables == sorted([TABLE_NAME, CONTENT_TABLE_NAME]),
           f"найдено: {names(kind_tables)}")
+    check("таблиц чужого круга V57 в круг узла не вошло — граница названа списком таблиц, "
+          "а не совпадением префикса (позиция 2.12, узел V57)",
+          len(foreign_found) in (0, len(PARAMETER_CIRCLE_TABLES)),
+          f"чужих таблиц: {names(foreign_found)}")
 
     option_columns = set(table_columns(cur, TABLE_NAME))
     content_columns = set(table_columns(cur, CONTENT_TABLE_NAME))

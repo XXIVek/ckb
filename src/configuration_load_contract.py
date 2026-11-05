@@ -300,6 +300,35 @@ from configuration_functional_options import (
     TABLE_NAME as FUNCTIONAL_OPTIONS_TABLE,
     state_columns as functional_options_state_columns,
 )
+# Узел V57 (параметры функциональных опций, шаг П4–П5, 04.11.2026, позиция 2.12 нормативного
+# списка): имена каталога и двух таблиц вида, метка метаданных, словари состояний и ключи сводки
+# приходят импортом из разбора (`src/configuration_functional_options_parameters.py`) — второго
+# перечня таблиц или состояний в проекте нет (тот же порядок, что V48…V56; шаг П4 держал только
+# имена двух таблиц круга, потому что стадии ещё не было — шаг П5 добавляет остальное вместе с
+# ключом ответа). Имена таблиц двух соседних видов начинаются одинаково —
+# `functional_options`/`functional_option_content` у 2.11 и
+# `functional_option_parameters`/`functional_option_parameter_targets` у 2.12, — поэтому круг
+# держится точными именами таблиц, а не началом имени (раздел 1.2 плана V57: тот же риск,
+# что с `FunctionalOption`/`FunctionalOptionsParameter` в индексе состава). Разбор ничего из
+# контракта не импортирует, цикл односторонний.
+# Словарей ЗНАЧЕНИЙ свойств здесь нет намеренно: CHECK на них в схеме нет по решению Q7
+# (вариант A, прецедент узла V50) — словарь замкнут 14 файлами круга при отсутствии XSD
+# (замер 1.5), и незнакомое значение остаётся значением с состоянием `unknown_value` и именем
+# виновника в `unknown_property_names`, а не отказом записи.
+from configuration_functional_options_parameters import (
+    CIRCLE_DISCREPANCIES as FUNCTIONAL_OPTIONS_PARAMETERS_CIRCLE_DISCREPANCIES,
+    COUNT_KEYS as FUNCTIONAL_OPTIONS_PARAMETERS_COUNT_KEYS,
+    COUNT_KEY_STATE_COLUMNS as FUNCTIONAL_OPTIONS_PARAMETERS_COUNT_STATE_KEYS,
+    DIR_NAME as FUNCTIONAL_OPTIONS_PARAMETERS_DIR,
+    MAX_TARGETS_KEY as FUNCTIONAL_OPTIONS_PARAMETERS_MAX_TARGETS_KEY,
+    OBJECT_KIND_TAG as FUNCTIONAL_OPTIONS_PARAMETERS_META_TAG,
+    OBSERVATION_KINDS as FUNCTIONAL_OPTIONS_PARAMETERS_OBSERVATION_KINDS,
+    STATE_VOCABULARIES as FUNCTIONAL_OPTIONS_PARAMETERS_STATE_VOCABULARIES,
+    SUMMARY_KEYS as FUNCTIONAL_OPTIONS_PARAMETERS_SUMMARY_KEYS,
+    TABLE_NAME as FUNCTIONAL_OPTION_PARAMETERS_TABLE,
+    TARGETS_TABLE_NAME as FUNCTIONAL_OPTION_PARAMETER_TARGETS_TABLE,
+    state_columns as functional_options_parameters_state_columns,
+)
 from current_revision import CONFIGURATION_VERSIONED_TABLES
 
 # ── стадии конвейера: один перечень на контракт, карточку и проверку ───────────────
@@ -432,6 +461,26 @@ STAGE_BOTS = "s4j_bots"
 # резать, замер 1.4 не дал (2 467 629 байта файлов регистрации на весь круг, прочего
 # содержимого — 0 байт; 765 строк вида и 10 063 строки применения).
 STAGE_FUNCTIONAL_OPTIONS = "s4k_functional_options"
+# Узел V57 (04.11.2026, позиция 2.12 нормативного списка): свойства параметров функциональных
+# опций — отдельная стадия по той же причине, что S4c (V48), S4d (V49), S4e (V50), S4f (V51),
+# S4g (V52), S4h (V53), S4i (V54), S4j (V55) и S4k (V56): правило C3 требует своего ключа
+# ответа `functional_options_parameters`, а разбивать чужой ключ `functional_options` значило
+# бы переименовывать контракт соседнего узла. Номер S4l, а не S5: S5 остаётся за планируемой
+# стадией анализа. В `STAGES` ниже стадия вносится этим же шагом П5 (позиция 2.12 идёт сразу
+# за 2.11, то есть между S4k и S4b — порядок нормативного списка держит `STAGES`, а не порядок
+# номеров): слой `load_functional_options_parameters`
+# (src/configuration_functional_options_parameters_loader.py) и точка входа
+# `load_functional_options_parameters_tool` появляются этим же шагом. Круг таблиц стадии
+# (`FUNCTIONAL_OPTION_PARAMETERS_TABLES`) и его включение в `FOREIGN_STAGE_TABLES` объявлены
+# шагом П4: версионная таблица без объявленного круга загрузки означала бы, что чужая стадия S4
+# её снимает (дефект, названный узлами V49…V56).
+# Групп запроса (`kinds`) у вида НЕТ — это решение, а не упущение (Q5 раздела 6 плана V57,
+# вариант A по прецеденту Q10 узла V50, Q5 узлов V52, V54, V55, V56 и Q8 узла V53): строка
+# применения существует только через id строки параметра (Q1, вариант A), поэтому частичная
+# запись круга описывала бы состав, которого в выгрузке нет, а порога цены, при котором круг
+# стоило бы резать, замер 1.4 не дал (весь круг четырёх выгрузок — 14 файлов регистрации и 34
+# цели применения, 0 байт прочего содержимого).
+STAGE_FUNCTIONAL_OPTIONS_PARAMETERS = "s4l_functional_options_parameters"
 # Узел V47 (28.10.2026): тексты модулей объектов конфигурации. Номер S4b, а не S5:
 # S5 остаётся за планируемой стадией анализа (дополнение оператора 23.10.2026), которой
 # в `STAGES` нет. Стадия идёт сразу за S4 и является второй транзакцией загрузки (Q6,
@@ -478,6 +527,11 @@ STAGES: Tuple[Tuple[str, str], ...] = (
     # потому что является второй транзакцией загрузки (Q6 узла V46), а не позицией списка.
     (STAGE_FUNCTIONAL_OPTIONS,
      "Свойства функциональных опций (FunctionalOptions, позиция 2.11)"),
+    # Узел V57 (позиция 2.12 списка, решение Q5 вариант A): 2.12 идёт сразу за 2.11, литера
+    # `s4l` в коде свободна — перенумерации прежних стадий нет. S4b остаётся последней,
+    # потому что является второй транзакцией загрузки (Q6 узла V46), а не позицией списка.
+    (STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
+     "Свойства параметров функциональных опций (FunctionalOptionsParameters, позиция 2.12)"),
     (STAGE_OBJECT_MODULES, "Модули объектов конфигурации (тексты Ext/, вторая транзакция)"),
 )
 
@@ -649,6 +703,12 @@ STAGE_FULL_RELOAD_ONLY: Dict[str, bool] = {
     # входа, хотя продолжение у неё есть (слоем `load_functional_options` и точкой входа
     # группы `load_functional_options_tool` оба обеспечены этим же шагом П5).
     STAGE_FUNCTIONAL_OPTIONS: False,
+    # Узел V57 (позиция 2.12, шаг П5 — урок П8 узлов V51–V56): ключ словаря и ветка
+    # `stage_resume_hint` вносятся ОДНИМ вызовом. Разрыв между ними маскировался бы значением
+    # по умолчанию в `build_stopped_stage`: стадия без ключа читается стадией без отдельного
+    # входа, хотя продолжение у неё есть (слоем `load_functional_options_parameters` и точкой
+    # входа группы `load_functional_options_parameters_tool` оба обеспечены этим же шагом П5).
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS: False,
     STAGE_OBJECT_MODULES: True,
 }
 
@@ -708,6 +768,16 @@ STAGE_INCOMPLETE_GROUPS: Dict[str, str] = {
     STAGE_FUNCTIONAL_OPTIONS: "свойства функциональных опций (позиция 2.11 нормативного "
                               "списка, её свойства файла регистрации, ссылка Location и "
                               "круг целей применения блока <Content>)",
+    # Узел V57 (шаг П5): группа называется позицией нормативного списка и её содержимым — по
+    # образцу записей S4c…S4k. У параметра функциональной опции нет форм, макетов, команд и
+    # модулей (замер 1.2 плана V57: записей индекса ровно по числу файлов, каталогов содержимого
+    # ноль), но есть перечень применения `<Use>` (34 цели на корпус), поэтому группа названа его
+    # свойствами файла регистрации и кругом целей применения: без записи остановка на S4l
+    # оставила бы ответ без машиночитаемого признака неполноты. Отличие от 2.11 названо
+    # позицией: у вида нет ссылки `Location`, есть только перечень `<Use>`.
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS:
+        "свойства параметров функциональных опций (позиция 2.12 нормативного "
+        "списка, её свойства файла регистрации и круг целей применения блока <Use>)",
     STAGE_OBJECT_MODULES: "модули объектов конфигурации (группа C модели V38, Ext/)",
 }
 
@@ -769,6 +839,7 @@ def stage_resume_hint(stage_id: str) -> str:
     `load_scheduled_jobs_tool` (шаг П5 узла V54),
     S4j — свой вход `load_bots_tool` (шаг П5 узла V55),
     S4k — свой вход `load_functional_options_tool` (шаг П5 узла V56),
+    S4l — свой вход `load_functional_options_parameters_tool` (шаг П5 узла V57),
     S4b — не имеет (решение Q4.1). Стадия без
     подсказки была бы ошибкой
     контракта, поэтому ответ по умолчанию — полная перезагрузка, а не пустая строка. Отсутствие
@@ -798,6 +869,8 @@ def stage_resume_hint(stage_id: str) -> str:
         return BOTS_REPEAT_HINT
     if stage_id == STAGE_FUNCTIONAL_OPTIONS:
         return FUNCTIONAL_OPTIONS_REPEAT_HINT
+    if stage_id == STAGE_FUNCTIONAL_OPTIONS_PARAMETERS:
+        return FUNCTIONAL_OPTIONS_PARAMETERS_REPEAT_HINT
     if stage_id == STAGE_OBJECT_MODULES:
         return OBJECT_MODULES_RELOAD_HINT
     return "полная перезагрузка load_1c_catalog_tool(source_path=…, force=True)"
@@ -1737,6 +1810,112 @@ FUNCTIONAL_OPTIONS_CIRCLE_BOUNDARY = (
     "(`DefinedTypes`) в выгрузке вида нет (замер 2.4.4 плана V56), узла для них нет"
 )
 
+# ── круг стадии S4l (узел V57, шаги П4–П5, позиция 2.12 списка) ───────────────────────
+# Круг таблиц был объявлен раньше стадии (шаг П4), потому что таблица
+# `functional_option_parameters` зарегистрирована в круге версионности тем же шагом
+# (`CONFIGURATION_VERSIONED_TABLES`, src/current_revision.py), а `CHILD_TABLES` строится из
+# `CONFIGURATION_VERSIONED_TABLES` минус `FOREIGN_STAGE_TABLES` — без этой константы стадия S4
+# снимала и анализировала бы чужие строки вида и его применения (замер 1.1 плана V57: 14
+# файлов регистрации и 34 цели применения на корпус; `_v46_p4_writer_probe.py` падает на
+# `KeyError` по той же причине, что падал на `filter_criteria` у V52). Тот же приём, что у
+# записей V49, V50, V52, V54, V55, V56. С шага П5 круг стоит ДО текстов стадии и до
+# `STORED_META_KINDS`: запись вида в этом словаре ссылается на `*_TABLES`, а порядок
+# определений модуля определяет и то, что имя уже связано (прецедент V56, где
+# `FUNCTIONAL_OPTIONS_TABLES` тоже объявлен до текста карточки).
+#
+# Круг — ДВЕ таблицы, а не одна (Q1, вариант A — решение оператора; прецедент V50/V56):
+# строка применения не существует без строки вида — её FK
+# `functional_option_parameter_targets_parameter_fkey` объявлен с `ON DELETE CASCADE`, — а
+# строка вида пишется и с пустым перечнем `<Use>`: пустой перечень является состоянием
+# `empty_content` строки вида, а не отсутствием строк применения (замер 2.1: пустых перечней
+# корпус не давал, состояние в словаре есть). Таблиц детей у вида нет, и это названо, а не
+# обойено: форм, макетов, команд и модулей у вида нет ни файлами, ни строками индекса состава
+# (замер 1.2 — записей индекса ровно по числу файлов, псевдозаписей и каталогов содержимого
+# ноль), поэтому общими таблицами `forms`/`form_ext`/`commands`/`templates` круг не
+# расширяется — как у V50, V53, V54, V55, V56.
+FUNCTIONAL_OPTION_PARAMETERS_TABLES: Tuple[str, ...] = (
+    FUNCTIONAL_OPTION_PARAMETERS_TABLE, FUNCTIONAL_OPTION_PARAMETER_TARGETS_TABLE,
+)
+
+# Порядок снятия круга — НЕ порядок `FUNCTIONAL_OPTION_PARAMETERS_TABLES`:
+# `functional_option_parameter_targets.functional_option_parameter_id` ссылается на строку вида
+# с `ON DELETE CASCADE`, и каскад снял бы применение молча, без точного счётчика (M7). Явный
+# `DELETE` первым держит честное число снятых строк и не зависит от того, поставлен ли каскад
+# в данной базе (миграция V57 могла не применяться). Тот же приём, что `REMOVE_ORDER` узлов
+# V50, V52, V54, V56.
+FUNCTIONAL_OPTION_PARAMETERS_REMOVE_ORDER: Tuple[str, ...] = (
+    FUNCTIONAL_OPTION_PARAMETER_TARGETS_TABLE, FUNCTIONAL_OPTION_PARAMETERS_TABLE,
+)
+
+# ── тексты стадии S4l (узел V57, шаг П5, позиция 2.12 списка) ──────────────────────────
+# Заголовок раздела, подсказка о повторе и граница круга объявлены ДО `CHILD_NOT_IMPLEMENTED`
+# и ДО констант круга S4l: текст незакрытой части ссылается на раздел, где читается отказ
+# стадии, а держать два написания одного заголовка нельзя (прецеденты V48…V56). Имена каталога,
+# двух таблиц вида и метки метаданных приходят импортом из разбора — второго перечня в проекте
+# нет. Граница называется и при успехе: «строки записаны» не равно «о параметрах функциональных
+# опций сохранено всё».
+FUNCTIONAL_OPTIONS_PARAMETERS_SECTION_HEADER = (
+    "СВОЙСТВА ПАРАМЕТРОВ ФУНКЦИОНАЛЬНЫХ ОПЦИЙ КОНФИГУРАЦИИ (узел V57, позиция 2.12)"
+)
+
+# Что обязан сказать ответ о повторе стадии. Отдельная точка входа группы —
+# `load_functional_options_parameters_tool` (шаг П5 узла, внесена в реестр сервера этим же
+# шагом — `tools/check_mcp_tool_wiring.py` сторожит состав). Обещать инструмент, которого в
+# реестре нет, — значит дать обещание, которое сервер не выполняет, поэтому ключ словаря,
+# ветка `stage_resume_hint`, текст подсказки и запись реестра вносятся одним шагом (прецеденты
+# V48…V56, урок П8 узлов V51–V56).
+FUNCTIONAL_OPTIONS_PARAMETERS_REPEAT_HINT = (
+    "Повторить стадию можно отдельным входом группы "
+    "load_functional_options_parameters_tool(source_path=…) без перезагрузки конфигурации "
+    "(узел V57, шаг П5) либо полной перезагрузкой "
+    "load_1c_catalog_tool(source_path=…, force=True)"
+)
+
+# Граница круга держится замеров разделов 1–2 плана V57 и решений Q1–Q3, Q7, Q9. Отличие от
+# круга 2.11 называется прямо: у параметра функциональной опции нет ссылки `Location` — есть
+# только перечень применения `<Use>`, и его цели ведут на объекты ДРУГИХ видов метаданных
+# (измерения регистров, реквизиты справочников), поэтому разрешение идёт по всем строкам
+# индекса состава этой конфигурации, а не по строкам своего вида.
+FUNCTIONAL_OPTIONS_PARAMETERS_CIRCLE_BOUNDARY = (
+    f"круг узла — файлы регистрации вида {FUNCTIONAL_OPTIONS_PARAMETERS_META_TAG} из каталога "
+    f"{FUNCTIONAL_OPTIONS_PARAMETERS_DIR}/ (позиция 2.12 списка), подтверждённые записями "
+    "индекса состава того же вида (`FunctionalOptionsParameter.<Имя>`) и перечнем заголовка "
+    "`configurations.functional_options_parameters` (ТРИ ноги круга, расхождения "
+    "`index_only`/`file_only`/`uuid_mismatch` называются ответом; нога перечня заголовка "
+    "стадией не перезаписывается и сверяется проверкой узла). Сверка круга ведётся точным "
+    "совпадением `object_type`, а не началом имени: рядом стоит вид "
+    "`FunctionalOption` (2.11), имена которого начинаются с той же строки (замер 1.2); "
+    f"в `{FUNCTIONAL_OPTION_PARAMETERS_TABLE}` идут четыре свойства файла регистрации "
+    "(`Name`, `Synonym`, `Comment`, `Use`) колонками `object_name`/`full_name`, `synonym` "
+    "(jsonb-карта языков) и `comment`, состояние разбора `properties_state` с перечнем "
+    "незнакомых тегов `unknown_property_names` (Q7, вариант A по прецеденту узла V50: XSD "
+    "вида нет, корпус 14 файлов словарь не замыкает, поэтому незнакомое называется, а не "
+    "отвергается записью) и состояние перечня `use_state` со счётчиком `targets_count`; "
+    f"в `{FUNCTIONAL_OPTION_PARAMETER_TARGETS_TABLE}` идут строки перечня `<Use>` — порядок "
+    "в файле, имя элемента как в выгрузке (`Item`, 34 из 34), значение атрибута `xsi:type` "
+    "и его состояние (`md_object_ref`/`other_form`/`absent`), полный адрес цели, вид цели по "
+    "первому сегменту и ФОРМА адреса цели (`object` — значение привязано к объекту целиком, "
+    "`dimension`/`register_resource`/`attribute`/`tabular_section` — к его срезу), ссылка на "
+    "строку индекса состава и состояние разрешения (34 цели на корпус, все `exact`, максимум "
+    "20 целей у одного параметра — замер 2.1). Ссылки `Location` у вида нет — в отличие от "
+    "круга 2.11 (замер 2 плана), поэтому колонок адреса носителя у узла нет осознанно, а "
+    "состояний `location_*` в контракте нет. Внешних ключей на цели нет осознанно (Q3, "
+    "вариант A по прецедентам Q3 узлов V50, V52, V53, V55, V56): слои регистров сведений, "
+    "справочников и прочих видов (группы A–H модели V38) этой позицией не загружаются, "
+    "поэтому цель называется состоянием, а не фактом существования. Форм, макетов, команд, "
+    "модулей и каталогов содержимого у вида нет ни в одной выгрузке (замер 1.2), поэтому "
+    "общих таблиц детей у узла нет осознанно; каталог вида плоский — появление подкаталога "
+    "или файла не-XML называется наблюдениями `unexpected_dir`/`unexpected_file`. Вид "
+    "существует в трёх выгрузках корпуса из четырёх: MinCfg 2 файла, BGU2 5, BP3 7, у KomMag "
+    "каталога нет ни файлами, ни строками индекса (замер 1.1) — отсутствие каталога "
+    "является наблюдением `directory_missing`, а не нулём строк (Q9, вариант A). Пустого "
+    "перечня `<Use>` корпус не давал ни разу (замер 2.1: 0 `empty_content`), но состояние "
+    "в словаре держится: пустой перечень читается состоянием строки вида, а не отсутствием "
+    "строк в таблице применения (Q1, вариант A). Определённых типов (`DefinedTypes`, "
+    "позиция 2.13) в выгрузке вида нет (замер 1.2), узла для них нет"
+)
+
+
 # Что из содержимого дочерних объектов стадия S4 НЕ загружает — определение перенесено
 # в это место узлом V50 (шаг П8): текст ссылается на заголовок раздела S4e, объявленного
 # рядом с кругом таблиц вида, поэтому заголовок обязан идти раньше текста (прецедент
@@ -1794,7 +1973,14 @@ CHILD_NOT_IMPLEMENTED = (
     + "» ниже; для этого вида закрыты его свойства файла регистрации, ссылка Location с "
     "тремя формами адреса (константа, ресурс регистра сведений, реквизит справочника) и круг "
     "целей применения блока <Content> двумя таблицами; форм, макетов, команд и модулей у "
-    "вида нет ни в одной выгрузке — замер 1.2 плана V56) "
+    "вида нет ни в одной выгрузке — замер 1.2 плана V56), свойства параметров функциональных "
+    "опций — позиция 2.12 нормативного списка (узел V57, стадия S4l, раздел «"
+    + FUNCTIONAL_OPTIONS_PARAMETERS_SECTION_HEADER
+    + "» ниже; для этого вида закрыты его свойства файла регистрации и круг целей применения "
+    "блока <Use> двумя таблицами с формой адреса цели (объект целиком, измерение регистра, "
+    "ресурс регистра сведений, реквизит справочника, табличная часть); ссылки Location у вида "
+    "нет — в отличие от круга 2.11, а форм, макетов, команд, модулей и каталогов содержимого "
+    "у вида нет ни в одной выгрузке — замер 1.2 плана V57) "
     "и тексты модулей объектов "
     "конфигурации — шесть слотов Ext/ (узел V47, стадия S4b, раздел «"
     "МОДУЛИ ОБЪЕКТОВ КОНФИГУРАЦИИ» ниже); не реализованы реквизиты и "
@@ -1814,7 +2000,9 @@ CHILD_NOT_IMPLEMENTED = (
 # V50/V51/V52/V53 его пишут (замер 03.11.2026 на MinCfg: `ScheduledJob 2` стоял и в
 # перечне «остальных объектов … в БД не раскладываются», и в разделе стадии S4i). Круг
 # называет один словарь — его читают оба формата. Порядок ключей — порядок нормативного
-# списка (2.3…2.10), он же порядок стадий S4c…S4j. Вид V46 (подсистемы и общие модули,
+# списка (2.3…2.12), он же порядок стадий S4c…S4l (строка остановилась на 2.10/S4j — узел V57
+# правит этот дрейф тем же шагом, что и внесение записи вида: перечень, который отстаёт от
+# регистра, читается как «видов больше нет»). Вид V46 (подсистемы и общие модули,
 # позиции 2.1–2.2) здесь не перечислен осознанно: его таблицы держит `LOADED_META_TABLES`
 # слоя свойств, и оба формата читают и его. Формулировка «слепая зона V38» к видам этого
 # словаря не относится: их содержимое в БД лежит, а незакрытые группы A–H модели V38
@@ -1873,6 +2061,17 @@ STORED_META_KINDS: Dict[str, Dict[str, Any]] = {
         "tables": FUNCTIONAL_OPTIONS_TABLES,
         "section": FUNCTIONAL_OPTIONS_SECTION_HEADER,
     },
+    # Узел V57 (шаг П5): вид 2.12 тем же порядком — без строки `FunctionalOptionsParameter`
+    # вид остался бы в перечне «содержимое в БД не раскладывается», хотя слой S4l пишет его
+    # свойства и перечень применения (прецеденты V55, V56; дефект назван `_v54_p5_stage_probe.py`).
+    # Круг — две таблицы (`FUNCTIONAL_OPTION_PARAMETERS_TABLES`, Q1 вариант A). Имя метки вида
+    # отличается от метки 2.11 (`FunctionalOption`) — словарь читается точными ключами, поэтому
+    # соседний вид в круг не попадает (замер 1.2 плана V57).
+    FUNCTIONAL_OPTIONS_PARAMETERS_META_TAG: {
+        "node": "V57", "stage": "S4l", "position": "2.12",
+        "tables": FUNCTIONAL_OPTION_PARAMETERS_TABLES,
+        "section": FUNCTIONAL_OPTIONS_PARAMETERS_SECTION_HEADER,
+    },
 }
 
 # Таблицы, чьи строки остаются нетронутыми, когда группа не запрошена: ответ обязан назвать
@@ -1894,11 +2093,20 @@ STORED_META_KINDS: Dict[str, Dict[str, Any]] = {
 # 1.1 и 2.2 плана V56). `functional_option_content` в `CONFIGURATION_VERSIONED_TABLES` нет
 # осознанно (своей цепи ревизий у таблицы нет — Q2, вариант A), поэтому в круге загрузки её
 # держит именно эта константа, а не круг версионности.
+# Узел V57 (шаг П4) добавляет круг стадии S4l тем же порядком и раньше, чем стадия входит в
+# `STAGES` (шаг П5): таблица `functional_option_parameters` уже зарегистрирована в круге
+# версионности (`CONFIGURATION_VERSIONED_TABLES`, `src/current_revision.py`, шаги П1/П4), и без
+# этой строки стадия S4 снимала и анализировала бы 14 строк вида и 34 строки его применения
+# (замеры 1.1 и 2.1 плана V57). `functional_option_parameter_targets` в
+# `CONFIGURATION_VERSIONED_TABLES` нет осознанно (своей цепи ревизий у таблицы нет — Q2,
+# вариант A), поэтому в круге загрузки её держит именно эта константа, а не круг версионности.
 FOREIGN_STAGE_TABLES: Tuple[str, ...] = (
     SESSION_PARAMETER_TABLES + ROLE_TABLES + COMMON_ATTRIBUTES_TABLES
     + EXCHANGE_PLAN_TABLES + FILTER_CRITERIA_TABLES + EVENT_SUBSCRIPTIONS_TABLES
     + SCHEDULED_JOBS_TABLES + BOTS_TABLES + FUNCTIONAL_OPTIONS_TABLES
+    + FUNCTIONAL_OPTION_PARAMETERS_TABLES
 )
+
 CHILD_TABLES: Tuple[str, ...] = tuple(
     table for table in CONFIGURATION_VERSIONED_TABLES
     if table not in FOREIGN_STAGE_TABLES
@@ -5081,4 +5289,322 @@ def format_functional_options_lines(result: Dict[str, Any], indent: str = "") ->
     lines.append(f"{indent}{FUNCTIONAL_OPTIONS_CIRCLE_BOUNDARY}")
     return lines
 
+
+def functional_options_parameters_defaults() -> Dict[str, Any]:
+    """Закрытый контракт стадии S4l с нулями (C1, C2, C3; узел V57, шаг П5).
+
+    Словарь плоский — тот же, что возвращает слой `load_functional_options_parameters` и что
+    собирает сводка разбора `collect_functional_options_parameters` (один словарь на разбор и
+    на ответ — приём `SUMMARY_KEYS` загрузчиков V46/V48…V56); конвейер вкладывает его в свой
+    ключ `functional_options_parameters` без переименования (C3). Групп `kinds` в контракте нет
+    — это решение Q5 раздела 6 плана V57 (вариант A), а не пропуск: строка применения
+    существует только через id строки параметра (Q1, вариант A), а порога цены, при котором
+    круг стоило бы резать, замер 1.4 не дал (14 файлов и 34 цели на весь круг).
+
+    Отдельно обязаны быть названы (план V57, разделы 1–2, 5, 8) — иначе нули читаются как
+    «в конфигурации параметров нет»:
+
+    * числа по таблицам (`removed_by_table`/`written_by_table`) — ДВУМЯ таблицами круга снятия
+      (`FUNCTIONAL_OPTION_PARAMETERS_REMOVE_ORDER`), а не одним числом: «записано 7» и «записано
+      7 параметров + 26 целей применения» — разные факты (прецедент V50, V56);
+    * словари состояний по всем колонкам `functional_options_parameters_state_columns()` —
+      строки `counts_by_*` строятся comprehension'ом по `STATE_VOCABULARIES` разбора: второй
+      перечень состояний нарушил бы и сверку с CHECK живой схемы (П6), и обещание C1; связь
+      «ключ сводки → колонка состояния» читается словарём `COUNT_KEY_STATE_COLUMNS` разбора, а
+      не выводится из имени;
+    * `targets_total`/`targets_distinct`/`max_targets_per_file` — распределение, а не итог:
+      20 целей у одного параметра в BP3 и 20 целей по разным параметрам — разные выгрузки
+      (замер 2.1, M3);
+    * `targets_by_kind` — распределение целей по видам метаданных (круг V38 шире круга V57),
+      словарь открытый по ключам и закрытый по смыслу;
+    * `counts_by_target_address_form` — форма адреса цели: без неё `InformationRegister.X` и
+      `InformationRegister.X.Dimension.Y` стали бы одним свойством (M5, вариант C отклонён Q1);
+    * `counts_by_item_type_state` — состояние атрибута `xsi:type` («не проверяли» и
+      «не разрешилось» — разные ответы, шаг П3 узла V55);
+    * `invariant_violations_total`/`invariant_violations` — нарушение инвариантов пары
+      «строка вида ↔ строки применения» (CHECK
+      `functional_option_parameters_use_state_matches_targets`, согласованность
+      `parameter_full_name`): в отличие от V56 связность проверяется разбором до записи, и
+      нарушение называется состоянием, а не потерянной строкой;
+    * `unknown_properties`/`unknown_value_properties`/`unexpected_tags`/
+      `unexpected_item_types` — виновники состояний поимённо: XSD вида нет (замер 1.5),
+      поэтому ответ обязан называть незнакомое, а не терять его (Q7, вариант A);
+    * расхождения двух ног круга — ДВУМЯ ключами: словарём `counts_by_circle_discrepancy`
+      (числа по замкнутому словарю `index_only`/`file_only`/`uuid_mismatch`) и списками тех
+      же имён (виновники поимённо). Пустой список — «расхождений нет» (замер 1.1 даёт полное
+      совпадение ног), а отсутствующий ключ — «мы не смотрели», что ответом о выгрузке не
+      является (C1, C2; прецедент контрактов V48…V56);
+    * `unresolved_targets_total` — целое число, а не длина примеров: примеры обрезаны до
+      `MAX_EXAMPLES` (замер 2.1 даёт 34 `exact`, и ноль обязан быть назван).
+    """
+    return {
+        "status": STATUS_NOT_RUN,
+        "success": False,
+        "error": None,
+        "reason": None,
+        "stage": STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
+        "configuration_id": None,
+        "configuration_uuid": None,
+        "configuration_name": None,
+        "tables": list(FUNCTIONAL_OPTION_PARAMETERS_REMOVE_ORDER),
+        "directory": FUNCTIONAL_OPTIONS_PARAMETERS_DIR,
+        "state_columns": list(functional_options_parameters_state_columns()),
+        "files_found": 0,
+        "files_read": 0,
+        "files_failed": [],
+        "observations": [],
+        "rows_written": 0,
+        "parameters_written": 0,
+        "targets_written": 0,
+        "removed_previous": 0,
+        "removed_by_table": {table: 0
+                             for table in FUNCTIONAL_OPTION_PARAMETERS_REMOVE_ORDER},
+        "written_by_table": {table: 0
+                             for table in FUNCTIONAL_OPTION_PARAMETERS_REMOVE_ORDER},
+        "index_available": False,
+        "index_kind_records": 0,
+        # Расхождения ног круга называются ДВУМЯ ключами осознанно: словарь
+        # `counts_by_circle_discrepancy` даёт числа (их печатает форматёр), а списки
+        # `index_only`/`file_only`/`uuid_mismatch` — виновников поимённо (их печатает
+        # форматёр отдельной строкой). Нулевой список означает «расхождений нет», отсутствие
+        # ключа — «мы не смотрели»; второе не является ответом о выгрузке (C1, C2; прецедент
+        # контрактов V48…V56).
+        "index_only": [],
+        "file_only": [],
+        "uuid_mismatch": [],
+        "counts_by_circle_discrepancy": {
+            state: 0 for state in FUNCTIONAL_OPTIONS_PARAMETERS_CIRCLE_DISCREPANCIES},
+        "counts_by_observation": {
+            kind: 0 for kind in FUNCTIONAL_OPTIONS_PARAMETERS_OBSERVATION_KINDS},
+        # Словари состояний — одна строка на каждое состояние замкнутого словаря разбора
+        # (C1): нулевое состояние остаётся ключом, потому что «состояния не было» и
+        # «состояние не считалось» являются разными ответами (C2).
+        **{key: {state: 0 for state in FUNCTIONAL_OPTIONS_PARAMETERS_STATE_VOCABULARIES[
+                FUNCTIONAL_OPTIONS_PARAMETERS_COUNT_STATE_KEYS[key]]}
+           for key in FUNCTIONAL_OPTIONS_PARAMETERS_COUNT_KEYS},
+        "targets_total": 0,
+        "targets_distinct": 0,
+        FUNCTIONAL_OPTIONS_PARAMETERS_MAX_TARGETS_KEY: 0,
+        "targets_by_kind": {},
+        "target_kinds_total": 0,
+        "unknown_properties": {},
+        "unknown_value_properties": {},
+        "unexpected_tags": {},
+        "unexpected_item_types": {},
+        "duplicate_targets": [],
+        "unresolved_targets_total": 0,
+        "unresolved_targets": [],
+        "invariant_violations_total": 0,
+        "invariant_violations": [],
+        "statistics_refreshed": 0,
+        "warnings": [],
+    }
+
+
+def format_functional_options_parameters_lines(result: Dict[str, Any],
+                                               indent: str = "") -> List[str]:
+    """Текст стадии S4l по закрытому контракту `functional_options_parameters_defaults()`
+    (C1, C3; узел V57, шаг П5).
+
+    Формат один для двух контуров: раздела карточки `load_1c_catalog_tool` и ответа
+    отдельного входа `load_functional_options_parameters_tool` (шаг П5) — прецеденты
+    V45/V46/V48…V56. Отказ форматёр называет сам, вызывающий причину не повторяет. Групп
+    `kinds` у вида нет (решение Q5 раздела 6 плана V57, вариант A), поэтому блока «группы
+    круга не запрашивались» здесь нет: он обещал бы раздельный вход дозагрузки, которого у
+    стадии нет. Блок детей отсутствует осознанно — форм, макетов, команд, модулей и каталогов
+    содержимого у вида нет ни в одной выгрузке (замер 1.2 плана V57). Блок `Location`
+    отсутствует тоже осознанно: в отличие от круга 2.11 адреса носителя у вида нет (замер 2
+    плана), есть только перечень `<Use>` — поэтому вместо него печатается форма адреса цели.
+    Граница круга печатается и при успехе: «строки записаны» не равно «о параметрах сохранено
+    всё» — внешнего ключа на цели перечня в схеме нет осознанно (Q3), и цель называется
+    состоянием разрешения.
+    """
+    lines: List[str] = []
+    if not result:
+        return lines
+
+    if not result.get("success"):
+        reason = result.get("error") or result.get("reason") or "загрузчик не назвал причину"
+        prefix = ("Стадия не выполнена" if result.get("status") in (None, STATUS_NOT_RUN)
+                  else "Стадия не удалась")
+        lines.append(f"{indent}{prefix}: {reason}")
+        if result.get("files_failed"):
+            # Отказ разбора круга — тот же статус `error`, что и отказ записи (словарь
+            # статусов контракта замкнут: not_run/ok/skipped/error, C2), поэтому ветка
+            # различается признаком круга, а не новым статусом: перечисленные файлы-виновники
+            # есть только у остановки до записи.
+            lines.append(
+                f"{indent}Стадия остановлена ДО записи (приём "
+                f"V12/V46/V48…V56): половина круга читалась бы как полный состав вида; "
+                f"прежние строки не сняты — "
+                f"{FUNCTIONAL_OPTION_PARAMETERS_TABLE} содержит прежнее состояние")
+            for failure in (result.get("files_failed") or [])[:10]:
+                lines.append(f"{indent}  ⚠️ файл не разобран: "
+                             f"{failure.get('source_path')} — {failure.get('reason')}")
+        if result.get("invariant_violations"):
+            lines.append(
+                f"{indent}⚠️ инварианты пары «строка вида ↔ строки применения» нарушены в "
+                f"{int(result.get('invariant_violations_total') or 0)} файлах — круг не "
+                "записан, потому что состояние `use_state` обязано выводиться из строк "
+                "применения (CHECK "
+                "`functional_option_parameters_use_state_matches_targets`), а не из догадки")
+        lines.append(f"{indent}{FUNCTIONAL_OPTIONS_PARAMETERS_REPEAT_HINT}")
+        for warning in result.get("warnings") or []:
+            lines.append(f"{indent}⚠️ {warning}")
+        return lines
+
+    written_by_table = result.get("written_by_table") or {}
+    removed_by_table = result.get("removed_by_table") or {}
+    lines.append(
+        f"{indent}{FUNCTIONAL_OPTIONS_PARAMETERS_SECTION_HEADER}: записано "
+        + ", ".join(f"{table}={int(written_by_table.get(table) or 0)}"
+                    for table in FUNCTIONAL_OPTION_PARAMETERS_REMOVE_ORDER)
+        + f" (всего {int(result.get('rows_written') or 0)})"
+    )
+    lines.append(
+        f"{indent}Файлов регистрации вида: {int(result.get('files_found') or 0)} "
+        f"(разобрано {int(result.get('files_read') or 0)}, каталог "
+        f"{result.get('directory') or FUNCTIONAL_OPTIONS_PARAMETERS_DIR}/, записей индекса "
+        f"состава вида {int(result.get('index_kind_records') or 0)}) — круг подтверждается "
+        "индексом состава этой конфигурации точным `object_type = "
+        f"{FUNCTIONAL_OPTIONS_PARAMETERS_META_TAG}` (правило V43: повторный разбор "
+        "`ConfigDumpInfo.xml` вторым источником не становится; соседний вид `FunctionalOption` "
+        "в круг не берётся — замер 1.2)"
+    )
+    if int(result.get("removed_previous") or 0):
+        lines.append(
+            f"{indent}Снято прежних строк этой конфигурации: "
+            + ", ".join(f"{table}={int(removed_by_table.get(table) or 0)}"
+                        for table in sorted(removed_by_table))
+            + " — снятие начинается со строк применения, иначе каскад "
+              "`functional_option_parameter_targets_parameter_fkey` снял бы их молча, и число "
+              "в ответе было бы неправдой (M7); история состояний не заводится (D8)"
+        )
+
+    observations = result.get("counts_by_observation") or {}
+    lines.append(
+        f"{indent}Наблюдения круга: "
+        + ", ".join(f"{kind}={int(observations.get(kind) or 0)}"
+                    for kind in FUNCTIONAL_OPTIONS_PARAMETERS_OBSERVATION_KINDS)
+        + " — отсутствие каталога вида является наблюдением `directory_missing`, а не нулём "
+          "строк (Q9, прецедент Q9 узлов V48/V50/V52–V56: одна из четырёх выгрузок вида не "
+          "имеет ни файлами, ни записями индекса — замер 1.1); `index_not_provided` означает, "
+          "что индекс состава в ход разбора не входил, и цели при этом остаются `unresolved` "
+          "— это другой ответ, чем «цели нет в перечне»"
+    )
+    if result.get("observations"):
+        lines.append(f"{indent}  фактические наблюдения прогона: "
+                     + ", ".join(sorted(str(item) for item in result["observations"])))
+
+    circle = result.get("counts_by_circle_discrepancy") or {}
+    lines.append(
+        f"{indent}Расхождения ног круга: "
+        + ", ".join(f"{state}={int(circle.get(state) or 0)}"
+                    for state in FUNCTIONAL_OPTIONS_PARAMETERS_CIRCLE_DISCREPANCIES)
+        + " — нули являются ответом, а не молчанием (замер 1.1 даёт полное совпадение файлов "
+          "и записей индекса на тех выгрузках, где вид есть); ключей `child_mismatches`/"
+          "`index_pseudo_entries` в словаре нет осознанно: детей и псевдозаписей вида индекс "
+          "не держит (замер 1.2)"
+    )
+    if result.get("index_only"):
+        lines.append(f"{indent}  запись индекса без файла: "
+                     + ", ".join(str(item) for item in result["index_only"]))
+    if result.get("file_only"):
+        lines.append(f"{indent}  файл вне индекса: "
+                     + ", ".join(str(item) for item in result["file_only"]))
+    if result.get("uuid_mismatch"):
+        lines.append(f"{indent}  ⚠️ несовпадение uuid файла и индекса: "
+                     + ", ".join(str(item) for item in result["uuid_mismatch"]))
+
+
+    prop_counts = result.get("counts_by_properties_state") or {}
+    lines.append(
+        f"{indent}Свойства файла регистрации (`Name`, `Synonym`, `Comment`, `Use`): "
+        "состояний разбора — "
+        + ", ".join(f"{state}={int(prop_counts.get(state) or 0)}"
+                    for state in FUNCTIONAL_OPTIONS_PARAMETERS_STATE_VOCABULARIES[
+                        "properties_state"])
+        + " — словаря значений свойств ни схемой, ни разборным словарём круг не замкнут "
+          "(Q7, вариант A: XSD вида нет — замер 1.5, корпус 14 файлов), поэтому незнакомое "
+          "остаётся состоянием `unknown_value`/`unknown_tag` с именем виновника"
+    )
+    unknown_properties = result.get("unknown_properties") or {}
+    unknown_values = result.get("unknown_value_properties") or {}
+    unexpected_tags = result.get("unexpected_tags") or {}
+    if unknown_properties or unknown_values or unexpected_tags:
+        lines.append(
+            f"{indent}  ⚠️ незнакомые имена свойств: "
+            + (", ".join(f"{name}={count}"
+                         for name, count in sorted(unknown_properties.items())) or "нет")
+            + "; незнакомые значения: "
+            + (", ".join(f"{name}={count}"
+                         for name, count in sorted(unknown_values.items())) or "нет")
+            + "; незнакомые теги: "
+            + (", ".join(f"{tag}={count}"
+                         for tag, count in sorted(unexpected_tags.items())) or "нет"))
+
+    use_counts = result.get("counts_by_use_state") or {}
+    resolve_counts = result.get("counts_by_target_resolve_state") or {}
+    form_counts = result.get("counts_by_target_address_form") or {}
+    item_type_counts = result.get("counts_by_item_type_state") or {}
+    lines.append(
+        f"{indent}Перечень применения `<Use>`: состояний строки вида — "
+        + ", ".join(f"{state}={int(use_counts.get(state) or 0)}"
+                    for state in FUNCTIONAL_OPTIONS_PARAMETERS_STATE_VOCABULARIES["use_state"])
+        + f"; целей {int(result.get('targets_total') or 0)} "
+          f"(различных {int(result.get('targets_distinct') or 0)}, максимум в одном файле "
+          f"{int(result.get(FUNCTIONAL_OPTIONS_PARAMETERS_MAX_TARGETS_KEY) or 0)}, видов цели "
+          f"{int(result.get('target_kinds_total') or 0)}); состояний разрешения цели — "
+        + ", ".join(f"{state}={int(resolve_counts.get(state) or 0)}"
+                    for state in
+                    FUNCTIONAL_OPTIONS_PARAMETERS_STATE_VOCABULARIES["target_resolve_state"])
+        + "; форм адреса цели — "
+        + ", ".join(f"{form or 'EMPTY'}={int(form_counts.get(form) or 0)}"
+                    for form in
+                    FUNCTIONAL_OPTIONS_PARAMETERS_STATE_VOCABULARIES["target_address_form"])
+        + "; состояний атрибута `xsi:type` — "
+        + ", ".join(f"{state}={int(item_type_counts.get(state) or 0)}"
+                    for state in
+                    FUNCTIONAL_OPTIONS_PARAMETERS_STATE_VOCABULARIES["item_type_state"])
+        + " — пустой перечень является состоянием `empty_content` строки вида (замер 2.1: "
+          "пустых перечней корпус не давал), а не отсутствием строк в таблице применения "
+          "(Q1, вариант A); форма адреса различает объект целиком (`object`) и его срезы "
+          "(`dimension`/`register_resource`/`attribute`/`tabular_section`), потому что иначе "
+          "`InformationRegister.X` и `InformationRegister.X.Dimension.Y` стали бы одним "
+          "свойством (M5, вариант C отклонён Q1)"
+    )
+    targets_by_kind = result.get("targets_by_kind") or {}
+    if targets_by_kind:
+        lines.append(f"{indent}  целей по видам метаданных: "
+                     + ", ".join(f"{kind}={count}" for kind, count in
+                                 sorted(targets_by_kind.items(),
+                                      key=lambda item: (-item[1], item[0]))))
+    if result.get("unresolved_targets"):
+        lines.append(f"{indent}  неразрешённых целей: "
+                     f"{int(result.get('unresolved_targets_total') or 0)} — примеры: "
+                     + "; ".join(str(item) for item in result["unresolved_targets"]))
+    if result.get("duplicate_targets"):
+        lines.append(f"{indent}  ⚠️ повторяющиеся цели внутри одного перечня: "
+                     + "; ".join(str(item) for item in result["duplicate_targets"][:10]))
+    unexpected_item_types = result.get("unexpected_item_types") or {}
+    if unexpected_item_types:
+        lines.append(f"{indent}  ⚠️ незнакомые значения `xsi:type`: "
+                     + ", ".join(f"{value or 'EMPTY'}={count}" for value, count in
+                                 sorted(unexpected_item_types.items())))
+    if int(result.get("invariant_violations_total") or 0):
+        lines.append(f"{indent}  ⚠️ нарушений инвариантов пары: "
+                     f"{int(result.get('invariant_violations_total') or 0)} — примеры: "
+                     + "; ".join(str(item) for item in result["invariant_violations"]))
+    if not result.get("index_available"):
+        lines.append(
+            f"{indent}Индекс состава этой конфигурации не прочитан — сверка файлов с "
+            "перечнем и разрешение целей невозможны: «объекта нет в перечне» и «перечень не "
+            "загружен» являются разными ответами (правило C2, Q3). Отличие от V55 названо "
+            "слоем: состояний `pending` в схеме вида нет, поэтому недоступный индекс является "
+            "предупреждением, а не отказом стадии"
+        )
+    for warning in result.get("warnings") or []:
+        lines.append(f"{indent}⚠️ {warning}")
+    lines.append(f"{indent}{FUNCTIONAL_OPTIONS_PARAMETERS_CIRCLE_BOUNDARY}")
+    return lines
 

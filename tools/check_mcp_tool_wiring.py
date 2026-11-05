@@ -175,6 +175,22 @@ DEFAULT_TARGETS = [
 # здесь, в отличие от V55, НЕ обязателен: состояний `pending` у вида в схеме нет, поэтому
 # недоступный индекс называется наблюдением `index_unavailable` и предупреждением, а цели
 # остаются `unresolved` (Q3 раздела 4 плана узла V56).
+# Узел V57 (П5, 04.11.2026) добавил load_functional_options_parameters_tool: core 14 → 15.
+# Причина та же (решение оператора Q5 узла V48 — свой вход на каждую позицию нормативного
+# списка): файлы регистрации вида `FunctionalOptionsParameters/` (позиция 2.12) меняются, а
+# заголовок и индекс состава — нет. Стадия S4l конвейера и инструмент вызывают одну и ту же
+# функцию слоя (src/configuration_functional_options_parameters_loader.load_functional_options_parameters);
+# закрытый словарь functional_options_parameters_defaults() и текст раздела даёт
+# configuration_load_contract. Групп `kinds` НЕТ — решение Q5 раздела 6 плана узла V57
+# (вариант A, тот же, что у V50, V52, V53, V54, V55 и V56): строка применения существует
+# только через id строки параметра (Q1, вариант A), а порога цены замер 1.4 не дал (весь круг
+# четырёх выгрузок — 24 431 байт файлов регистрации и 34 цели применения при нуле прочего
+# содержимого). Индекс состава, как у V56, НЕ обязателен: состояний `pending` у вида в схеме
+# нет, поэтому недоступный индекс называется наблюдением `index_not_provided` и предупреждением,
+# а цели остаются `unresolved` (в отличие от V55, где индекс обязателен). Отличие круга от 2.11
+# названо планом раздела 2: у параметра нет ссылки `Location`, а цели `<Use>` ведут на объекты
+# других видов метаданных, поэтому разрешение идёт по всем строкам индекса состава.
+# Элемент перечня — `<xr:Item xsi:type="xr:MDObjectRef">`, а не `<xr:Object>` (замер 2.1).
 EXPECTED_TOOLS = {
     "server_configurations_core.py": [
         "delete_external_report_tool", "load_1c_catalog_tool",
@@ -185,6 +201,7 @@ EXPECTED_TOOLS = {
         "load_event_subscriptions_tool",
         "load_exchange_plans_tool",
         "load_filter_criteria_tool",
+        "load_functional_options_parameters_tool",
         "load_functional_options_tool",
         "load_roles_tool", "load_scheduled_jobs_tool", "load_session_parameters_tool",
     ],
