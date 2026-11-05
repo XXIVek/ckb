@@ -600,6 +600,26 @@ MCP-сервера. Прогон: `python tools/check_mcp_tool_wiring.py`, `pyth
   `Styles`, `StyleItems`, `CommandGroups`, `CommonCommands`, `CommonAttributes`,
   `EventSubscriptions`, `Languages` — нет; группы F, G, H — не закрыты.
   Узлы V18 и V38 остаются незакрытыми;
+
+  > Уточнение 05.11.2026 (узел V57, шаг П7, план
+  > `docs/CONFIGURATION_FUNCTIONAL_OPTIONS_PARAMETERS_PLAN.md`). Абзац выше — снимок границ узла V46
+  > от 28.10.2026, и с тех пор он не правил ни одним из последующих узлов: ни V48, ни V49, ни V50,
+  > ни V52–V56 не трогали этот файл (проверено историей `git log` по файлу). Читателю он
+  > сообщал бы о незакрытых позициях, которые закрыты, поэтому состояние группы E называется здесь
+  > отдельно, а прежний текст сохранён как снимок даты узла — тот же приём, что в
+  > `docs/config-scenarios/01_configuration.md`. Актуальное состояние группы E («объекты без
+  > дочерней структуры — только свойства»): закрыты `Subsystems` (V46), `SessionParameters` (V48,
+  > позиция 2.3), `CommonAttributes` (V50, 2.5), `FilterCriteria` (V52, 2.7), `EventSubscriptions`
+  > (V53, 2.8), `ScheduledJobs` (V54, 2.9), `Bots` (V55, 2.10), `FunctionalOptions` (V56, 2.11),
+  > `FunctionalOptionsParameters` (V57, 2.12) — все отдельными таблицами, а не колонкой
+  > `properties jsonb` (её в живой схеме нет); не закрыты `Constants`, `Styles`, `StyleItems`,
+  > `CommandGroups`, `CommonCommands`, `Languages`, а также позиция 2.13 (`DefinedTypes` — в
+  > выгрузке эталонного набора определённых типов нет). Роли (V49) и содержимое вида
+  > (`Content`/`<Source>`/`<Use>`/`Ext/Schedule.xml`) относятся к группе F, дети общей раскладки
+  > `ExchangePlans` и `FilterCriteria` (V51/V52) — к группе A, модули — к группе B (V46/V47).
+  > Живой перечень закрытых позиций и актуальная формулировка группы E держат строками матрицы
+  > групп A–H в `docs/config-scenarios/01_configuration.md`; состояние любой позиции читается
+  > прогоном по живой схеме и `STAGES`, а не отметкой в тексте плана.
 - слоты `Help` и `CommandInterface` подсистем: состояние называется, содержимое (xtui, html) не
   сохраняется;
 - вариант «расширение» остаётся заглушкой (правило R7);
