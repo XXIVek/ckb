@@ -31,6 +31,14 @@ except Exception:
     pass
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "src"))
+import db_env  # noqa: E402
+
+# Значение, которое снимали правкой. Образцы прежнего кода ниже называют его маркером, а не
+# литералом: иначе сам измеритель стал бы носителем секрета, который снимает. Маркер
+# подставляется в main() перед сравнением, поэтому тексты правок остаются дословными.
+SECRET = db_env.pg_password()
+MARK = "«PG_SECRET»"
 
 # (файл, старый текст, новый текст, ожидаемое число вхождений)
 # Ожидаемое число - часть правки: молча заменить первое из двух одинаковых вхождений значит
@@ -42,7 +50,7 @@ EDITS = [
      "import psycopg2\nimport psycopg2.pool\n\nfrom db_env import db_params\n", 1),
     ("src/mcp_tools_core.py",
      "DB_CONFIG = {\n    'host': 'localhost',\n    'port': 5432,\n    'dbname': 'local_doc',"
-     "\n    'user': 'postgres',\n    'password': 'Sta090860',\n}\n",
+     "\n    'user': 'postgres',\n    'password': '«PG_SECRET»',\n}\n",
      "# Реквизиты подключения к базе правил и знаний. Отдельного литерала пароля здесь нет\n"
      "# (узел V60, 06.11.2026): значения ведёт `src/db_env.py` - переменные `PG*` процесса,\n"
      "# затем файл `.env` в корне проекта. Прежний словарь молча дублировал `src/database.py`,\n"
@@ -62,7 +70,7 @@ EDITS = [
      '        "port": int(os.environ.get("PGPORT", "5432")),\n'
      '        "dbname": dbname or DB_NAME,\n'
      '        "user": os.environ.get("PGUSER", "postgres"),\n'
-     '        "password": os.environ.get("PGPASSWORD", "Sta090860"),\n'
+     '        "password": os.environ.get("PGPASSWORD", "«PG_SECRET»"),\n'
      '    }\n',
      'def db_config(dbname=None):\n'
      '    """Параметры подключения (dbname по умолчанию - ckb_1c_configurations).\n\n'
@@ -77,7 +85,7 @@ EDITS = [
      "from external_db import transaction\n",
      "from db_env import subprocess_env\nfrom external_db import transaction\n", 1),
     ("src/external_report_loader.py",
-     '    env = dict(os.environ)\n    env["PGPASSWORD"] = "Sta090860"\n',
+     '    env = dict(os.environ)\n    env["PGPASSWORD"] = "«PG_SECRET»"\n',
      "    env = subprocess_env()\n", 2),
 
     # --- src/pdf_parser.py: два вызова psycopg2.connect с литералом ---
@@ -86,7 +94,7 @@ EDITS = [
      "from pathlib import Path\n\nfrom db_env import db_params\n", 1),
     ("src/pdf_parser.py",
      "conn = psycopg2.connect(host='localhost', port=5432, dbname='local_doc', "
-     "user='postgres', password='Sta090860')",
+     "user='postgres', password='«PG_SECRET»')",
      'conn = psycopg2.connect(**db_params("local_doc"))', 2),
 
     # --- tools/backup_databases.py: учётные данные и тексты-подсказки в описании точки ---
@@ -104,7 +112,7 @@ EDITS = [
      'PG_HOST = os.environ.get("PGHOST", "localhost")\n'
      'PG_PORT = os.environ.get("PGPORT", "5432")\n'
      'PG_USER = os.environ.get("PGUSER", "postgres")\n'
-     'PG_PASSWORD = os.environ.get("PGPASSWORD", "Sta090860")\n',
+     'PG_PASSWORD = os.environ.get("PGPASSWORD", "«PG_SECRET»")\n',
      "# Пути берутся из окружения, значение пароля - из src/db_env.py (узел V60): файла `.env`\n"
      "# или переменных процесса. Литерала пароля здесь нет, поэтому вызов бросает понятную\n"
      "# ошибку, если значение не задано, а не молча подставляет секрет из кода.\n"
@@ -114,7 +122,7 @@ EDITS = [
      'PG_USER = os.environ.get("PGUSER", "postgres")\n'
      "PG_PASSWORD = pg_password()\n", 1),
     ("tools/backup_databases.py",
-     "$env:PGPASSWORD='Sta090860'",
+     "$env:PGPASSWORD='«PG_SECRET»'",
      "$env:PGPASSWORD=(Get-Content .env | ConvertFrom-StringData).PGPASSWORD", 2),
 
     # --- tools/check_position_frame.py: окружение psql в прогоне узла V59 ---
@@ -123,7 +131,7 @@ EDITS = [
      'sys.path.insert(0, str(ROOT / "probes" / "v59"))\n'
      "from db_env import subprocess_env  # noqa: E402  (узел V60: значения подключения из .env)\n", 1),
     ("tools/check_position_frame.py",
-     '    env = dict(os.environ, PGPASSWORD="Sta090860")\n',
+     '    env = dict(os.environ, PGPASSWORD="«PG_SECRET»")\n',
      "    env = subprocess_env()\n", 1),
 ]
 
@@ -137,6 +145,8 @@ def main():
     print("=== узел V60 П1: точки подключения на src/db_env.py ===", "запись" if write else "только разбор")
     failures = []
     for rel, old, new, expect in EDITS:
+        old = old.replace(MARK, SECRET)
+        new = new.replace(MARK, SECRET)
         path = ROOT / rel
         if not path.exists():
             failures.append(f"{rel}: файла нет")
@@ -145,11 +155,14 @@ def main():
         eol = detect_eol(raw)
         old_eol = old.replace("\n", eol)
         new_eol = new.replace("\n", eol)
+        # Порядок проверок важен: у правок импортов старый блок является началом нового, поэтому
+        # поиск старого текста дал бы ложную готовность применить правку второй раз и получить
+        # дубль импорта. Сначала спрашиваем, стоит ли уже новый текст.
+        if raw.count(new_eol) >= expect:
+            print(f"  без изменений (уже применено): {rel}")
+            continue
         count = raw.count(old_eol)
         if count == 0:
-            if raw.count(new_eol) >= expect:
-                print(f"  без изменений (уже применено): {rel}")
-                continue
             failures.append(f"{rel}: подстрока не найдена ({old.splitlines()[0][:60]})")
             continue
         if count != expect:

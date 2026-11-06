@@ -38,7 +38,12 @@ except Exception:
     pass
 
 ROOT = Path(__file__).resolve().parents[2]
-SECRET = "Sta090860"
+sys.path.insert(0, str(ROOT / "src"))
+import db_env  # noqa: E402
+
+# Значение пароля берётся из единственной точки (узел V60), иначе сам измеритель стал бы
+# носителем секрета, который снимает.
+SECRET = db_env.pg_password()
 
 # (имя класса, регулярное выражение, замена)
 CLASSES = [

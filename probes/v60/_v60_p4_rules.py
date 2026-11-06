@@ -53,11 +53,16 @@ import _make_rule_cards as MC  # noqa: E402
 import rules_layer as RL  # noqa: E402
 import rules_read as RR  # noqa: E402
 from database import get_cursor  # noqa: E402
+from db_env import pg_password  # noqa: E402  (узел V60: значение пароля не держится литералом)
 from mcp_tools_api import add_snippet, update_snippet  # noqa: E402
 
 LAYER = MC.LAYER_ADDRESS              # `rules:kb-rules:`
 DB_ACCESS = "rules:always:db-access"  # новая always-карточка
 ALWAYS_INDEX = "rules:always:index"
+# Значение пароля для примера в тексте карточки (узел V60): в реестре литерала нет, значение
+# держит `.env`. Карточка в БД пароль называет обязана — иначе строку запуска `psql` нельзя
+# собрать из найденного правила.
+SECRET = pg_password()
 DB_ACCESS_TAGS = "1c-rules-root,rules,rules-layer,always"
 # Алиасы задаются списком, а не строкой: `add_snippet` перебирает переданный `aliases`
 # итератором, и строка дала бы алиасы по одному символу (замер узла V60: 55 алиасов, из них
@@ -70,12 +75,12 @@ DB_ACCESS_ALIASES = [
     "пароль postgres", "PGPASSWORD", "роли PostgreSQL", "local_doc", "ckb_1c_configurations",
 ]
 
-CARD_DB_ACCESS = """===WHEN
+CARD_DB_ACCESS = f"""===WHEN
 Прямая работа с PostgreSQL: запуск `psql.exe`, запрос к базе правил и знаний, подключение из кода.
 Карточку поднимают до первой команды `psql`, а не после отказа подключения.
 
 ===TERMINAL
-    $env:PGPASSWORD='Sta090860'; C:\\Postgres\\bin\\psql.exe -U postgres -h localhost -tA -P footer=off
+    $env:PGPASSWORD='{SECRET}'; C:\\Postgres\\bin\\psql.exe -U postgres -h localhost -tA -P footer=off
 `-tA` - тихий режим, `footer=off` - постраничный вывод выключен. Роли `Buh` (имя Windows-пользователя,
 которое `psql.exe` подставляет по умолчанию) на сервере нет: без `-U postgres` подключение падает с
 `FATAL: password authentication failed for user "Buh"`, поэтому `-U postgres` обязателен в каждой

@@ -43,6 +43,12 @@ CARD_ADDRESS = "rules:kb-rules:functional:db-access"
 FALLBACK_RE = re.compile(
     r"""os\.environ\.(?:get|setdefault)\(\s*["']PGPASSWORD["']\s*,\s*["'][^"']+["']""")
 
+# Область поиска фолбэка — код подключения: `src/`, `tools/` и корневые скрипты. Каталог
+# `probes/` и документы из него сняты: текст зонда описывает прежний код и пересказывает сам
+# запрет словами, а не подключением. Литерал значения при этом ищется по всем отслеживаемым
+# файлам — секрету в реестре места нет ни в коде, ни в прозе.
+FALLBACK_SCOPES = ("src/", "tools/")
+
 
 def git(*args):
     return subprocess.run(("git",) + args, cwd=ROOT, capture_output=True,
@@ -111,11 +117,12 @@ def main():
             continue
         if secret in text:
             hits.append(rel)
-        if FALLBACK_RE.search(text):
-            fallbacks.append(rel)
+        if rel.endswith(".py") and ("/" not in rel or rel.startswith(FALLBACK_SCOPES)):
+            if FALLBACK_RE.search(text):
+                fallbacks.append(rel)
     check(not hits, f"литерала пароля нет в отслеживаемых файлах (проверено {len(files)})",
           "значение стоит в: " + ", ".join(hits[:8]) + ("…" if len(hits) > 8 else ""))
-    check(not fallbacks, "фолбэка пароля в коде нет",
+    check(not fallbacks, "фолбэка пароля в коде подключения нет (src/, tools/, корневые .py)",
           "фолбэк возвращает секрет в реестр: " + ", ".join(fallbacks[:8]))
 
     # 5. Карточка правила называет пароль.
