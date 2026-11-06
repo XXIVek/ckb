@@ -32,7 +32,7 @@ MIGRATION = os.path.join(ROOT, "sql", "migrate_v51_exchange_plans.sql")
 STEPS = ("src/ddl_external_report.sql", "src/ddl_enrichment.sql",
          "sql/create_1c_configurations_db.sql")
 PSQL = r"C:\Postgres\bin\psql.exe"
-ENV = {**os.environ, "PGPASSWORD": "Sta090860", "PGCLIENTENCODING": "UTF8"}
+ENV = {**os.environ, "PGCLIENTENCODING": "UTF8"}
 
 
 def psql(args):
@@ -77,7 +77,7 @@ def build(db, steps):
 def snapshot(db):
     import psycopg2
     conn = psycopg2.connect(host="localhost", dbname=db, user="postgres",
-                            password="Sta090860")
+                            password=os.environ["PGPASSWORD"])
     cur = conn.cursor()
     cur.execute("SELECT table_name, column_name, data_type, is_nullable, "
                 "COALESCE(column_default,'') FROM information_schema.columns "

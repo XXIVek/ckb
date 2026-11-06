@@ -58,7 +58,7 @@
 -- не меняет ничего.
 --
 -- Применение к живой БД:
---   $env:PGPASSWORD='Sta090860'; C:\Postgres\bin\psql.exe -U postgres -tA -P footer=off \
+--   $env:PGPASSWORD=(Get-Content .env | ConvertFrom-StringData).PGPASSWORD; C:\Postgres\bin\psql.exe -U postgres -tA -P footer=off \
 --     -v ON_ERROR_STOP=1 -d ckb_1c_configurations -f migrate_v42_configuration_header_fields.sql
 -- Проверка: `python _cmp_ddl.py` (шаг 2 против живой схемы) и
 -- `python _v41_three_configs_check.py` (паритет разбора и колонок заголовка).

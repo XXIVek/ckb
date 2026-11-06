@@ -12,6 +12,7 @@ WSReferences → WSReference) ломает обход молча.
 
 Запуск: python _v37_kind_dirs.py [путь_к_выгрузке] [configuration_id]
 """
+import os
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -42,7 +43,7 @@ def main():
 
     # 2. что обещает индекс состава
     conn = psycopg2.connect(dbname="ckb_1c_configurations", user="postgres",
-                            password="Sta090860", host="localhost")
+                            password=os.environ["PGPASSWORD"], host="localhost")
     cur = conn.cursor()
     cur.execute(
         "SELECT object_type, object_name, uuid::text FROM configuration_objects "

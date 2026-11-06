@@ -10,6 +10,7 @@
     python _v53_p5_db_check.py
 """
 from __future__ import annotations
+import os
 
 import sys
 from pathlib import Path
@@ -26,7 +27,7 @@ except Exception:
 import psycopg2  # noqa: E402
 
 DB = dict(host="localhost", dbname="ckb_1c_configurations", user="postgres",
-          password="Sta090860")
+          password=os.environ["PGPASSWORD"])
 
 # Имя папки выгрузки ≠ name строки заголовка БД (прецедент V52/V53 — соответствие установлено
 # замером П0 числом строк индекса состава вида).

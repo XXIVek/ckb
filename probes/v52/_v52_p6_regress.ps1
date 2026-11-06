@@ -2,7 +2,7 @@
 # Узел V52 пишет в общие таблицы детей (forms/form_ext/commands), поэтому контур V47–V51,
 # цепей ревизий и правок внешних объектов обязан остаться зелёным.
 $env:PGUSER = 'postgres'
-$env:PGPASSWORD = 'Sta090860'
+$env:PGPASSWORD=(Get-Content .env | ConvertFrom-StringData).PGPASSWORD
 $env:PYTHONIOENCODING = 'utf-8'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Set-Location 'C:\1C_LLM\ckb'

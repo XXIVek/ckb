@@ -88,7 +88,7 @@ def module_path(dump_dir, name, slot, cache=None):
 
 def main():
     conn = psycopg2.connect(host="localhost", user="postgres",
-                            password="Sta090860", dbname="ckb_1c_configurations")
+                            password=os.environ["PGPASSWORD"], dbname="ckb_1c_configurations")
     cur = conn.cursor(cursor_factory=RealDictCursor)
     cur.execute(
         "SELECT c.uuid::text AS cfg, c.name AS cfg_name, o.name, o.object_id "

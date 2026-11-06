@@ -15,7 +15,7 @@ cd C:\1C_LLM\ckb
 python validate_external_children.py           # инварианты V12/V13/V14 (код возврата 0)
 python validate_load_flow.py --with-load       # сценарии контракта загрузки (код возврата 0)
 python tools/restore_reference_pair.py         # вернуть эталонную пару в БД (валидаторы её чистят)
-$env:PGCLIENTENCODING='UTF8'; $env:PGPASSWORD='Sta090860'
+$env:PGCLIENTENCODING='UTF8'; $env:PGPASSWORD=(Get-Content .env | ConvertFrom-StringData).PGPASSWORD
 C:\Postgres\bin\psql.exe -v ON_ERROR_STOP=1 -U postgres -h localhost -d ckb_1c_configurations `
   -P pager=off -f check_external_report_fill.sql      -o _v15_fill_out.txt
 C:\Postgres\bin\psql.exe -v ON_ERROR_STOP=1 -U postgres -h localhost -d ckb_1c_configurations `

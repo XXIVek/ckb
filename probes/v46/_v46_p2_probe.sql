@@ -33,7 +33,7 @@
 -- `tools/check_v32_zero_configuration.py` (242 проверок, провалено 0, 28.10.2026).
 -- Файл оставлен как снимок шага П2 узла V46 без правки фикстур: это artifact узла, а не
 -- поддерживаемая регрессия (поддерживаемые проверки живут в `tools/check_*`).
--- Запуск: $env:PGPASSWORD='Sta090860'; C:\Postgres\bin\psql.exe -tA -P footer=off -U postgres -d ckb_1c_configurations -v ON_ERROR_STOP=1 -f _v46_p2_probe.sql
+-- Запуск: $env:PGPASSWORD=(Get-Content .env | ConvertFrom-StringData).PGPASSWORD; C:\Postgres\bin\psql.exe -tA -P footer=off -U postgres -d ckb_1c_configurations -v ON_ERROR_STOP=1 -f _v46_p2_probe.sql
 
 \set ON_ERROR_STOP on
 

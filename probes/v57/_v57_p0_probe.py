@@ -41,6 +41,7 @@
          python _v57_p0_probe.py MinCfg     # одна
 """
 
+import os
 import re
 import sys
 from collections import Counter, defaultdict
@@ -68,7 +69,7 @@ DUMP_TO_CONFIGURATION = {
     "BP3": "БухгалтерияПредприятия",
 }
 DB = dict(host="localhost", dbname="ckb_1c_configurations", user="postgres",
-          password="Sta090860")
+          password=os.environ["PGPASSWORD"])
 
 XSI_TYPE = "{http://www.w3.org/2001/XMLSchema-instance}type"
 XSI_NIL = "{http://www.w3.org/2001/XMLSchema-instance}nil"

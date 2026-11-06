@@ -19,6 +19,7 @@
          python _v52_q4_resolve_probe.py BGU2 BP3   # выборочно
 """
 
+import os
 import sys
 from collections import Counter
 from pathlib import Path
@@ -42,7 +43,7 @@ VIEW_DIR = "FilterCriteria"
 INDEX_NAME_SEPARATOR = "."
 MAX_EXAMPLES = 6
 DB = dict(host="localhost", dbname="ckb_1c_configurations", user="postgres",
-          password="Sta090860")
+          password=os.environ["PGPASSWORD"])
 
 
 def local(tag):

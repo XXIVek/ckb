@@ -18,7 +18,7 @@
 XML-выгрузки не сжат (CLI «python -m v8unpack -E» к нему неприменим — ждёт сжатые контейнеры).
 
 Запуск (для БД нужен доступ к ckb_1c_configurations):
-    $env:PGPASSWORD='Sta090860'
+    $env:PGPASSWORD=(Get-Content .env | ConvertFrom-StringData).PGPASSWORD
     python validate_form_bin_decode.py --file "C:\\1C_LLM\\LoadDoc\\Test2_Otchet\\PUBID_180946-СреднийВозрастОС\\Forms\\Отчет\\Ext\\Form.bin"
     python validate_form_bin_decode.py --uuid d364e104-e1ef-49e7-8163-d2ab726aaa96
     python validate_form_bin_decode.py --file <Form.bin> --uuid <uuid> --form Отчет --out _v14_module.bsl

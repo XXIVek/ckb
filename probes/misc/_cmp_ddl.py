@@ -35,7 +35,7 @@ BOOTSTRAP = r"C:\1C_LLM\ckb\sql\create_1c_configurations_db.sql"
 DDL = r"C:\1C_LLM\ckb\src\ddl_external_report.sql"
 DDL_ENRICHMENT = r"C:\1C_LLM\ckb\src\ddl_enrichment.sql"
 PSQL = r"C:\Postgres\bin\psql.exe"
-ENV = {**os.environ, "PGPASSWORD": "Sta090860", "PGCLIENTENCODING": "UTF8"}
+ENV = {**os.environ, "PGCLIENTENCODING": "UTF8"}
 
 
 def psql_run(args):
@@ -45,7 +45,7 @@ def psql_run(args):
 
 def snapshot(dbname):
     conn = psycopg2.connect(host="localhost", dbname=dbname, user="postgres",
-                            password="Sta090860")
+                            password=os.environ["PGPASSWORD"])
     cur = conn.cursor()
     # таблицы и витрины — колонками (у витрин information_schema тоже отдаёт колонки)
     cur.execute(

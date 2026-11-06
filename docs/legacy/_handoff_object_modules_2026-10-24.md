@@ -269,7 +269,7 @@ form_module`. Если `ManagerModule` внешних объектов тоже 
 python _v47s_cmdpath.py            # образец вывода: _v47s_cmdpath.txt
 
 # SQL-замеры по живой БД (шаблоны в репозитории, вывод в файл)
-$env:PGPASSWORD='Sta090860'; $env:PGCLIENTENCODING='UTF8'
+$env:PGPASSWORD=(Get-Content .env | ConvertFrom-StringData).PGPASSWORD; $env:PGCLIENTENCODING='UTF8'
 C:\Postgres\bin\psql.exe -h localhost -U postgres -d ckb_1c_configurations `
   -v ON_ERROR_STOP=1 -f _v47v_check.sql -o _v47v_check.txt   # инварианты name / object_name / owner-uuid
 C:\Postgres\bin\psql.exe -h localhost -U postgres -d ckb_1c_configurations `

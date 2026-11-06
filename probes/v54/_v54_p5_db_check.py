@@ -12,6 +12,7 @@
     python _v54_p5_db_check.py
 """
 from __future__ import annotations
+import os
 
 import sys
 from pathlib import Path
@@ -28,7 +29,7 @@ except Exception:
 import psycopg2  # noqa: E402
 
 DB = dict(host="localhost", dbname="ckb_1c_configurations", user="postgres",
-          password="Sta090860")
+          password=os.environ["PGPASSWORD"])
 
 QUERIES = [
     ("колонки scheduled_jobs", """

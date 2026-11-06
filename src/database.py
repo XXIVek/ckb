@@ -12,15 +12,15 @@ import psycopg2
 import psycopg2.pool
 import psycopg2.extras
 
+from db_env import db_params
 
-# Конфигурация подключения к PostgreSQL
-DB_CONFIG = {
-    'host': 'localhost',
-    'port': 5432,
-    'dbname': 'local_doc',
-    'user': 'postgres',
-    'password': 'Sta090860',
-}
+# Конфигурация подключения к PostgreSQL (узел V60, 06.11.2026).
+# Значения держит `src/db_env.py`: переменные `PG*` процесса, затем файл `.env` в корне
+# проекта (вне репозитория). Литерала пароля в коде больше нет — до узла то же значение
+# встречалось в 53 отслеживаемых файлах и попадало в историю git. Значение для прямой
+# работы оператора в `psql` ведёт карточка правил `rules:db-access`.
+DB_NAME = 'local_doc'
+DB_CONFIG = db_params(DB_NAME)
 
 # Пул соединений (для многопоточности)
 _connection_pool: Optional[psycopg2.pool.SimpleConnectionPool] = None
@@ -174,7 +174,7 @@ def init_database():
     Вызывать при первом запуске или обновлении схемы.
     """
     # Подключаемся к default database 'postgres' для создания БД
-    conn = psycopg2.connect(host='localhost', port=5432, dbname='postgres', user='postgres', password='Sta090860')
+    conn = psycopg2.connect(**db_params('postgres'))
     conn.autocommit = True
     cur = conn.cursor()
 

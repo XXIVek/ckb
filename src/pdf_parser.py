@@ -8,6 +8,8 @@ import os
 import sys
 from pathlib import Path
 
+from db_env import db_params
+
 if sys.platform == 'win32':
     import io
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -68,7 +70,7 @@ def batch_load_pdfs(folder_path=None):
         print(f"PDF файлы не найдены в: {folder_path}")
         sys.exit(1)
     
-    conn = psycopg2.connect(host='localhost', port=5432, dbname='local_doc', user='postgres', password='Sta090860')
+    conn = psycopg2.connect(**db_params("local_doc"))
     cur = conn.cursor()
     cur.execute('SELECT title FROM docs WHERE local_path IS NOT NULL')
     existing_titles = set(r[0] for r in cur.fetchall())
@@ -110,7 +112,7 @@ def batch_load_pdfs(folder_path=None):
             print(f"  Исключение: {e}")
         print()
     
-    conn = psycopg2.connect(host='localhost', port=5432, dbname='local_doc', user='postgres', password='Sta090860')
+    conn = psycopg2.connect(**db_params("local_doc"))
     cur = conn.cursor()
     cur.execute('SELECT COUNT(*) FROM docs'); docs_count = cur.fetchone()[0]
     cur.execute('SELECT COUNT(*) FROM doc_fragments'); frags_count = cur.fetchone()[0]

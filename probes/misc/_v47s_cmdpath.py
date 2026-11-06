@@ -63,7 +63,7 @@ def dump_root_uuid(dump_dir):
 
 def main():
     conn = psycopg2.connect(host="localhost", user="postgres",
-                            password="Sta090860", dbname="ckb_1c_configurations")
+                            password=os.environ["PGPASSWORD"], dbname="ckb_1c_configurations")
     cur = conn.cursor()
     cur.execute("SELECT id, uuid::text FROM configurations")
     headers = {i: (u or "").lower() for i, u in cur.fetchall()}

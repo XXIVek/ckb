@@ -24,7 +24,7 @@ V43 = list(header_array_columns())
 
 def main():
     conn = psycopg2.connect(dbname="ckb_1c_configurations", user="postgres",
-                            password="Sta090860", host="127.0.0.1")
+                            password=os.environ["PGPASSWORD"], host="127.0.0.1")
     cur = conn.cursor()
     cur.execute("""
         SELECT column_name FROM information_schema.columns

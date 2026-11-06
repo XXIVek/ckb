@@ -28,7 +28,7 @@ import re
 import sys
 
 os.environ["PGUSER"] = "postgres"
-os.environ.setdefault("PGPASSWORD", "Sta090860")
+# PGPASSWORD берётся из окружения процесса (значение ведёт файл .env, карточка правил `rules:db-access`)
 HERE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(HERE, "src"))
 

@@ -49,6 +49,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "probes" / "v59"))
+from db_env import subprocess_env  # noqa: E402  (узел V60: значения подключения из .env)
 
 from configuration_position_spec import (  # noqa: E402
     EXPORTS, FRAME_NODE, MEASURE_DATE, ordered_specs, position_ddl, expected_total,
@@ -84,7 +85,7 @@ def note(kind: str, title: str, detail: str = "") -> None:
 
 def psql(query: str) -> list:
     """Строки ответа базы. Роль `postgres` названа явно: роли Windows-пользователя нет."""
-    env = dict(os.environ, PGPASSWORD="Sta090860")
+    env = subprocess_env()
     result = subprocess.run(
         [PSQL, "-U", "postgres", "-h", "localhost", "-tA", "-P", "pager=off",
          "-P", "footer=off", "-d", DATABASE, "-c", query],

@@ -6,6 +6,7 @@
 
 Запуск: python _v37_ref_probe.py [id_внешнего_объекта]
 """
+import os
 import collections
 import re
 import sys
@@ -18,7 +19,7 @@ PAT = re.compile(r"(?:cfg:|d4p1:)([A-Za-z][A-Za-z0-9]*\.[^\s\"'<>&]+)")
 def main():
     obj_id = int(sys.argv[1]) if len(sys.argv) > 1 else 505
     conn = psycopg2.connect(dbname="ckb_1c_configurations", user="postgres",
-                            password="Sta090860", host="localhost")
+                            password=os.environ["PGPASSWORD"], host="localhost")
     cur = conn.cursor()
     cur.execute("SELECT uuid, name, object_kind FROM external_report WHERE id=%s", (obj_id,))
     row = cur.fetchone()

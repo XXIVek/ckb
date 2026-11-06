@@ -82,7 +82,7 @@ list_configurations_tool(status='indexed')
 
 **Через psql:**
 ```powershell
-$env:PGPASSWORD='Sta090860'; C:\Postgres\bin\psql.exe -U postgres -d configurations -c "SELECT id, name, version, status, created_at FROM configuration ORDER BY created_at DESC LIMIT 5;"
+$env:PGPASSWORD=(Get-Content .env | ConvertFrom-StringData).PGPASSWORD; C:\Postgres\bin\psql.exe -U postgres -d configurations -c "SELECT id, name, version, status, created_at FROM configuration ORDER BY created_at DESC LIMIT 5;"
 ```
 
 ### Получение помощи

@@ -6,6 +6,7 @@ V52 считает строки `filter_criteria` MinCfg, и если их не�
 предыдущего прогона конвейера, а не текст проверки. Скрипт только читает.
 """
 from __future__ import annotations
+import os
 
 import sys
 from pathlib import Path
@@ -22,7 +23,7 @@ except Exception:
 import psycopg2  # noqa: E402
 
 DB = dict(host="localhost", dbname="ckb_1c_configurations", user="postgres",
-          password="Sta090860")
+          password=os.environ["PGPASSWORD"])
 
 KINDS = [
     ("session_parameters", "session_parameters"),

@@ -5,6 +5,7 @@ configurations по 33 колонкам узла V42 для КАЖДОГО за�
 источника (провенанса строк конфигурации нет, решение D-C) - поэтому сопоставление идёт по
 uuid строки с разбором того же Configuration.xml из XML_files.
 """
+import os
 import sys
 from pathlib import Path
 
@@ -33,7 +34,7 @@ XML_ROOT = Path(r"C:\1C_LLM\LoadDoc\Configurations\XML_files")
 
 def main():
     conn = psycopg2.connect(dbname="ckb_1c_configurations", user="postgres",
-                            password="Sta090860", host="localhost")
+                            password=os.environ["PGPASSWORD"], host="localhost")
     with conn.cursor() as cur:
         cur.execute("SELECT id, name, uuid, to_jsonb(c) FROM configurations c ORDER BY id")
         rows = cur.fetchall()

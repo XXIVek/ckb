@@ -3,6 +3,7 @@
 Зонд только читает. Нужен ровно один ответ: фикстура на диске новее загруженной
 строки или нет (предупреждение handoff про `configurations id=244`).
 """
+import os
 import re
 
 import psycopg2
@@ -20,7 +21,7 @@ mods = [n for n, _ in rows if n.rsplit(".", 1)[-1] in SLOTS]
 print(f"  модульных записей шести слотов: {len(mods)}")
 
 conn = psycopg2.connect(host="localhost", user="postgres",
-                        password="Sta090860", dbname="ckb_1c_configurations")
+                        password=os.environ["PGPASSWORD"], dbname="ckb_1c_configurations")
 cur = conn.cursor()
 cur.execute("SELECT count(*) FROM configuration_objects WHERE configuration_id=244")
 db_total = cur.fetchone()[0]

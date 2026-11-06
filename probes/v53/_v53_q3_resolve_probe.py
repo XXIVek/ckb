@@ -21,6 +21,7 @@
          python _v53_q3_resolve_probe.py MinCfg     # одна
 """
 
+import os
 import sys
 from collections import Counter
 from pathlib import Path
@@ -50,7 +51,7 @@ DUMP_TO_CONFIGURATION = {
 VIEW_DIR = "EventSubscriptions"
 MAX_EXAMPLES = 8
 DB = dict(host="localhost", dbname="ckb_1c_configurations", user="postgres",
-          password="Sta090860")
+          password=os.environ["PGPASSWORD"])
 
 # Квалификатор `cfg:<Класс>` → вид метаданных индекса состава. Замер П0 назвал 30 классов по
 # корпусу; словарь закрыт именно ими, а не списком платформы: неизвестный класс называется

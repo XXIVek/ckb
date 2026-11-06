@@ -39,7 +39,7 @@ from psycopg2.extras import register_uuid
 # 'UUID'»), а строки круга ключуются именно uuid'ами конфигурации и объекта.
 register_uuid()
 
-HOST, USER, PASSWORD = "localhost", "postgres", "Sta090860"
+HOST, USER, PASSWORD = "localhost", "postgres", os.environ["PGPASSWORD"]
 TEMP_DB = "v55_syntax_check"
 MIGRATION = r"C:\1C_LLM\ckb\migrate_v55_bots.sql"
 PSQL = r"C:\Postgres\bin\psql.exe"

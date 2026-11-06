@@ -1,9 +1,10 @@
+import os
 import sys; sys.path.insert(0, 'src')
 from pathlib import Path
 import psycopg2
 ROOT = Path(r'C:\1C_LLM\LoadDoc\Configurations\XML_files\BGU2')
 DIRS = {'Catalog': 'Catalogs'}
-conn = psycopg2.connect(dbname='ckb_1c_configurations', user='postgres', password='Sta090860', host='localhost')
+conn = psycopg2.connect(dbname='ckb_1c_configurations', user='postgres', password=os.environ["PGPASSWORD"], host='localhost')
 cur = conn.cursor()
 cur.execute("""SELECT name, object_name, object_id FROM configuration_objects
                WHERE configuration_id=242 AND depth=2 AND child_type='CommandModule'""")

@@ -6,6 +6,7 @@ import subprocess
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from db_env import subprocess_env
 from external_db import transaction
 from external_meta_parser import parse_external_meta
 # Узел V19 (M1–M5, S1–S5): версионность состояний. Единая точка доступа к «текущему» —
@@ -57,8 +58,7 @@ def _run_psql(query, db="ckb_1c_configurations"):
     """Execute SQL query on ckb_1c_configurations database."""
     # Используем stdin для передачи SQL — это наиболее надёжный способ на Windows
     cmd = [r"C:\Postgres\bin\psql.exe", "-U", "postgres", "-d", db, "-h", "localhost", "-tA"]
-    env = dict(os.environ)
-    env["PGPASSWORD"] = "Sta090860"
+    env = subprocess_env()
     # Критически важно: PGCLIENTENCODING=UTF8 для корректной передачи русских символов
     env["PGCLIENTENCODING"] = "UTF8"
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
@@ -133,8 +133,7 @@ def _psql_fields(query, db="ckb_1c_configurations"):
     Возвращает список списков либо {"error": ...}.
     """
     cmd = [r"C:\Postgres\bin\psql.exe", "-U", "postgres", "-d", db, "-h", "localhost", "-tA"]
-    env = dict(os.environ)
-    env["PGPASSWORD"] = "Sta090860"
+    env = subprocess_env()
     # Критически важно: PGCLIENTENCODING=UTF8 для корректной передачи русских символов
     env["PGCLIENTENCODING"] = "UTF8"
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)

@@ -53,6 +53,12 @@ import time
 from datetime import date, datetime
 from pathlib import Path
 
+# src/db_env.py - единственный источник значений подключения (узел V60). Модуль лежит в
+# `src`, поэтому путь к нему добавляется здесь, как в других прогонах каталога `tools/`.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+from db_env import pg_password  # noqa: E402
+
 # Каталог архива задаётся здесь, а не в аргументах запуска: точки отката лежат в одном
 # месте с описанием процедуры (C:\1C_LLM\Arhiv_BD), случайный путь дал бы вторую
 # невзаимосвязанную россыпь дампов.
@@ -61,12 +67,14 @@ MANIFEST_NAME = "manifest.tsv"
 DESC_PREFIX = "RESTORE_"          # описание точки: RESTORE_<база>.md
 DEFAULT_COMPRESS = 0              # см. шапку: сборка pg_dump без поддержки gzip
 
-# Пути и учётные данные — те же, что в правилах ассистента (.clinerules/1C_Rule.md).
+# Пути берутся из окружения, значение пароля - из src/db_env.py (узел V60): файла `.env`
+# или переменных процесса. Литерала пароля здесь нет, поэтому вызов бросает понятную
+# ошибку, если значение не задано, а не молча подставляет секрет из кода.
 PG_BIN = Path(os.environ.get("PG_BIN", r"C:\Postgres\bin"))
 PG_HOST = os.environ.get("PGHOST", "localhost")
 PG_PORT = os.environ.get("PGPORT", "5432")
 PG_USER = os.environ.get("PGUSER", "postgres")
-PG_PASSWORD = os.environ.get("PGPASSWORD", "Sta090860")
+PG_PASSWORD = pg_password()
 
 PROJECT_DBS = ("ckb_1c_configurations", "local_doc")
 SCHEMA = "public"
@@ -448,7 +456,7 @@ RESTORE_VARIANTS = """## Как восстановить при проблема
 ### Вариант 1 — заменить испорченную базу этой копией
 
 ```powershell
-$env:PGPASSWORD='Sta090860'
+$env:PGPASSWORD=(Get-Content .env | ConvertFrom-StringData).PGPASSWORD
 C:\\Postgres\\bin\\dropdb.exe -U postgres -h localhost {db}
 C:\\Postgres\\bin\\createdb.exe -U postgres -h localhost -T template0 -E UTF8 `
     --lc-collate='{collate}' --lc-ctype='{ctype}' {db}
@@ -554,7 +562,7 @@ def point_section(db: str, info: dict, dump_meta: dict, digest: str, toc: dict,
         "даёт `invalid compression specification` (замер 24.10.2026).\n\n"
         "### Команда создания\n\n"
         "```powershell\n"
-        "$env:PGPASSWORD='Sta090860'\n"
+        "$env:PGPASSWORD=(Get-Content .env | ConvertFrom-StringData).PGPASSWORD\n"
         f"C:\\Postgres\\bin\\pg_dump.exe -U postgres -h {PG_HOST} -p {PG_PORT} -d {db} "
         f"-Fc -Z0 `\n    -f {path}\n```\n\n"
         f"### Контрольные счётчики на момент снятия ({day} "

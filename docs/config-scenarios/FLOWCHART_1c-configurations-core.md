@@ -750,7 +750,7 @@ bsl_modules` обрывали создание на первой таблице 
 
 ```powershell
 # чистая установка (после CREATE DATABASE) — ровно три шага в этом порядке
-$env:PGCLIENTENCODING='UTF8'; $env:PGPASSWORD='Sta090860'
+$env:PGCLIENTENCODING='UTF8'; $env:PGPASSWORD=(Get-Content .env | ConvertFrom-StringData).PGPASSWORD
 C:\Postgres\bin\psql.exe -v ON_ERROR_STOP=1 -U postgres -h localhost -d ckb_1c_configurations -f src/ddl_external_report.sql
 C:\Postgres\bin\psql.exe -v ON_ERROR_STOP=1 -U postgres -h localhost -d ckb_1c_configurations -f src/ddl_enrichment.sql
 C:\Postgres\bin\psql.exe -v ON_ERROR_STOP=1 -U postgres -h localhost -d ckb_1c_configurations -f create_1c_configurations_db.sql
@@ -949,7 +949,7 @@ n_commands=1`; «форм с незаполненным составом = 0»; 
 ### Проверка состояния БД после загрузки:
 
 ```powershell
-$env:PGPASSWORD='Sta090860'; $env:PGCLIENTENCODING='UTF8'; C:\Postgres\bin\psql.exe -U postgres -h localhost -d ckb_1c_configurations -tA -P footer=off `
+$env:PGPASSWORD=(Get-Content .env | ConvertFrom-StringData).PGPASSWORD; $env:PGCLIENTENCODING='UTF8'; C:\Postgres\bin\psql.exe -U postgres -h localhost -d ckb_1c_configurations -tA -P footer=off `
   -c "SELECT e.id, e.uuid, e.name,
       (SELECT COUNT(*) FROM attributes a WHERE a.parent_uuid = e.uuid),
       (SELECT COUNT(*) FROM tabular_sections t WHERE t.parent_uuid = e.uuid),
@@ -963,7 +963,7 @@ $env:PGPASSWORD='Sta090860'; $env:PGCLIENTENCODING='UTF8'; C:\Postgres\bin\psql.
 Сироты (потомки без родителя) и дубли форм/макетов:
 
 ```powershell
-$env:PGPASSWORD='Sta090860'; $env:PGCLIENTENCODING='UTF8'; C:\Postgres\bin\psql.exe -U postgres -h localhost -d ckb_1c_configurations -tA -P footer=off `
+$env:PGPASSWORD=(Get-Content .env | ConvertFrom-StringData).PGPASSWORD; $env:PGCLIENTENCODING='UTF8'; C:\Postgres\bin\psql.exe -U postgres -h localhost -d ckb_1c_configurations -tA -P footer=off `
   -c "SELECT 'form_ext без формы', COUNT(*) FROM form_ext fe LEFT JOIN forms f ON f.id = fe.form_id WHERE f.id IS NULL
       UNION ALL SELECT 'bsl без родителя', COUNT(*) FROM bsl_modules b LEFT JOIN external_report e ON e.uuid = b.parent_uuid WHERE b.parent_uuid IS NOT NULL AND e.uuid IS NULL
       UNION ALL SELECT 'дубли форм', COUNT(*) FROM (SELECT parent_uuid, uuid FROM forms GROUP BY 1,2 HAVING COUNT(*) > 1) d"
@@ -980,7 +980,7 @@ $env:PGPASSWORD='Sta090860'; $env:PGCLIENTENCODING='UTF8'; C:\Postgres\bin\psql.
 | `check_external_report_inventory.sql` | отчёт-инвентарь «что видно из БД без распаковки `Form.bin`», разделы 0–14: карточка объекта, реквизиты/ТЧ (9c–9e — каст `attributes.type::jsonb`, сводка типов, стандартные реквизиты ТЧ), **7** — классификация состояния ordinary-форм (после V14/V15 ожидается `OK` со счётчиками `n_items`/`n_attributes`/`n_events`/`n_commands` = 10/4/1/1 для `Test2_Otchet`), формы и их наполнение, модули с типами и числом объявлений, витрины по обоим типам форм (10–10e), макеты с `template_type`/`ext_root_tag` и различимостью содержимого (14), заполненность второстепенных колонок с пояснением «пусто по источнику» или «не разобрано» (12), атрибуты и команды формы (13), слепые зоны (11 — после V15 пустой состав больше не слепая зона, остаются скалярные свойства и заголовок ordinary-формы), целостность (сироты/дубли). Источник отчёта [ANALYSIS_2026-10-13_content_inventory.md](ANALYSIS_2026-10-13_content_inventory.md); ревизия инструментов — [TOOLS_REVISION_2026-10-13.md](TOOLS_REVISION_2026-10-13.md); стратегия обогащения — [CONFIGURATIONS_ENRICHMENT_PLAN.md](../CONFIGURATIONS_ENRICHMENT_PLAN.md) |
 
 ```powershell
-$env:PGCLIENTENCODING='UTF8'; $env:PGPASSWORD='Sta090860'
+$env:PGCLIENTENCODING='UTF8'; $env:PGPASSWORD=(Get-Content .env | ConvertFrom-StringData).PGPASSWORD
 C:\Postgres\bin\psql.exe -v ON_ERROR_STOP=1 -U postgres -h localhost -d ckb_1c_configurations -P pager=off `
   -f check_external_report_fill.sql -o _v15_fill_out.txt      # результат пишем в файл (-o),
 C:\Postgres\bin\psql.exe -v ON_ERROR_STOP=1 ... `

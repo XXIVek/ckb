@@ -80,7 +80,7 @@ def read_state():
         summary = MC.section_text(answer, "SUMMARY")
         general = MC.section_text(answer, "MCP")
         links = MC.section_text(answer, "LINKS")
-        generated = MC.mcp_section(cur)
+        generated = MC.mcp_section()
         children = MC.children_rows(cur)
         cur.execute("SELECT count(*) c FROM knowledge_snippets WHERE question LIKE 'kb-rules:%%' "
                     "AND source_url NOT LIKE %s", ("rules-layer://rules:%",))

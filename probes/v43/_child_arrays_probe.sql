@@ -15,7 +15,7 @@
 --   K4  уникальны ли имена внутри вида в пределах одной конфигурации (массив имён обязан
 --       быть однозначным);
 --   K5  как индекс моделирует нумераторы и последовательности (имя короткое неоднозначно).
--- Запуск: $env:PGPASSWORD='Sta090860'; C:\Postgres\bin\psql.exe -h localhost -U postgres -d ckb_1c_configurations -v ON_ERROR_STOP=1 -tA -P footer=off -f _child_arrays_probe.sql
+-- Запуск: $env:PGPASSWORD=(Get-Content .env | ConvertFrom-StringData).PGPASSWORD; C:\Postgres\bin\psql.exe -h localhost -U postgres -d ckb_1c_configurations -v ON_ERROR_STOP=1 -tA -P footer=off -f _child_arrays_probe.sql
 
 \set ON_ERROR_STOP on
 

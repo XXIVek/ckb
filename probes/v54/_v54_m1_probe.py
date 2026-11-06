@@ -26,6 +26,7 @@ BP3) и V53 (162 uuid и 192 имени общие у BGU2 и BP3). К пози�
          python _v54_m1_probe.py MinCfg     # одна
 """
 from __future__ import annotations
+import os
 
 import re
 import sys
@@ -52,7 +53,7 @@ DUMP_TO_CONFIGURATION = {
     "BP3": "БухгалтерияПредприятия",
 }
 DB = dict(host="localhost", dbname="ckb_1c_configurations", user="postgres",
-          password="Sta090860")
+          password=os.environ["PGPASSWORD"])
 
 UUID_RE = re.compile(r'^\s*<ScheduledJob\s+uuid="([0-9a-fA-F-]{36})"', re.MULTILINE)
 # Нога вида: id — ровно 36 символов (дочерняя запись оканчивается на `.0`, её этот

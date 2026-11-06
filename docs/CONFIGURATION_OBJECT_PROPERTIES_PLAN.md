@@ -231,7 +231,7 @@ configuration_id = %s`, строки 314–316). `src/config_load_router.py` п�
 и колонки витрин; `-P pager=off` убирает разделитель вывода):
 
 ```text
-$env:PGPASSWORD='Sta090860'; C:\Postgres\bin\psql.exe -U postgres -h localhost -d ckb_1c_configurations `
+$env:PGPASSWORD=(Get-Content .env | ConvertFrom-StringData).PGPASSWORD; C:\Postgres\bin\psql.exe -U postgres -h localhost -d ckb_1c_configurations `
   -tA -P footer=off -P pager=off `
   -c "SELECT count(*) FILTER (WHERE has_revision) AS tables_with_revision,
          count(*) FILTER (WHERE has_revision AND has_commit) AS revision_and_commit
@@ -261,7 +261,7 @@ D12 от 28.10.2026**: загрузка подтверждает строку (`
 созданной правкой в базе (замер 2.8).
 
 ```text
-$env:PGPASSWORD='Sta090860'; $env:PGCLIENTENCODING='UTF8'
+$env:PGPASSWORD=(Get-Content .env | ConvertFrom-StringData).PGPASSWORD; $env:PGCLIENTENCODING='UTF8'
 C:\Postgres\bin\psql.exe -U postgres -h localhost -d ckb_1c_configurations -tA -P footer=off `
   -c "SELECT (SELECT count(*) FROM information_schema.tables WHERE table_schema='public'),
          (SELECT count(*) FROM information_schema.views WHERE table_schema='public'),

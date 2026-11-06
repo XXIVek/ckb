@@ -11,7 +11,7 @@
 --      (`role_rights`), строки индекса состава с `child_type='FilterCriterion'`.
 --
 -- Запуск:
---   $env:PGPASSWORD='Sta090860'; C:\Postgres\bin\psql.exe -tA -P footer=off -U postgres \
+--   $env:PGPASSWORD=(Get-Content .env | ConvertFrom-StringData).PGPASSWORD; C:\Postgres\bin\psql.exe -tA -P footer=off -U postgres \
 --       -d ckb_1c_configurations -f _v52_p0_db_probe.sql
 
 \pset footer off

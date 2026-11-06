@@ -103,7 +103,7 @@ python -c "import sys;sys.path.insert(0,'src');import current_revision as c;prin
 
 # к запросу ниже обязателен префикс и пользователь: без `-U postgres` psql подключается под
 # именем учётной записи ОС и отвечает отказом аутентификации — это не «ноль строк»
-$env:PGPASSWORD='Sta090860'; $env:PGCLIENTENCODING='UTF8'
+$env:PGPASSWORD=(Get-Content .env | ConvertFrom-StringData).PGPASSWORD; $env:PGCLIENTENCODING='UTF8'
 C:\Postgres\bin\psql.exe -U postgres -h localhost -d ckb_1c_configurations -tA -P footer=off `
   -c "SELECT (SELECT count(*) FROM information_schema.tables WHERE table_schema='public') AS tables,
          (SELECT count(*) FROM information_schema.views WHERE table_schema='public') AS views,

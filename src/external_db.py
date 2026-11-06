@@ -17,18 +17,19 @@ from contextlib import contextmanager
 import psycopg2
 import psycopg2.extras  # noqa: F401  (нужен писателям: execute_values, Json)
 
+from db_env import db_params
+
 DB_NAME = "ckb_1c_configurations"
 
 
 def db_config(dbname=None):
-    """Параметры подключения (dbname по умолчанию - ckb_1c_configurations; значения - рабочие)."""
-    return {
-        "host": os.environ.get("PGHOST", "localhost"),
-        "port": int(os.environ.get("PGPORT", "5432")),
-        "dbname": dbname or DB_NAME,
-        "user": os.environ.get("PGUSER", "postgres"),
-        "password": os.environ.get("PGPASSWORD", "Sta090860"),
-    }
+    """Параметры подключения (dbname по умолчанию - ckb_1c_configurations).
+
+    Значения держит `src/db_env.py` (узел V60, 06.11.2026): переменные `PG*` процесса,
+    затем файл `.env` в корне проекта. Фолбэка на литерал пароля здесь больше нет - именно
+    он держал секрет в репозитории даже при заданном окружении.
+    """
+    return db_params(dbname or DB_NAME)
 
 
 def connect(dbname=None):

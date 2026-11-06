@@ -40,6 +40,7 @@
          python _v58_p0_probe.py MinCfg     # одна
 """
 
+import os
 import re
 import sys
 from collections import Counter, defaultdict
@@ -65,7 +66,7 @@ DUMP_TO_CONFIGURATION = {
     "BP3": "БухгалтерияПредприятия",
 }
 DB = dict(host="localhost", dbname="ckb_1c_configurations", user="postgres",
-          password="Sta090860")
+          password=os.environ["PGPASSWORD"])
 
 XSI_NIL = "{http://www.w3.org/2001/XMLSchema-instance}nil"
 UUID_RE = re.compile(r'^\s*<' + VIEW_TAG + r'\s+uuid="([0-9a-fA-F-]{36})"', re.MULTILINE)

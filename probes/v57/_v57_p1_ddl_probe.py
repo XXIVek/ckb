@@ -47,7 +47,7 @@ from psycopg2.extras import register_uuid
 
 register_uuid()
 
-HOST, USER, PASSWORD = "localhost", "postgres", "Sta090860"
+HOST, USER, PASSWORD = "localhost", "postgres", os.environ["PGPASSWORD"]
 TEMP_DB = "v57_syntax_check"
 MIGRATION = r"C:\1C_LLM\ckb\migrate_v57_functional_options_parameters.sql"
 PSQL = r"C:\Postgres\bin\psql.exe"

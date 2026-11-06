@@ -74,6 +74,15 @@ ALLOWED_ROOT_FILES = {
     "validate_pdf_whole_file.py",
 }
 
+# Файлы значений: не точки входа, а конфигурация окружения прогона. Класс назван отдельно, потому
+# что положить их в ALLOWED_ROOT_FILES — значит соврать, что их запускают: их читают. `.env` держит
+# значения и в репозиторий не входит (узел V60, 06.11.2026), `.env.example` — отслеживаемый шаблон
+# без значений. Единственная точка чтения значений — `src/db_env.py`.
+ROOT_VALUE_FILES = {
+    ".env": "значения подключения к PostgreSQL (вне репозитория, читает src/db_env.py)",
+    ".env.example": "шаблон файла значений (отслеживается, значений не держит)",
+}
+
 # Куда проверка отправляет лишний файл — по тому же разделению, которое описывает `.gitignore`
 # и `probes/README.md`. Подсказка обязана называть место, а не «удалите это».
 WHERE_BY_KIND = (
@@ -126,17 +135,26 @@ def where_should_it_be(name: str) -> str:
 
 
 def check_root_files(out) -> tuple[int, int]:
-    """Файлы корня: только точки входа."""
+    """Файлы корня: точки входа и названный класс файлов значений; остальное — провал."""
     total = failed = 0
+    values = []
     for p in sorted(ROOT.iterdir()):
         if not p.is_file():
             continue
         total += 1
         if p.name in ALLOWED_ROOT_FILES:
             continue
+        if p.name in ROOT_VALUE_FILES:
+            values.append(p.name)
+            continue
         failed += 1
         out(f"  FAIL  файл корня вне перечня точек входа: {p.name}")
         out(f"        место: {where_should_it_be(p.name)}")
+    if values:
+        # Класс назван числом и назначением: молча пропущенный файл значений неотличим от
+        # пропущенного хлама, а именно это и проверялось в разборе 05.11.2026.
+        out(f"  INFO  файлы значений в корне: {len(values)} — "
+          + "; ".join(f"{name} ({ROOT_VALUE_FILES[name]})" for name in values))
     return total, failed
 
 

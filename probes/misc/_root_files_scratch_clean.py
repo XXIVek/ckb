@@ -19,6 +19,7 @@
 и отсутствие ссылки в тексте это не проверяет.
 """
 
+import os
 import re
 import shutil
 import subprocess
@@ -78,7 +79,7 @@ def refs_db():
     found = set()
     for db in DBS:
         conn = psycopg2.connect(host="localhost", dbname=db, user="postgres",
-                                password="Sta090860")
+                                password=os.environ["PGPASSWORD"])
         try:
             with conn, conn.cursor() as cur:
                 cur.execute(SQL[db])

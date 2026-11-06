@@ -9,7 +9,7 @@
 --   docs/config-scenarios/ANALYSIS_2026-10-13_content_inventory.md
 --
 -- Запуск (метки разделов печатает SQL, \echo в -o файл не пишется):
---   $env:PGCLIENTENCODING='UTF8'; $env:PGPASSWORD='Sta090860'
+--   $env:PGCLIENTENCODING='UTF8'; $env:PGPASSWORD=(Get-Content .env | ConvertFrom-StringData).PGPASSWORD
 --   C:\Postgres\bin\psql.exe -v ON_ERROR_STOP=1 -U postgres -h localhost `
 --     -d ckb_1c_configurations -P pager=off -f check_external_report_inventory.sql `
 --     -o _v15_inventory_out.txt

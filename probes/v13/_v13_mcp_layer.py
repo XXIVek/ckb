@@ -11,6 +11,7 @@ with DB counters and orphan checks between steps.
 удаления — не оставаться.
 Запуск: python _v13_mcp_layer.py
 """
+import os
 import sys
 from pathlib import Path
 
@@ -37,7 +38,7 @@ PARENTS = "(SELECT uuid FROM external_report)"
 
 def q(sql, params=None):
     conn = psycopg2.connect(dbname="ckb_1c_configurations", user="postgres",
-                            password="Sta090860", host="localhost")
+                            password=os.environ["PGPASSWORD"], host="localhost")
     cur = conn.cursor()
     cur.execute(sql, params or ())
     rows = cur.fetchall()

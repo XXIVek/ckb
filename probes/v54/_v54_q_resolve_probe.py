@@ -24,6 +24,7 @@
 Зонд только читает. Запуск:  python _v54_q_resolve_probe.py [MinCfg ...]
 """
 from __future__ import annotations
+import os
 
 import re
 import sys
@@ -47,7 +48,7 @@ DUMPS: Tuple[str, ...] = ("MinCfg", "KomMag", "BGU2", "BP3")
 VIEW_DIR = "ScheduledJobs"
 MAX_EXAMPLES = 6
 DB = dict(host="localhost", dbname="ckb_1c_configurations", user="postgres",
-          password="Sta090860")
+          password=os.environ["PGPASSWORD"])
 # Соответствие имени папки и строки заголовка БД установлено замером круга (П0/M1):
 # число файлов совпало с числом строк индекса и с длиной перечня заголовка
 # (2↔MinCfg, 1↔KomMag, 157↔BGU2, 186↔BP3), а не предполагалось по названию папки.

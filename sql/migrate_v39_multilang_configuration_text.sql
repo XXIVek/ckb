@@ -30,7 +30,7 @@
 -- тип нечем и второй контракт здесь не появляется.
 --
 -- Применение к живой БД:
---   $env:PGPASSWORD='Sta090860'; C:\Postgres\bin\psql.exe -U postgres -tA -P footer=off \
+--   $env:PGPASSWORD=(Get-Content .env | ConvertFrom-StringData).PGPASSWORD; C:\Postgres\bin\psql.exe -U postgres -tA -P footer=off \
 --     -v ON_ERROR_STOP=1 -d ckb_1c_configurations -f migrate_v39_multilang_configuration_text.sql
 -- Проверка: `python tools/check_v32_zero_configuration.py --only multilang` и `python _cmp_ddl.py`.
 

@@ -6,6 +6,8 @@ import re
 import psycopg2
 import psycopg2.pool
 
+from db_env import db_params
+
 
 def ensure_utf8():
     try:
@@ -17,13 +19,11 @@ def ensure_utf8():
         pass
 
 
-DB_CONFIG = {
-    'host': 'localhost',
-    'port': 5432,
-    'dbname': 'local_doc',
-    'user': 'postgres',
-    'password': 'Sta090860',
-}
+# Реквизиты подключения к базе правил и знаний. Отдельного литерала пароля здесь нет
+# (узел V60, 06.11.2026): значения ведёт `src/db_env.py` - переменные `PG*` процесса,
+# затем файл `.env` в корне проекта. Прежний словарь молча дублировал `src/database.py`,
+# и расхождения двух копий не замечал никто.
+DB_CONFIG = db_params('local_doc')
 
 _connection_pool = None
 
