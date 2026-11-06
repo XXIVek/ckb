@@ -20,6 +20,12 @@
                   «больше нет») или карточка снятого функционала (`:removed`): называть то, чего
                   нет, им предписано.
 
+Метки корзин и сам предикат держит `src/rule_references.py`: тот же порядок применяет
+часть B `tools/check_rule_tool_coverage.py` (разделы `CHECK`/`TOOLS`). Две копии
+классификации разошлись бы — и правило, рассказывающее о снятом, читалось бы битой
+ссылкой (узел COV-BASKETS, 06.11.2026: часть B давала два провала на живых строках с
+«→» и «прежние файлы»).
+
 Граница: разбираются только пути файлов проекта; имена таблиц, колонок, URL и идентификаторы кода
 не проверяются — для них нет понятия «файл на диске».
 
@@ -44,27 +50,21 @@ _NAME_INDEX = None
 
 from database import get_cursor  # noqa: E402
 from quarantine import MARK_ARRAY, sql_not_marked  # noqa: E402
+# Корзины ссылок — общий предикат двух инструментов (см. docs модуля); своя копия
+# классификации означала бы, что аудит сверяет себя, а не тот же порядок, по которому
+# правило говорит о снятом (узел COV-BASKETS, 06.11.2026).
+from rule_references import (  # noqa: E402
+    KIND_BROKEN, KIND_HISTORY, KIND_PROVENANCE, classify, context_window,
+)
 
 # Путь внутри репозитория: tools/x.py, src/y/z.py, docs/x/y.md, .clinerules/x.md, _probe.py.
 PATH_RE = re.compile(
     r"(?<![\w/.-])((?:\.clinerules|docs|src|tools)/[\w./\-]*\.(?:py|sql|md)|_"
     r"[\w\-]*\.(?:py|sql))"
 )
-# Снимок прежних текстов и снятый функционал: называть отсутствующее им предписано.
-JOURNAL_MARK = ":journal:"
-REMOVED_MARK = ":removed"
-# Маркеры строки-истории — тот же приём, что у check_search_rules_sync (снимок не правится),
-# плюс конструкции «названо именно для того, чтобы сказать, что этого нет».
-HISTORY_MARKS = (
-    "→", "прежн", "удал", "снят", "сним", "перенес", "архив", "ранее",
-    "больше нет", "источник", "Источник", "до правки", "замер ",
-    "ошибк", "несуществующ", "никогда не было", "файла с таким именем",
-)
-# Файлы прежних правил, перенесённые в базу правилами: ссылка на них = происхождение текста.
-PROVENANCE_DIR = ".clinerules/"
-# Проза карточек перенесена по строкам посреди предложения, поэтому контекстом берётся абзац
-# вокруг совпадения: одна физическая строка не видит, что имя названо в рассказе об ошибке.
-CONTEXT_LINES = 1
+# Контекст совпадения — окно строк (общее с частью B сторожа разделов): проза карточек
+# перенесена посреди предложения, и одна физическая строка не видит, что имя названо в
+# рассказе об ошибке. Число строк и приём окна держит `src/rule_references.py`.
 
 
 def name_index():
@@ -99,18 +99,6 @@ def resolves(path):
     return bool(name_index().get(path))
 
 
-def classify(address: str, line: str, path: str) -> str:
-    """Корзина ссылки: происхождение и история правомочны, битая ссылка — провал."""
-    if JOURNAL_MARK in address or path.startswith(PROVENANCE_DIR):
-        return "provenance"
-    if REMOVED_MARK in address:
-        return "history"
-    for mark in HISTORY_MARKS:
-        if mark in line:
-            return "history"
-    return "broken"
-
-
 def main():
     with get_cursor() as cur:
         cur.execute(
@@ -126,15 +114,15 @@ def main():
         address = row["question"]
         lines = (row["answer"] or "").splitlines()
         for idx, line in enumerate(lines):
-            window = "\n".join(lines[max(0, idx - CONTEXT_LINES): idx + CONTEXT_LINES + 1])
+            window = context_window(lines, idx)
             for path in sorted(set(PATH_RE.findall(line))):
                 checked += 1
                 if resolves(path):
                     continue
                 kind = classify(address, window, path)
-                if kind == "broken":
+                if kind == KIND_BROKEN:
                     broken.setdefault(address, set()).add(path)
-                elif kind == "provenance":
+                elif kind == KIND_PROVENANCE:
                     provenance.add(path)
                 else:
                     history.add((address, path))

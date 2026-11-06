@@ -15,7 +15,18 @@
      скриптом, врёт о своём контракте. Таблицы индексов («чем проверяется») сторожит
      `check_rules_layer.py`, разделы `CHECK`/`TOOLS` до этого узла не сторожил никто.
 
-Выход: 0, если часть B пуста. Часть A на код возврата не влияет намеренно: её читают люди,
+Часть B различает три корзины — битую ссылку, происхождение и историю — общим предикатом
+`src/rule_references.py` с `tools/_named_artifacts_audit.py`. Провалом считается только
+битая ссылка; ссылка происхождения (прежние файлы правил `.clinerules/<слой>_Rule.md`,
+содержимое которых перенесено в базу) и ссылка истории (строка со «→», «прежн», «снято»,
+карточка `:removed`) печатаются отдельно и на код возврата не влияют. Без этого живое
+правило, рассказывающее о снятом, читалось бы дефектом, а «исправление» значило бы стирать
+рассказ о прошлом: прогон 06.11.2026 числились провалами `_layers_tree_probe.py` (имя,
+переименованное в `_layer_tree_check.py`, названо в строке с «→») и `_Rule.md` (прежние
+файлы правил, названы в строке с «прежние») — обе стоят в правиле
+`rules:checks:layer-verification`, которое тем же текстом предписывает их отделять.
+
+Выход: 0, если в части B нет битых ссылок. Часть A на код возврата не влияет намеренно: её читают люди,
 принимающие решение о правиле.
 
 Режим `--brief` печатает только отказы и счётчики, без строк покрытия. Появлен по замеру живого
@@ -39,6 +50,12 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 from database import get_cursor  # noqa: E402
 from quarantine import MARK_ARRAY, sql_not_marked  # noqa: E402
+# Корзины ссылок (происхождение / история / битая) — общий предикат с аудитом прозы
+# `tools/_named_artifacts_audit.py`: своя копия классификации сверяла бы себя, а не тот
+# порядок, по которому правило говорит о снятом (узел COV-BASKETS).
+from rule_references import (  # noqa: E402
+    KIND_BROKEN, KIND_HISTORY, KIND_PROVENANCE, classify, context_window,
+)
 
 SOURCE_SCHEME = "rules-layer://"
 # Что считается инструментом: рабочие скрипты `tools/` и генераторы/проверки слоя в корне.
@@ -78,13 +95,18 @@ FILE_TOKEN = re.compile(r"[A-Za-z0-9_./\\-]+\.(?:py|ps1|sql|md)\b")
 
 
 def scan_sections(text):
-    """Текст разделов `===CHECK`/`===TOOLS` карточки — только он и считается ссылкой.
+    """Строки разделов `===CHECK`/`===TOOLS` карточки — только они и считаются ссылкой.
 
     Разделение ответственности: существование имён в таблицах индексов («чем проверяется») сторожит
     `check_rules_layer.py` пунктом формата 2 про колонку проверки; разделы `CHECK`/`TOOLS` не
     сторожит никто, и именно они говорят читателю, чем подтвердить правило. Проза карточки в
     расчёт не берётся: карточка снятого узла обязана называть то, чего больше нет, и требовать от
     неё существующих файлов — значит врать о её содержании.
+
+    Отдаются построчно, а не склейкой: контекстом ссылки становится окно строк раздела
+    (`context_window` из `src/rule_references.py`). Склеенный текст теряет, в каком рассказе
+    стоит имя, а одна строка не видит переноса предложения — маркер истории оказывается
+    строкой выше или ниже названия.
     """
     blocks = []
     keep = False
@@ -96,9 +118,15 @@ def scan_sections(text):
             continue
         if keep:
             blocks.append(line)
-    return "\n".join(blocks)
+    return blocks
+
+
 def named_artifacts(cur):
-    """Имена файлов, на которые ДЕЙСТВУЮЩИЕ карточки ссылаются разделами `CHECK`/`TOOLS`.
+    """Файлы, на которые ДЕЙСТВУЮЩИЕ карточки ссылаются разделами `CHECK`/`TOOLS`.
+
+    Возврат: имя файла -> список вхождений `(адрес карточки, строка раздела)`. Строка нужна для
+    корзин: имя, названное в настоящем времени, — обещание проверки, а имя в строке со «→» или
+    «прежние» — рассказ о снятом.
 
     Снимки журнала (`…:journal:…`) исключены намеренно: они описывают состояние узла на дату и
     называют файлы, снятые к сегодняшнему дню, — снимок не является живым правилом. Не считаются и
@@ -112,13 +140,19 @@ def named_artifacts(cur):
     )
     found = {}
     for row in cur.fetchall():
-        text = scan_sections(row["answer"])
-        for match in FILE_TOKEN.finditer(text):
-            before = text[match.start() - 1] if match.start() else " "
-            after = text[match.end()] if match.end() < len(text) else " "
-            if before in "…*<" or after in "*…>":
-                continue
-            found.setdefault(match.group(0), set()).add(row["question"])
+        address = row["question"]
+        section_lines = scan_sections(row["answer"])
+        for idx, line in enumerate(section_lines):
+            for match in FILE_TOKEN.finditer(line):
+                before = line[match.start() - 1] if match.start() else " "
+                after = line[match.end()] if match.end() < len(line) else " "
+                if before in "…*<" or after in "*…>":
+                    continue
+                # Контекст — окно строк раздела, а не одна строка: текст карточки перенесён
+                # посреди предложения, и маркер истории («→», «прежние») стоит строкой выше
+                # или ниже названия. Приём окна общий с аудитом прозы.
+                found.setdefault(match.group(0), []).append(
+                    (address, context_window(section_lines, idx)))
     return found
 
 
@@ -164,18 +198,38 @@ def main(argv=None):
         print()
         print("=" * 74)
         print("B. ССЫЛКИ ДЕЙСТВУЮЩИХ КАРТОЧЕК НА ФАЙЛЫ, КОТОРЫХ НЕТ В ПРОЕКТЕ")
-        print("   (снимки журнала в расчёт не берутся: они называют состояние узла на дату)")
+        print("   (снимки журнала в расчёт не берутся: они называют состояние узла на дату;")
+        print("    корзины происхождения и истории — общие с аудитом прозы, провалом")
+        print("    считается только битая ссылка)")
         print("=" * 74)
-        broken = []
-        for token, cards in sorted(named_artifacts(cur).items()):
-            if not exists_in_project(token):
-                broken.append((token, sorted(cards)))
+        broken, provenance, history = [], set(), []
+        for token, occurrences in sorted(named_artifacts(cur).items()):
+            if exists_in_project(token):
+                continue
+            baskets = {}
+            for address, line in occurrences:
+                baskets.setdefault(classify(address, line, token), set()).add(address)
+            if KIND_BROKEN in baskets:
+                broken.append((token, sorted(baskets[KIND_BROKEN])))
+            if KIND_PROVENANCE in baskets:
+                provenance.add(token)
+            if KIND_HISTORY in baskets:
+                history.append((token, sorted(baskets[KIND_HISTORY])))
         if not broken:
             print("  ✅ битых ссылок нет: каждый названный карточкой файл существует")
         else:
             for token, cards in broken:
                 where = ", ".join(cards[:3])
-                print(f"  ❌ {token:<48} назван карточкой, файла нет ← {where}")
+                print(f"  ❌ {token:<48} назван как действующая проверка, файла нет ← {where}")
+        if provenance:
+            print(f"  · ссылок происхождения: {len(provenance)} "
+                  "(прежние файлы правил, перенесены в базу правилами)")
+            for token in sorted(provenance):
+                print(f"      · {token}")
+        if history:
+            print(f"  · ссылок истории: {len(history)} (снятое названо по смыслу правила)")
+            for token, cards in history:
+                print(f"      · {token} ← {', '.join(cards[:2])}")
 
     print()
     if args.brief:
