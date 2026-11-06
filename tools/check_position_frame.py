@@ -29,6 +29,12 @@
      Имена видов приведения (`int`, `text`, `jsonb_nullable`) не совпадают с именами
      SQL-типов (`integer`), и подмена одного другим видна только на вставке — ни сверка
      живой схемы, ни сверка DDL её не замечают.
+   8. раздел «Состояние позиций нормативного списка» в модели
+      (`docs/config-scenarios/01_configuration.md`) равен тексту, который порождает
+      `tools/_make_position_status.py` (узел V61, шаг П1) — тот же приём, что пункт 4 для
+      DDL: расхождение значит, что генератор не прогоняли после правки контракта, а не что
+      «текст в документе устарел». До этого узла состояние позиций держалось в модели прозой
+      семью датированными перечнями, и каждый новый узел добавлял следующую копию.
 
 Запуск: python tools/check_position_frame.py [--exports BP3,ZUP31,UT11,MinCfg]
 """
@@ -59,6 +65,9 @@ from check_stage_order_against_normative_list import (  # noqa: E402
     NORMATIVE_LIST, read_normative,
 )
 from _v59_p0_frame_probe import registration_counts  # noqa: E402
+from _make_position_status import (  # noqa: E402  (узел V61: реестр состояния позиций)
+    MODEL as STATUS_MODEL, extract_block as status_extract, render_block as status_render,
+)
 
 PSQL = r"C:\Postgres\bin\psql.exe"
 DATABASE = "ckb_1c_configurations"
@@ -252,6 +261,27 @@ def main() -> int:
             bool(adapter_kinds) and not unknown,
             ("неизвестные виды: " + ", ".join(unknown)) if unknown
             else f"видов в словаре `_adapt`: {len(adapter_kinds)}")
+
+    # 8. раздел состояния позиций в модели = вывод генератора (узел V61, шаг П1).
+    #    Раздел порождается прогоном, поэтому сверяется его текст целиком: расхождение
+    #    означает, что генератор не запускали после правки `STAGES`, спецификации или схемы.
+    try:
+        want_block = status_render()
+        live_block = status_extract(STATUS_MODEL.read_text(encoding="utf-8"))
+        if live_block is None:
+            check("раздел состояния позиций вставлен в модель", False,
+                  f"маркеров генератора нет в {STATUS_MODEL}")
+        else:
+            identical = live_block == want_block
+            check("раздел «Состояние позиций нормативного списка» модели = вывод "
+                  "`_make_position_status.py`",
+                  identical,
+                  "" if identical else
+                  f"в файле {len(live_block)} симв., генератор даёт {len(want_block)} — "
+                  "нужен прогон python tools/_make_position_status.py --write")
+    except Exception as exc:  # noqa: BLE001 — отказ называется, а не роняет прогон
+        note("FAIL", "генератор состояния позиций не выполнил свой прогон",
+             f"{type(exc).__name__}: {exc}")
 
     print("-" * 78)
     total = sum(_counters.values())
