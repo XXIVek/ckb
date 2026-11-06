@@ -35,6 +35,10 @@
       DDL: расхождение значит, что генератор не прогоняли после правки контракта, а не что
       «текст в документе устарел». До этого узла состояние позиций держалось в модели прозой
       семью датированными перечнями, и каждый новый узел добавлял следующую копию.
+   9. оглавление разделов модели равно выводу `tools/_make_model_toc.py` (узел V61,
+      шаг П2) — второй генерируемый раздел того же файла. Генерируемый раздел, который
+      не сверяется, отстаёт молча: так индекс журнала карточек называл 96 снимков при 97
+      живых (нашёл прогон узла V61).
 
 Запуск: python tools/check_position_frame.py [--exports BP3,ZUP31,UT11,MinCfg]
 """
@@ -67,6 +71,9 @@ from check_stage_order_against_normative_list import (  # noqa: E402
 from _v59_p0_frame_probe import registration_counts  # noqa: E402
 from _make_position_status import (  # noqa: E402  (узел V61: реестр состояния позиций)
     MODEL as STATUS_MODEL, extract_block as status_extract, render_block as status_render,
+)
+from _make_model_toc import (  # noqa: E402  (узел V61: оглавление разделов модели)
+    DEFAULT_FILE as TOC_FILE, extract_block as toc_extract, render_block as toc_render,
 )
 
 PSQL = r"C:\Postgres\bin\psql.exe"
@@ -281,6 +288,27 @@ def main() -> int:
                   "нужен прогон python tools/_make_position_status.py --write")
     except Exception as exc:  # noqa: BLE001 — отказ называется, а не роняет прогон
         note("FAIL", "генератор состояния позиций не выполнил свой прогон",
+             f"{type(exc).__name__}: {exc}")
+
+    # 9. оглавление разделов модели = вывод генератора (узел V61, шаг П2).
+    #    Раздел порождается прогон по заголовкам файла, поэтому сверяется его текст
+    #    целиком: расхождение значит, что в документе появился раздел и оглавление не
+    #    перегенерировали, а не что «перечень чуть устарел».
+    try:
+        toc_text = (ROOT / TOC_FILE).read_text(encoding="utf-8")
+        toc_live, toc_want = toc_extract(toc_text), toc_render(toc_text)
+        if toc_live is None:
+            check("оглавление разделов вставлено в модель", False,
+                  f"маркеров генератора нет в {TOC_FILE}")
+        else:
+            identical = toc_live == toc_want
+            check("оглавление разделов модели = вывод `_make_model_toc.py`",
+                  identical,
+                  "" if identical else
+                  f"в файле {len(toc_live)} симв., прогон даёт {len(toc_want)} — нужен "
+                  "прогон python tools/_make_model_toc.py --write")
+    except Exception as exc:  # noqa: BLE001 — отказ называется, а не роняет прогон
+        note("FAIL", "генератор оглавления не выполнил свой прогон",
              f"{type(exc).__name__}: {exc}")
 
     print("-" * 78)
