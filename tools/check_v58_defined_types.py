@@ -152,7 +152,8 @@ from configuration_load_contract import (  # noqa: E402
     DEFINED_TYPES_OBSERVATION_KINDS, DEFINED_TYPES_REMOVE_ORDER, DEFINED_TYPES_REPEAT_HINT,
     DEFINED_TYPES_CIRCLE_BOUNDARY, DEFINED_TYPES_SECTION_HEADER,
     DEFINED_TYPES_STATE_VOCABULARIES, DEFINED_TYPES_TABLE,
-    DEFINED_TYPES_TABLES, FOREIGN_STAGE_TABLES, STAGES, STAGE_DEFINED_TYPES,
+    DEFINED_TYPES_TABLES, FOREIGN_STAGE_TABLES, STAGES, STAGE_COMMON_TEMPLATES,
+    STAGE_DEFINED_TYPES,
     STAGE_FULL_RELOAD_ONLY, STAGE_FUNCTIONAL_OPTIONS_PARAMETERS, STAGE_OBJECT_MODULES,
     STORED_META_KINDS, defined_types_defaults, format_defined_types_lines,
     stage_resume_hint, stage_title, stages_after,
@@ -1655,18 +1656,21 @@ def check_contract():
           % (STAGE_DEFINED_TYPES, STAGE_FUNCTIONAL_OPTIONS_PARAMETERS),
           ids.index(STAGE_DEFINED_TYPES) == ids.index(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS) + 1,
           "порядок: %s" % ids)
-    check("`%s` остаётся последней стадией (вторая транзакция текстов модулей), а `%s` стоит "
-          "перед ней" % (STAGE_OBJECT_MODULES, STAGE_DEFINED_TYPES),
+    check("`%s` остаётся последней стадией (вторая транзакция текстов модулей), а справа у "
+          "`%s` — `%s` (узел V59, позиция 2.18 нормативного списка)"
+          % (STAGE_OBJECT_MODULES, STAGE_DEFINED_TYPES, STAGE_COMMON_TEMPLATES),
           ids[-1] == STAGE_OBJECT_MODULES
-          and stages_after(STAGE_DEFINED_TYPES)[:1] == [STAGE_OBJECT_MODULES]
+          and stages_after(STAGE_DEFINED_TYPES)[:1] == [STAGE_COMMON_TEMPLATES]
           and is_last_stage(STAGE_OBJECT_MODULES), "порядок: %s" % ids)
     check("stages_after('%s') называет продолжением `%s` — дозагрузка вида не теряется в "
           "перечне стадий" % (STAGE_FUNCTIONAL_OPTIONS_PARAMETERS, STAGE_DEFINED_TYPES),
           stages_after(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS)[:1] == [STAGE_DEFINED_TYPES],
           str(stages_after(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS)))
-    check("stages_after('%s') называет продолжением `%s`" % (STAGE_DEFINED_TYPES,
-                                                             STAGE_OBJECT_MODULES),
-          stages_after(STAGE_DEFINED_TYPES)[:1] == [STAGE_OBJECT_MODULES],
+    check("stages_after('%s') называет продолжением `%s` (узел V59), а не `%s`; последней "
+          "стадией хвоста `s4b_object_modules` при этом остаётся"
+          % (STAGE_DEFINED_TYPES, STAGE_COMMON_TEMPLATES, STAGE_OBJECT_MODULES),
+          stages_after(STAGE_DEFINED_TYPES)[:1] == [STAGE_COMMON_TEMPLATES]
+          and stages_after(STAGE_DEFINED_TYPES)[-1:] == [STAGE_OBJECT_MODULES],
           str(stages_after(STAGE_DEFINED_TYPES)))
     check(f"у стадии `{STAGE_DEFINED_TYPES}` отдельного входа дозагрузки БОЛЬШЕ НЕТ: продолжение только "
           "полной перезагрузкой единой точки входа (узел TOOL-DROP, 05.11.2026) — "

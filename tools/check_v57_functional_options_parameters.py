@@ -142,8 +142,9 @@ from configuration_load_contract import (  # noqa: E402
     FUNCTIONAL_OPTIONS_PARAMETERS_OBSERVATION_KINDS, FUNCTIONAL_OPTIONS_PARAMETERS_REPEAT_HINT,
     FUNCTIONAL_OPTIONS_PARAMETERS_SECTION_HEADER, FUNCTIONAL_OPTION_PARAMETER_TARGETS_TABLE,
     FUNCTIONAL_OPTION_PARAMETERS_REMOVE_ORDER, FUNCTIONAL_OPTION_PARAMETERS_TABLE,
-    FUNCTIONAL_OPTION_PARAMETERS_TABLES, STAGE_FUNCTIONAL_OPTIONS,
-    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS, STAGE_FULL_RELOAD_ONLY, STAGE_OBJECT_MODULES, STAGES,
+    FUNCTIONAL_OPTION_PARAMETERS_TABLES, STAGE_DEFINED_TYPES,
+    STAGE_FUNCTIONAL_OPTIONS, STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
+    STAGE_FULL_RELOAD_ONLY, STAGE_OBJECT_MODULES, STAGES,
     STORED_META_KINDS, functional_options_parameters_defaults,
     format_functional_options_parameters_lines, stage_resume_hint, stage_title, stages_after,
 )
@@ -1814,8 +1815,9 @@ def check_contract():
           "порядок литер)",
           ids.index(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS)
           == ids.index(STAGE_FUNCTIONAL_OPTIONS) + 1, f"порядок: {ids}")
-    check(f"`{STAGE_OBJECT_MODULES}` остаётся последней стадией (вторая транзакция текстов), а "
-          f"`{STAGE_FUNCTIONAL_OPTIONS_PARAMETERS}` стоит перед ней",
+    check(f"`{STAGE_OBJECT_MODULES}` остаётся последней стадией (вторая транзакция текстов), "
+          f"а справа у `{STAGE_FUNCTIONAL_OPTIONS_PARAMETERS}` — `{STAGE_DEFINED_TYPES}` "
+          "(узел V58, позиция 2.13 нормативного списка)",
           ids[-1] == STAGE_OBJECT_MODULES
           and stages_after(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS)[:1] == [STAGE_DEFINED_TYPES]
           and is_last_stage(STAGE_OBJECT_MODULES),
@@ -1825,8 +1827,10 @@ def check_contract():
           stages_after(STAGE_FUNCTIONAL_OPTIONS)[:1] == [STAGE_FUNCTIONAL_OPTIONS_PARAMETERS],
           str(stages_after(STAGE_FUNCTIONAL_OPTIONS)))
     check(f"`stages_after('{STAGE_FUNCTIONAL_OPTIONS_PARAMETERS}')` называет продолжением "
-          f"`{STAGE_OBJECT_MODULES}`",
-          stages_after(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS)[:1] == [STAGE_OBJECT_MODULES],
+          f"`{STAGE_DEFINED_TYPES}` (узел V58), а не `{STAGE_OBJECT_MODULES}`; последней "
+          "стадией хвоста `s4b_object_modules` при этом остаётся",
+          stages_after(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS)[:1] == [STAGE_DEFINED_TYPES]
+          and stages_after(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS)[-1:] == [STAGE_OBJECT_MODULES],
           str(stages_after(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS)))
     check(f"у стадии `{STAGE_FUNCTIONAL_OPTIONS_PARAMETERS}` отдельного входа дозагрузки БОЛЬШЕ НЕТ: продолжение только "
           "полной перезагрузкой единой точки входа (узел TOOL-DROP, 05.11.2026) — "
@@ -1938,9 +1942,12 @@ def check_contract():
     not_run = [str(line) for line in
                (format_functional_options_parameters_lines(defaults) or [])]
     check("форматтер невыполненной стадии называет сам факт («Стадия не выполнена») и чем "
-          "продолжить, а не нули строк (C1)",
+          "продолжить — полной перезагрузкой единой точки входа `load_1c_catalog_tool` "
+          "(отдельный вход `load_functional_options_parameters_tool` снят узлом TOOL-DROP, "
+          "05.11.2026), а не нули строк (C1)",
           bool(not_run) and any("Стадия не выполнена" in line for line in not_run)
-          and any("load_functional_options_parameters_tool" in line for line in not_run),
+          and any("load_1c_catalog_tool" in line and "TOOL-DROP" in line
+                  for line in not_run),
           _brief(compact(not_run[:3])))
     check("форматтер невыполненной стадии не приписывает кругу строк: текст не утверждает "
           "«записано N» при N больше нуля",

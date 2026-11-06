@@ -61,11 +61,17 @@ from configuration_load_contract import (
     format_functional_options_lines,
     format_functional_options_parameters_lines,
     format_object_module_lines,
+    format_position_frame_lines,
     format_roles_lines,
     format_root_modules_lines,
     format_scheduled_jobs_lines,
     format_session_parameters_lines,
     format_stopped_stage_lines,
+    # Узел V59: десять стадий пакета печатает один форматёр (`format_position_frame_lines`
+    # выше), а перечень позиций и заголовки разделов задаёт пакет — здесь нет ни десяти
+    # вызовов, ни десяти заголовков, выписанных текстом.
+    position_frame_specs,
+    section_header as position_frame_section_header,
 )
 # Узел V31: формулировки провенанса принадлежат модулю провенанса, а не карточке. Карточка
 # объекта, карточка дубликата и сводка печатают один и тот же текст по одному описанию —
@@ -599,6 +605,19 @@ def _stage_section_lines(result):
     if defined_types_part:
         lines.append(f"{DEFINED_TYPES_SECTION_HEADER}:")
         lines.extend(format_defined_types_lines(defined_types_part, indent="   "))
+    # Узел V59 (десять стадий пакета: позиции 2.18, 2.19, 2.20, 2.23, 2.25…2.28, 5.2, 19
+    # списка): разделы десяти позиций печатает ОДИН форматёр, а заголовок каждого раздела
+    # задаёт строка контракта позиции (`position_frame_section_header`) — здесь нет десяти
+    # вызовов по три строки и десяти выписанных заголовков, которые разъезжались бы с
+    # форматёром при первой же правке (отличие от V48…V58 названо в форматёре). Раздел
+    # печатается и при отказе стадии, и при `not_run`: «загружено» без него читалось бы как
+    # «состав конфигурации в БД есть весь» (прецедент S3/S4/S4c…S4m). Порядок разделов —
+    # порядок нормативного списка, который держит пакет, а не этот файл.
+    for frame_spec in position_frame_specs():
+        frame_part = result.get(frame_spec["table"]) or {}
+        if frame_part:
+            lines.append(f"{position_frame_section_header(frame_spec)}:")
+            lines.extend(format_position_frame_lines(frame_part, indent="   "))
     # Узел V47 (стадия S4b): модули объектов конфигурации — вторая транзакция загрузки
     # (Q6, граница D7). Раздел печатается и при отказе стадии, и при `not_run` (индекс
     # состава не разобран — круг не определён): «конфигурация загружена» без него

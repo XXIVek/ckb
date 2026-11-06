@@ -28,7 +28,10 @@ import subprocess
 import psycopg2
 
 TEMP_DB = "v13_ddl_check"
-BOOTSTRAP = r"C:\1C_LLM\ckb\create_1c_configurations_db.sql"
+# Узел V59 (06.11.2026): шаг 3 лежит в `sql/` (перенос сделан раньше, чем правка пути в
+# пробе) — прежний путь указывал на каталог репозитория, шаг 2 прогонялся с
+# «No such file or directory», и итог сравнивал живую БД со схемой без шага 3.
+BOOTSTRAP = r"C:\1C_LLM\ckb\sql\create_1c_configurations_db.sql"
 DDL = r"C:\1C_LLM\ckb\src\ddl_external_report.sql"
 DDL_ENRICHMENT = r"C:\1C_LLM\ckb\src\ddl_enrichment.sql"
 PSQL = r"C:\Postgres\bin\psql.exe"

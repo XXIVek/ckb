@@ -81,9 +81,10 @@ r"""tools/check_v53_event_subscriptions.py — узел V53: подписки н
       стадией (вторая транзакция); круг снятия и
       порядок удаления (`sources` ДО `subscriptions` — иначе `ON DELETE CASCADE` снял бы строки
       молча, и число в ответе было бы неправдой); подсказка продолжения; нулевой ответ стадии;
-      вход `load_event_subscriptions_tool` в реестре `EXPECTED_TOOLS` (одиннадцатый инструмент
-      ядра — с узла V54 круг вырос до 12, с узла V55 (шаг П5, `load_bots_tool`) до 13;
-      проверка считает актуальный круг, а сторож состава — `tools/check_mcp_tool_wiring.py`).
+      вход `load_event_subscriptions_tool` назван снятым (узел TOOL-DROP, 05.11.2026): его
+      нет в `EXPECTED_TOOLS` ядра, и имя числится в `DELETED_TOOLS` того же файла; состав
+      реестра сторожит `tools/check_mcp_tool_wiring.py`, второй числовой эталон здесь не
+      держится.)
   12. ИТОГ ПО КОРПУСУ и неприкосновенность чужих кругов: сумма по четырём выгрузкам равна
       разделам 1 и 2 плана, таблицы других узлов прогон не меняет.
 
@@ -1472,6 +1473,23 @@ def registry_expected_tools():
     return {}
 
 
+def registry_deleted_tools():
+    """Имена снятых инструментов из `DELETED_TOOLS` — тем же снятием синтаксиса, что и реестр.
+
+    Подстрока по тексту после `DELETED_TOOLS = [` не годится: в комментариях этого блока
+    названа единая точка входа `load_1c_catalog_tool` (чем заменён снятый вход), и проверка
+    считала бы её снятой. Список снимается значением, а не текстом.
+    """
+    source = (ROOT / "tools" / "check_mcp_tool_wiring.py").read_text(encoding="utf-8")
+    for node in ast.parse(source).body:
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if getattr(target, "id", "") == "DELETED_TOOLS":
+                return list(ast.literal_eval(node.value))
+    return []
+
+
 # ── контур 11: контракт стадии, круг снятия и реестр инструментов ────────────────────────────
 def check_contract():
     """Позиция нормативного списка 2.8, порядок снятия, подсказка продолжения, реестр входов.
@@ -1549,14 +1567,21 @@ def check_contract():
           "kinds" not in defaults, _brief(sorted(defaults)))
     registry = registry_expected_tools()
     core_tools = list((registry.get("server_configurations_core.py") or []))
-    check("вход `load_event_subscriptions_tool` внесён в реестр `EXPECTED_TOOLS` ядра "
-          "(узлом V53 П5 круг ядра — 11 инструментов; с узла V54 П5 — 12; с узла V55 П5 — 13; "
-          "с узла V56 П5 — 14; с узла V57 П5 — 15)",
-          "load_event_subscriptions_tool" in core_tools, names(core_tools))
-    check(f"число инструментов ядра — {len(core_tools)} (эталон реестра: 15 — узел V57 добавил "
-          "`load_functional_options_parameters_tool`; до узла V56 было 14; состав сторожит "
-          "`tools/check_mcp_tool_wiring.py`)",
-          len(core_tools) == 15, f"факт: {len(core_tools)}, эталон: 15")
+    # Узел TOOL-DROP (05.11.2026) снял позиционные входы дозагрузки: их имён в реестре быть не
+    # может, а снятыми их называет `DELETED_TOOLS` того же файла. Числовой эталон состава здесь
+    # больше не держится второй копией — состав сторожит `tools/check_mcp_tool_wiring.py`.
+    wiring_deleted = set(registry_deleted_tools())
+    check("входа `load_event_subscriptions_tool` БОЛЬШЕ НЕТ в реестре `EXPECTED_TOOLS` ядра "
+          "(снят узлом TOOL-DROP, 05.11.2026), и имя названо снятым в `DELETED_TOOLS` того же "
+          "файла",
+          "load_event_subscriptions_tool" not in core_tools
+          and "load_event_subscriptions_tool" in wiring_deleted, names(core_tools))
+    check("среди инструментов ядра нет позиционных входов дозагрузки, а единая точка входа "
+          "`load_1c_catalog_tool` на месте — повтор позиции делается полной перезагрузкой "
+          "(узел TOOL-DROP)",
+          bool(core_tools) and "load_1c_catalog_tool" in core_tools
+          and not [name for name in core_tools if name in wiring_deleted],
+          f"факт: {len(core_tools)} — {names(core_tools)}")
 
 
 # ── контур 12: итог по корпусу и неприкосновенность чужих кругов ─────────────────────────────

@@ -79,9 +79,11 @@ r"""tools/check_v52_filter_criteria.py — узел V52: критерии отб
      строки чужих узлов за прогон не меняются — проверка только читает.
  12. КОНТРАКТ СТАДИИ И РЕЕСТР ИНСТРУМЕНТОВ. `s4g_filter_criteria` стоит в `STAGES` между
      `s4f_exchange_plans` и `s4b_object_modules`, круг `FILTER_CRITERIA_TABLES` входит в
-     `FOREIGN_STAGE_TABLES`, подсказка продолжения стадии названа, а десятый инструмент
-     реестра (`load_filter_criteria_tool`) присутствует в `EXPECTED_TOOLS` — иначе проверка
-     молчала бы о стадии, в которую конвейер уже не заходит, и о входе, которым её повторяют.
+     `FOREIGN_STAGE_TABLES`, подсказка продолжения стадии названа, а вход позиции
+     (`load_filter_criteria_tool`) назван снятым: отдельный вход снят узлом TOOL-DROP
+     (05.11.2026), его нет в `EXPECTED_TOOLS`, и имя числится в `DELETED_TOOLS` — иначе
+     проверка молчала бы о стадии, в которую конвейер уже не заходит, и о входе, которым её
+     повторяют.
  13. ССЫЛКИ ДРУГИХ СЛОЁВ НА ВИД (позиция O1, закрыта замером 02.11.2026). Сами ссылки живут в
      кругах V46 (`subsystem_content`) и V49 (`role_rights`), узел V52 их не пишет. Сторожится
      свойство, а не число: каждая ссылка с uuid обязана иметь запись индекса состава той же
@@ -2134,6 +2136,23 @@ def registry_expected_tools():
     return {}
 
 
+def registry_deleted_tools():
+    """Имена снятых инструментов из `DELETED_TOOLS` — тем же снятием синтаксиса, что и реестр.
+
+    Подстрока по тексту после `DELETED_TOOLS = [` не годится: в комментариях этого блока
+    названа единая точка входа `load_1c_catalog_tool` (чем заменён снятый вход), и проверка
+    считала бы её снятой. Список снимается значением, а не текстом.
+    """
+    source = (ROOT / "tools" / "check_mcp_tool_wiring.py").read_text(encoding="utf-8")
+    for node in ast.parse(source).body:
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if getattr(target, "id", "") == "DELETED_TOOLS":
+                return list(ast.literal_eval(node.value))
+    return []
+
+
 def check_contract():
     """Стадия, круг снятия, подсказка продолжения и вход группы — на местах.
 
@@ -2196,14 +2215,22 @@ def check_contract():
           str(STAGE_FULL_RELOAD_ONLY.get(STAGE_FILTER_CRITERIA)))
     registry = registry_expected_tools()
     core_tools = registry.get("server_configurations_core.py", [])
-    check("вход группы `load_filter_criteria_tool` назван в реестре `EXPECTED_TOOLS` ядра",
-          "load_filter_criteria_tool" in core_tools, _brief(sorted(core_tools)))
-    check(f"число инструментов ядра — {len(core_tools)} (после узлов V52, V53 и V54 было 12; "
-          "с узла V55, шаг П5 — 13: добавлен `load_bots_tool`; с узла V56, шаг П5 — 14: добавлен "
-          "`load_functional_options_tool`; с узла V57, шаг П5 — 15: добавлен "
-          "`load_functional_options_parameters_tool`; состав сторожит "
-          "`tools/check_mcp_tool_wiring.py`)",
-          len(core_tools) == 15, f"в реестре {len(core_tools)}")
+    # Узел TOOL-DROP (05.11.2026) снял позиционные входы дозагрузки: их имён в реестре быть не
+    # может, а снятыми их называет `DELETED_TOOLS` того же файла. Числовой эталон состава здесь
+    # больше не держится второй копией — состав сторожит `tools/check_mcp_tool_wiring.py`.
+    wiring_deleted = set(registry_deleted_tools())
+    check("вход группы `load_filter_criteria_tool` БОЛЬШЕ НЕ входит в реестр "
+          "`EXPECTED_TOOLS` ядра (снят узлом TOOL-DROP, 05.11.2026) и назван снятым в "
+          "`DELETED_TOOLS` того же файла",
+          "load_filter_criteria_tool" not in core_tools
+          and "load_filter_criteria_tool" in wiring_deleted,
+          _brief(sorted(core_tools)))
+    check("среди инструментов ядра нет позиционных входов дозагрузки, а единая точка входа "
+          "`load_1c_catalog_tool` на месте — повтор позиции делается полной перезагрузкой "
+          "(узел TOOL-DROP)",
+          bool(core_tools) and "load_1c_catalog_tool" in core_tools
+          and not [name for name in core_tools if name in wiring_deleted],
+          f"в реестре {len(core_tools)}: {names(core_tools)}")
 
 
 # ═══ контур 11 (продолжение): неприкосновенность чужих кругов ═════════════════════════

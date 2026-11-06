@@ -57,7 +57,9 @@ r"""tools/check_v56_functional_options.py — узел V56: функционал
      словарю; форматёр называет каждое состояние, а не только ненулевые; порядок снятия
      начинается с таблицы применения (M7); стадия `s4k_functional_options` стоит в `STAGES`
      между `s4j_bots` и `s4b_object_modules` и имеет подсказку продолжения; инструмент
-     `load_functional_options_tool` внесён в реестр сервера (`EXPECTED_TOOLS`).
+     `load_functional_options_tool` снят узлом TOOL-DROP (05.11.2026): его нет в реестре
+     сервера (`EXPECTED_TOOLS`), и имя числится снятым в `DELETED_TOOLS` файла
+     `tools/check_mcp_tool_wiring.py`.
   9. КОРПУС (контур 9). Суммы по четырём выгрузкам сходятся с разделами 1.1, 2.1, 2.2:
      765 файлов, 765 записей индекса, 765 строк вида, 10 063 строки применения, 765
      разрешённых ссылок `Location`, 203 пустых перечня, максимум 438 целей на вид, 21 класс
@@ -1598,9 +1600,11 @@ def check_contract():
           f"status: {defaults.get('status')}")
     not_run = [str(line) for line in (format_functional_options_lines(defaults) or [])]
     check("форматтер невыполненной стадии называет сам факт («стадия не выполнена») и чем "
-          "продолжить, а не нули строк (C1)",
+          "продолжить — полной перезагрузкой единой точки входа `load_1c_catalog_tool` "
+          "(отдельный вход группы снят узлом TOOL-DROP, 05.11.2026), а не нули строк (C1)",
           bool(not_run) and any("не выполнена" in line for line in not_run)
-          and any(TOOL_NAME in line for line in not_run), _brief(compact(not_run[:3])))
+          and any("load_1c_catalog_tool" in line and "TOOL-DROP" in line
+                  for line in not_run), _brief(compact(not_run[:3])))
     check("форматтер невыполненной стадии не приписывает кругу строк: текст не утверждает "
           "«записано N» при N больше нуля",
           not any("записано" in line and any(digit in line for digit in "123456789")

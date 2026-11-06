@@ -172,6 +172,13 @@ from configuration_functional_options_parameters import (
 from configuration_defined_types import (
     TABLE_NAME as DEFINED_TYPES_TABLE,
 )
+# Узел V59 (пакет плоских позиций, шаг П4, 06.11.2026): имена таблиц, имена стадий и
+# спецификации колонок писателей пакета выводятся строкой контракта
+# (`src/configuration_position_spec.py`), а не выписываются здесь по десятку на каждую
+# позицию. Цикла импортов нет: спецификация не импортирует ни разбора, ни писателей.
+from configuration_position_spec import specs as position_frame_specs, writer_columns
+
+
 
 # Ревизионные колонки в спецификациях версионированных писателей (M1). Порядок -
 # тот же, что в DDL (шаг 1 src/generate_ddl.py): integer / timestamp / text / boolean.
@@ -3327,6 +3334,43 @@ CONFIGURATION_OBJECT_WRITERS = {
     # `CONFIGURATION_UNVERSIONED_TABLES`.
     DEFINED_TYPES_TABLE: DefinedTypesRowWriter,
 }
+# ─── узел V59 (пакет плоских позиций, шаг П4): писатели выводятся спецификацией ──
+def position_frame_writer_class(spec):
+    """Писатель строки позиции пакета: спецификацию колонок даёт строка контракта.
+
+    Десять позиций кластера отличаются списком тегов `Properties`, наличием
+    `InternalInfo` и наличием `ChildObjects` (замер `probes/v59/_v59_p0_frame_probe.py`);
+    всё остальное у них общее. Держать десять классов с десятью копиями одних и тех же
+    колонок — значит иметь десять мест, где колонка может разойтись с DDL. Спецификацию
+    колонок читает `writer_columns(spec)` — её же используют генератор DDL
+    (`tools/_make_position_frame.py`) и постоянная проверка (`tools/check_position_frame.py`),
+    поэтому расхождение схемы и вставки исключено по построению, а не внимательностью.
+
+    Класс строится фабрикой, а не десятикратным копированием, и это отличие от V48…V58
+    названо прямо: там словарь свойств вида замыкался замером (38 тегов у общих
+    реквизитов, 4 — у определяемых типов), а здесь словарь задаёт строка контракта, и
+    правка круга позиции = правка одной строки.
+    """
+    name = "PositionFrame" + "".join(part.capitalize()
+                                     for part in spec["table"].split("_")) + "RowWriter"
+    doc = (f"Строка свойств вида «{spec['title']}» выгрузки (узел V59, позиция "
+           f"{spec['position']} нормативного списка). Колонки выводятся строкой контракта "
+           f"`src/configuration_position_spec.py`; ключ цепочки состояния — "
+           f"(configuration_uuid, object_name, revision_no). Граница круга: "
+           f"{spec['boundary']}")
+    return type(name, (TableRowWriter,), {
+        "TABLE": spec["table"],
+        "COLUMNS": versioned_columns(writer_columns(spec)),
+        "__doc__": doc,
+    })
+
+
+POSITION_FRAME_WRITERS = {spec["table"]: position_frame_writer_class(spec)
+                          for spec in position_frame_specs()}
+# Тот же реестр, что и для писателей V46–V58: выбор писателя по таблице (правило
+# `rules:core-rules:functional:add-object-block`, п. 6), отдельного механизма у пакета нет.
+CONFIGURATION_OBJECT_WRITERS.update(POSITION_FRAME_WRITERS)
+
 
 
 # Таблицы, чей писатель зарегистрирован общим реестром, но своей ЦЕПИ РЕВИЗИЙ у таблицы

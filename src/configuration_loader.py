@@ -543,6 +543,23 @@ from configuration_defined_types_loader import (
     load_defined_types,
     remove_defined_types,
 )
+# Узел V59 (позиции 2.18, 2.19, 2.20, 2.23, 2.25…2.28, 5.2, 19 нормативного списка): десять
+# плоских позиций регистрации загружает ОДИН слой — `configuration_position_frame_loader`, чей
+# контракт (`configuration_position_spec`) задаёт таблицы, колонки, разбор, ответ и форматёр.
+# Здесь импортируются ОДНА точка входа и перечень строк контракта, а не десять функций: десять
+# блоков по тридцать строк в конвейере были бы десятью местами, где ответ одной по форме
+# стадии разъезжается, — ровно тем, ради чего пакет и сделан. Строки круга снимаются вместе с
+# заголовком явным `DELETE` внутри слоя загрузки (внешнего ключа на `configurations` в схеме
+# нет осознанно — прецедент V20.1…V58), поэтому отдельного `remove_*` на позицию нет: круг
+# снятия равен таблице вида (`stage_remove_order` пакета), и второй перечень имён не держится.
+from configuration_position_frame_loader import (
+    load_position_frame,
+    not_run_answer as position_frame_not_run,
+)
+from configuration_position_spec import (
+    ordered_specs as position_frame_specs,
+    section_header as position_frame_section_header,
+)
 # Узел V47 (стадия S4b): модули объектов конфигурации — вторая транзакция после фиксации
 # содержимого (Q6, граница D7). Точка входа стадии одна и отдельного инструмента у неё нет
 # (Q4.1), поэтому здесь импортируется и ответ «стадия не выполнялась» (`mark_index_unavailable`):
@@ -1537,6 +1554,17 @@ def register_configuration(source_path, force=False, xml_path=None):
     # `unresolved` (правило C2, Q3); отличие от V55, где индекс является отказом стадии,
     # названо слоем прямо.
     defined_types = defined_types_defaults()
+    # Узел V59 (позиции 2.18, 2.19, 2.20, 2.23, 2.25…2.28, 5.2, 19 списка): десять стадий
+    # пакета — ответы в собственных ключах по имени таблицы позиции (правило C3), и каждый
+    # нулевой ответ описан ОДНОЙ функцией (`not_run_answer` читает `empty_answer` пакета):
+    # десять вызовов `*_defaults()` были бы десятью местами одного ответа «не смотрели»
+    # (прецедент V48…V58 — форма, а не число). Групп `kinds` у стадий нет — это решение Q1
+    # варианта A узла V58: у каждой позиции одна таблица свойств, а содержимое `Ext/`
+    # считается числом и отдельной таблицы не образует (замер P0 плана V59).
+    position_frame_results: Dict[str, Any] = {
+        frame_spec["table"]: position_frame_not_run(frame_spec)
+        for frame_spec in position_frame_specs()
+    }
 
     object_modules = object_modules_defaults()
     # Узел V48 (шаг П8, правило C2): пропущенная стадия называет причину пропуска. Без неё
@@ -2213,6 +2241,55 @@ def register_configuration(source_path, force=False, xml_path=None):
             load_incomplete = True
 
 
+    # ── узел V59 (десять стадий пакета: позиции 2.18, 2.19, 2.20, 2.23, 2.25…2.28, 5.2, 19) ─
+    # Десять стадий выполняются ОДНИМ циклом: разбор, запись и ответ каждой позиции задаёт
+    # строка пакета `configuration_position_spec`, поэтому и в конвейере они — один блок, а не
+    # десять копий по тридцать строк (ради этого пакет и сделан). Порядок задаёт
+    # `position_frame_specs()` — он же порядок `STAGES`; равенство перечней сверяет
+    # `tools/check_position_frame.py`, а не этот файл.
+    #
+    # Отказ любой из десяти стадий останавливает конвейер так же, как отказ V48…V58 (правило
+    # C5): заголовок, индекс состава, модули корня, свойства прежних видов и позиции этого
+    # пакета, уже записанные в данном цикле, остаются в базе, и отказ следующей позиции их не
+    # отменяет. Ответ каждой позиции лежит в собственном ключе (правило C3), а позиции после
+    # остановленной читаются состоянием `not_run`: их нулевые ответы положены в словарь до
+    # цикла (правило C2), поэтому карточка остановки видит все десять разделов.
+    #
+    # Штамп времени общий с остальными стадиями этой загрузки (M2) — `load_moment` задан выше,
+    # где начинается событие детей заголовка.
+    if not stopped:
+        for frame_spec in position_frame_specs():
+            frame_key = frame_spec["table"]
+            try:
+                position_frame_results[frame_key] = load_position_frame(
+                    frame_spec, root_source,
+                    configuration_uuid=row["uuid"], changed_at=load_moment)
+            except Exception as exc:  # noqa: BLE001 — отказ стадии называется, а не бросается
+                frame_result = position_frame_not_run(
+                    frame_spec,
+                    f"исключение слоя свойств позиции {frame_spec['position']} "
+                    f"({frame_spec['kind_tag']}): {exc}")
+                frame_result["status"] = STATUS_ERROR
+                position_frame_results[frame_key] = frame_result
+            frame_result = position_frame_results[frame_key]
+            frame_result["configuration_id"] = new_id
+            frame_result["configuration_uuid"] = row["uuid"]
+            frame_result["configuration_name"] = row["name"]
+            for frame_warning in frame_result.get("warnings") or []:
+                warnings.append(f"{frame_spec['kind_tag']}: {frame_warning}")
+            if not frame_result.get("success"):
+                warnings.append(
+                    f"Свойства вида {frame_spec['kind_tag']} (позиция "
+                    f"{frame_spec['position']}) не загружены — причина названа строкой "
+                    "«Стадия не выполнена» в разделе «"
+                    + position_frame_section_header(frame_spec)
+                    + "» карточки. Чем продолжить: load_1c_catalog_tool(source_path=…, "
+                    f"force=True) (configuration_uuid={row['uuid']}).")
+                stopped_stage = _stop_here(frame_spec["stage"], frame_result)
+                stopped = True
+                load_incomplete = True
+                break
+
     # ── узел V47 (стадия S4b): модули объектов конфигурации ────────────────────────────
     # Вторая транзакция ПОСЛЕ фиксации содержимого конфигурации (решение Q6, граница D7
     # узла V46): отказ стадии не откатывает заголовок, индекс состава, модули корня и
@@ -2383,6 +2460,15 @@ def register_configuration(source_path, force=False, xml_path=None):
         # прецедент V52/V56/V57; в ответе называются две ноги, которые узел действительно
         # читал: файлы круга и записи индекса состава вида (замер 1.1 плана V58 — 820/820).
         "defined_types": defined_types,
+        # узел V59: машинная часть десяти стадий пакета (позиции 2.18, 2.19, 2.20, 2.23,
+        # 2.25…2.28, 5.2, 19 списка) — каждая лежит в собственном ключе по имени таблицы
+        # позиции (правило C3), а не в одном общем ключе `position_frame`: общий ключ лишил бы
+        # ответ признака «какая именно позиция отказала», и `stopped_stage` не отличил бы одну
+        # стадию от другой. Словарь заполнен ДО конвейера нулями `not_run_answer` и поправлен
+        # циклом — содержимое ключей задаёт пакет позиций, а не этот файл (прецедент
+        # `*_defaults` V48…V58 по форме ответа). Групп `kinds` в ответе нет — это решение Q1
+        # варианта A (одна таблица свойств на позицию, содержимое `Ext/` считается числом).
+        **position_frame_results,
         # узел V47: машинная часть стадии S4b — полная (тот же закрытый контракт, который
         # читают проба П4 и проверка П5); текст раздела даёт общий форматёр контракта.
         # `load_incomplete`/`incomplete_groups` — признак того, что состав в БД неполный

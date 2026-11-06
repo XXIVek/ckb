@@ -355,6 +355,30 @@ from configuration_defined_types import (
     TYPE_CLASS_VALUES as DEFINED_TYPES_VALUE_CLASS_VALUES,
     zero_counts as defined_types_zero_counts,
 )
+# Узел V59 (позиции 2.18, 2.19, 2.20, 2.23, 2.25…2.28, 5.2, 19 нормативного списка): десять
+# плоских позиций регистрации описаны ОДНИМ пакетом — строками `configuration_position_spec`
+# (таблица, колонки, состояния, ответ позиции) и разбором `configuration_position_frame`.
+# Форматёр раздела здесь ОДИН на десять стадий (функция `format_position_frame_lines` ниже) по
+# той же причине, по которой у V48…V58 форматёр один на карточку и на отдельный инструмент:
+# два описания одного состава разъезжаются при первой же правке, а десять описаний десяти
+# одинаковых по форме стадий разъезжаются тем быстрее. Отличия позиций — заголовок раздела,
+# таблица, витрина, наличие содержимого `Ext/` и блока `InternalInfo` — читаются функцией из
+# самой строки контракта, а не выписаны в форматёре.
+from configuration_position_frame import REGISTRATION_STATE_VALUES
+from configuration_position_spec import (
+    CONTENT_EXPECTED,
+    CONTENT_STATE_VALUES,
+    FRAME_NODE,
+    INTERNAL_INFO_STATE_VALUES,
+    OBSERVATION_KINDS,
+    PROPERTIES_STATE_VALUES,
+    all_tables as position_frame_tables,
+    by_position,
+    header_column,
+    ordered_specs as position_frame_specs,
+    property_columns,
+    section_header,
+)
 from current_revision import CONFIGURATION_VERSIONED_TABLES
 
 # ── стадии конвейера: один перечень на контракт, карточку и проверку ───────────────
@@ -522,6 +546,31 @@ STAGE_FUNCTIONAL_OPTIONS_PARAMETERS = "s4l_functional_options_parameters"
 # резать, замер 2.2 не дал (весь круг четырёх выгрузок — 820 файлов регистрации и 17 544
 # значения, прочего содержимого ноль).
 STAGE_DEFINED_TYPES = "s4m_defined_types"
+# ── узел V59 (позиции 2.18, 2.19, 2.20, 2.23, 2.25…2.28, 5.2, 19 нормативного списка) ─
+# Десять плоских позиций регистрации задаются ОДНИМ пакетом — строками
+# `src/configuration_position_spec.py`; имена стадий читаются тем же пакетом
+# (`spec["stage"]`), а выписаны здесь только потому, что реестр `STAGES` обязан быть
+# литералом этого модуля. Причина отдельной стадии на позицию — правило C3 (ответ каждой
+# стадии лежит в своём ключе), как у V48…V58; порядок нормативного списка держит
+# `STAGES`, а не порядок литер (прецеденты V52…V58). Литеры `s4n`…`s4w` в коде свободны,
+# перенумерации прежних стадий нет; `s4b` остаётся последней стадией, потому что является
+# второй транзакцией загрузки (Q6 узла V46), а не позицией списка.
+# Групп запроса (`kinds`) у десяти позиций НЕТ — это решение, а не упущение (прецедент
+# Q1 варианта A узла V58): у каждой позиции одна таблица свойств, и содержимое `Ext/`
+# этой стадией считается числом, а не раскладывается отдельными таблицами (замер P0
+# плана V59: подкаталогов и дочерних таблиц ни у одной из десяти позиций нет).
+# Значения литер читаются пакетом; блок ниже — единственный, где они названы текстом.
+# @position-frame:stage-ids
+STAGE_COMMON_TEMPLATES = "s4n_common_templates"
+STAGE_COMMON_PICTURES = "s4o_common_pictures"
+STAGE_XDTO_PACKAGES = "s4p_xdto_packages"
+STAGE_WS_REFERENCES = "s4q_ws_references"
+STAGE_INTEGRATION_SERVICES = "s4r_integration_services"
+STAGE_STYLE_ITEMS = "s4s_style_items"
+STAGE_STYLES = "s4t_styles"
+STAGE_LANGUAGES = "s4u_languages"
+STAGE_SEQUENCES = "s4v_sequences"
+STAGE_EXTERNAL_DATA_SOURCES = "s4w_external_data_sources"
 # Узел V47 (28.10.2026): тексты модулей объектов конфигурации. Номер S4b, а не S5:
 # S5 остаётся за планируемой стадией анализа (дополнение оператора 23.10.2026), которой
 # в `STAGES` нет. Стадия идёт сразу за S4 и является второй транзакцией загрузки (Q6,
@@ -578,6 +627,32 @@ STAGES: Tuple[Tuple[str, str], ...] = (
     # потому что является второй транзакцией загрузки (Q6 узла V46), а не позицией списка.
     (STAGE_DEFINED_TYPES,
      "Свойства определяемых типов (DefinedTypes, позиция 2.13)"),
+    # Узел V59 (позиции 2.18, 2.19, 2.20, 2.23, 2.25…2.28, 5.2, 19 нормативного списка):
+    # десять стадий плоской регистрации идут строго порядком нормативного списка — 2.18…2.20
+    # после 2.13, 2.23…2.28 после 2.18…2.20, затем 5.2 и 19 (позиции 5.x и верхнего уровня
+    # идут после позиций раздела 2, порядок задаёт сам нормативный список). Литеры `s4n`…`s4w`
+    # свободны, перенумерации прежних стадий нет; S4b остаётся последней стадией, потому что
+    # является второй транзакцией загрузки (Q6 узла V46), а не позицией списка.
+    (STAGE_COMMON_TEMPLATES,
+     "Свойства общих макетов (CommonTemplates, позиция 2.18)"),
+    (STAGE_COMMON_PICTURES,
+     "Свойства общих картинок (CommonPictures, позиция 2.19)"),
+    (STAGE_XDTO_PACKAGES,
+     "Свойства XDTO-пакетов (XDTOPackages, позиция 2.20)"),
+    (STAGE_WS_REFERENCES,
+     "Свойства WS-ссылок (WSReferences, позиция 2.23)"),
+    (STAGE_INTEGRATION_SERVICES,
+     "Свойства сервисов интеграции (IntegrationServices, позиция 2.25)"),
+    (STAGE_STYLE_ITEMS,
+     "Свойства элементов стиля (StyleItems, позиция 2.26)"),
+    (STAGE_STYLES,
+     "Свойства стилей (Styles, позиция 2.27)"),
+    (STAGE_LANGUAGES,
+     "Свойства языков (Languages, позиция 2.28)"),
+    (STAGE_SEQUENCES,
+     "Свойства последовательностей (Sequences, позиция 5.2)"),
+    (STAGE_EXTERNAL_DATA_SOURCES,
+     "Свойства внешних источников данных (ExternalDataSources, позиция 19)"),
     (STAGE_OBJECT_MODULES, "Модули объектов конфигурации (тексты Ext/, вторая транзакция)"),
 )
 
@@ -2223,6 +2298,25 @@ STORED_META_KINDS: Dict[str, Dict[str, Any]] = {
     },
 }
 
+# Узел V59 (шаг П5): десять позиций пакета входят в круг тем же порядком, что и одиночные
+# виды V48…V58. Без этих строк десять видов остались бы в перечне «содержимое в БД не
+# раскладывается», хотя стадии `s4n`…`s4w` пишут их свойства (прецеденты V55…V58; дефект
+# назван `_v54_p5_stage_probe.py`). Записи строятся ЦИКЛОМ по строкам контракта позиции:
+# выписать десять руками значило бы держать второй перечень позиций — тот самый, которого
+# пакет избегает. Таблицей одна запись остаётся осознанно (Q1 варианта A узлов V55/V58):
+# дочерних таблиц ни у одной из десяти позиций нет (замер P0 плана V59), а содержимое `Ext/`
+# этой стадией считается числом и отдельной таблицы не образует.
+STORED_META_KINDS.update({
+    frame_spec["kind_tag"]: {
+        "node": FRAME_NODE,
+        "stage": frame_spec["stage"],
+        "position": frame_spec["position"],
+        "tables": [frame_spec["table"]],
+        "section": section_header(frame_spec),
+    }
+    for frame_spec in position_frame_specs()
+})
+
 # Таблицы, чьи строки остаются нетронутыми, когда группа не запрошена: ответ обязан назвать
 # это, а не отдать нули как «в конфигурации ничего нет» (C2).
 # Узел V52 (шаг П4) добавляет круг стадии S4g: без этой строки `CHILD_TABLES` — круг стадии
@@ -2261,6 +2355,15 @@ FOREIGN_STAGE_TABLES: Tuple[str, ...] = (
     + EXCHANGE_PLAN_TABLES + FILTER_CRITERIA_TABLES + EVENT_SUBSCRIPTIONS_TABLES
     + SCHEDULED_JOBS_TABLES + BOTS_TABLES + FUNCTIONAL_OPTIONS_TABLES
     + FUNCTIONAL_OPTION_PARAMETERS_TABLES + DEFINED_TYPES_TABLES
+    # Узел V59 (шаг П4) добавляет круг десяти стадий `s4n`…`s4w` тем же порядком и раньше,
+    # чем стадии входят в `STAGES` (шаг П5): таблицы уже зарегистрированы в круге версионности
+    # (`CONFIGURATION_VERSIONED_TABLES`, `src/current_revision.py`, шаг П1 пакета), и без этой
+    # строки стадия S4 снимала и анализировала бы чужие строки десяти видов (замер P0 плана
+    # V59: 2 148 файлов регистрации на четыре выгрузки корпуса). Перечень таблиц задаёт пакет
+    # (`position_frame_tables()` — строки контракта позиции), а не этот файл: выписанный
+    # вторым списком, он разошёлся бы с пакетом при первой же правке, и `CHILD_TABLES` снова
+    # стал бы шире круга стадии — дефект, который закрывали записи V48…V58.
+    + tuple(position_frame_tables())
 )
 
 CHILD_TABLES: Tuple[str, ...] = tuple(
@@ -6021,5 +6124,167 @@ def format_defined_types_lines(result: Dict[str, Any], indent: str = "") -> List
     for warning in result.get("warnings") or []:
         lines.append(f"{indent}⚠️ {warning}")
     lines.append(f"{indent}{DEFINED_TYPES_CIRCLE_BOUNDARY}")
+    return lines
+
+def format_position_frame_lines(result: Dict[str, Any],
+                               indent: str = "") -> List[str]:
+    """Строки отчёта стадии позиции пакета V59 — ОДИН форматёр на десять стадий.
+
+    Почему форматёр один, а не десять (отличие от V48…V58 названо, а не сглажено): десять
+    позиций имеют ОДИН контракт — строка `configuration_position_spec` задаёт таблицу,
+    колонки, словари состояний и ответ позиции. Десять форматёров по сорок строк различались
+    бы только заголовком раздела и перечнем состояний, то есть держали бы десять описаний
+    одного состава и разъезжались бы при первой же правке круга. Отличия позиций — заголовок
+    раздела, таблица, витрина, наличие содержимого `Ext/` и блока `InternalInfo` — читаются
+    здесь из самой строки контракта (`by_position(result["position"])`), поэтому правка
+    позиции меняет и ответ стадии, и раздел карточки одним местом.
+
+    Печатается полными словарями, а не только ненулевыми значениями (C1): состояния свойств
+    (`PROPERTIES_STATE_VALUES`, он же CHECK живой схемы), состояния содержимого
+    (`CONTENT_STATE_VALUES`), состояния сверки с индексом состава
+    (`REGISTRATION_STATE_VALUES` слоя разбора) и наблюдения (`OBSERVATION_KINDS`). Отличия
+    состояний названы строками, потому что числа их не различают: `not_checked` — «перечень
+    не загружен», а не «объекта нет в перечне» (C2); `no_content` — «содержимого у вида нет»,
+    `content_missing` — «ожидалось и не найдено» (замер P0: содержимое есть не у каждой из
+    десяти позиций, и смешение двух состояний дало бы неверный ответ о выгрузке).
+    """
+    position = str(result.get("position") or "")
+    try:
+        spec = by_position(position)
+    except KeyError:
+        # Ответ вне пакета: форматёр не выдумывает заголовок и не печатает числа «на глаз» —
+        # он называет, что контракт позиции не найден (ошибка программы, а не данных).
+        return [f"{indent}⚠️ позиция {position or '—'} вне пакета {FRAME_NODE}: ответ стадии "
+                "не описан форматёром — это ошибка контракта, а не отсутствие данных"]
+
+    lines: List[str] = []
+    stage = spec["stage"]
+    table = spec["table"]
+
+    def state_line(prefix: str, vocabulary: Tuple[str, ...]) -> str:
+        return ", ".join(f"{state}={int(result.get(prefix + state) or 0)}"
+                         for state in vocabulary)
+
+    if result.get("status") not in (STATUS_OK, STATUS_SKIPPED):
+        error = result.get("error") or result.get("reason") or "стадия не выполнялась"
+        lines.append(f"{indent}⚠️ {stage}: {error}")
+        for failure in result.get("failures") or []:
+            lines.append(f"{indent}  ⚠️ {failure}")
+        return lines
+    if result.get("status") == STATUS_SKIPPED:
+        lines.append(f"{indent}{stage}: {result.get('reason') or 'вид не запрошен'}")
+        return lines
+
+    lines.append(
+        f"{indent}{stage}: конфигурация id={result.get('configuration_id')} "
+        f"uuid={result.get('configuration_name')}, строк {int(result.get('rows_written') or 0)} "
+        f"(снято прежних {int(result.get('removed_previous') or 0)}), файлов регистрации "
+        f"найдено {int(result.get('registration_files') or 0)}, отказов разбора "
+        f"{int(result.get('parse_failures') or 0)}"
+    )
+    lines.append(
+        f"{indent}  по таблицам: {table}:снято="
+        f"{int((result.get('removed_by_table') or {}).get(table) or 0)}/записано="
+        f"{int((result.get('written_by_table') or {}).get(table) or 0)}"
+        f"; статистика обновлена: {int(result.get('statistics_refreshed') or 0)}"
+        f"; витрина текущих строк: {spec['view']}"
+    )
+    lines.append(
+        f"{indent}Свойства файла регистрации — "
+        + state_line("properties_", PROPERTIES_STATE_VALUES)
+        + "; имена незаписанных тегов держит колонка `" + table
+        + ".unknown_property_names` строки (в ответе стадии они не собираются: имена нужны "
+          "для правки словаря тегов, а не для числа расхождений)"
+    )
+
+    if spec["internal_info"]:
+        lines.append(
+            f"{indent}Блок `InternalInfo` — "
+            + state_line("internal_info_", INTERNAL_INFO_STATE_VALUES)
+            + "; идентификатор генерируемого типа — колонка `generated_name`, ключом строки "
+              "она не является (тот же смысл, что у Q4 узла V58)"
+        )
+    if spec["content"] == CONTENT_EXPECTED:
+        lines.append(
+            f"{indent}Содержимое `Ext/` вида — "
+            + ", ".join(
+                f"{state}="
+                f"{int((result.get('counts_by_content_state') or {}).get(state) or 0)}"
+                for state in CONTENT_STATE_VALUES)
+            + f"; файлов содержимого {int(result.get('content_files') or 0)} "
+              f"(объектов с содержимым {int(result.get('objects_with_content') or 0)}, без "
+              f"содержимого {int(result.get('objects_without_content') or 0)})"
+        )
+        lines.append(
+            f"{indent}  `no_content` — каталога `Ext/` у объекта нет, `content_missing` — "
+              "корпус позиции содержимое даёт, а у этого объекта его нет: два разных ответа о "
+              "выгрузке, и нуль счётчика их не различает (замер P0 плана V59)"
+        )
+    else:
+        lines.append(
+            f"{indent}Каталога содержимого `Ext/` у вида нет ни в одной выгрузке корпуса "
+            "(замер P0) — это факт выгрузки, а не пропуск круга узла"
+        )
+    if spec["child_blocks"]:
+        lines.append(
+            f"{indent}Дочерние блоки `<ChildObjects>` — "
+            + ", ".join(f"{child_table}={int(result.get('children_' + child_table) or 0)}"
+                        for _tag, child_table in spec["child_blocks"])
+            + f"; всего детей {int(result.get('child_objects_total') or 0)}"
+        )
+    filled = ", ".join(
+        f"{column}={int(result.get('property_' + column) or 0)}"
+        for column in property_columns(spec) if column != "object_name")
+    lines.append(
+        f"{indent}Заполненность свойств (строк с ненулевым значением): "
+        f"{filled or 'нет колонок свойств'} — число СТРОК с значением, а не число значений: "
+        "строка одна на файл регистрации (прецедент V58: «строк вида с квалификаторами», "
+        "а не «блоков»)"
+    )
+    lines.append(
+        f"{indent}Сверка круга с индексом состава (записей вида в индексе "
+        f"{int(result.get('index_kind_records') or 0)}): "
+        + ", ".join(
+            f"{state}="
+            f"{int((result.get('counts_by_registration_state') or {}).get(state) or 0)}"
+            for state in REGISTRATION_STATE_VALUES)
+    )
+    lines.append(
+        f"{indent}  `not_checked` — индекс состава этой конфигурации не читался: «объекта нет "
+          "в перечне» и «перечень не загружен» являются разными ответами (правило C2); "
+          "`matched`/`file_only`/`index_only`/`uuid_mismatch` — состояния сверки, которые "
+          "индекс позволяет различить"
+    )
+    for key in ("index_only", "file_only", "uuid_mismatch", "duplicate_names"):
+        if result.get(key):
+            lines.append(f"{indent}  ⚠️ {key}: "
+                         + "; ".join(str(item) for item in (result.get(key) or [])[:10]))
+    observations = result.get("counts_by_observation") or {}
+    lines.append(
+        f"{indent}Наблюдения круга: "
+        + ", ".join(f"{kind}={int(observations.get(kind) or 0)}"
+                    for kind in OBSERVATION_KINDS)
+        + " — отсутствующий каталог вида является состоянием выгрузки, а не отказом стадии "
+          "(позиции 2.27, 5.2 и 19 отсутствуют в части выгрузок корпуса — замер P0)"
+    )
+    for example in (result.get("examples") or [])[:3]:
+        lines.append(
+            f"{indent}  ⚠️ {example.get('source_path')}: регистрация="
+            f"{example.get('registration_check')}, содержимое={example.get('content_state')} "
+            f"({int(example.get('content_files') or 0)} файлов), свойства="
+            f"{example.get('properties_state')}")
+    if not result.get("index_available"):
+        lines.append(
+            f"{indent}Индекс состава этой конфигурации не прочитан — сверка файлов с перечнем "
+              "невозможна: все строки остались состоянием `not_checked`, и это НЕ ответ "
+              "«объектов в конфигурации нет» (правило C2)"
+        )
+    for warning in result.get("warnings") or []:
+        lines.append(f"{indent}⚠️ {warning}")
+    lines.append(
+        f"{indent}Граница круга позиции {spec['position']}: {spec['boundary']}. Перечень имён "
+        f"вида в строке заголовка (configurations.{header_column(spec['kind_tag'])}) стадия "
+        "не пишет и не перечитывает — его держит S2 узла V43 (прецедент V52/V56/V57/V58)."
+    )
     return lines
 
