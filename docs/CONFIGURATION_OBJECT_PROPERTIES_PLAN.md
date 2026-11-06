@@ -613,8 +613,10 @@ MCP-сервера. Прогон: `python tools/check_mcp_tool_wiring.py`, `pyth
   > (V53, 2.8), `ScheduledJobs` (V54, 2.9), `Bots` (V55, 2.10), `FunctionalOptions` (V56, 2.11),
   > `FunctionalOptionsParameters` (V57, 2.12) — все отдельными таблицами, а не колонкой
   > `properties jsonb` (её в живой схеме нет); не закрыты `Constants`, `Styles`, `StyleItems`,
-  > `CommandGroups`, `CommonCommands`, `Languages`, а также позиция 2.13 (`DefinedTypes` — в
-  > выгрузке эталонного набора определённых типов нет). Роли (V49) и содержимое вида
+  > `CommandGroups`, `CommonCommands`, `Languages`. Позиция 2.13 (`DefinedTypes`) закрыта узлом
+  > V58 (05.11.2026): каталог `DefinedTypes/` есть во всех четырёх выгрузках эталонного набора —
+  > 2 / 1 / 304 / 513 файла; прежняя формулировка «определённых типов нет» снята шагом П7 этого
+  > узла. Роли (V49) и содержимое вида
   > (`Content`/`<Source>`/`<Use>`/`Ext/Schedule.xml`) относятся к группе F, дети общей раскладки
   > `ExchangePlans` и `FilterCriteria` (V51/V52) — к группе A, модули — к группе B (V46/V47).
   > Живой перечень закрытых позиций и актуальная формулировка группы E держат строками матрицы
