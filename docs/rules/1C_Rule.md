@@ -377,7 +377,11 @@ XML, флаги изменённых объектов, сборка XML по с�
    прямо и разрешается по авторитетному источнику (группа BSL-справки), а не по порядку в выдаче.
 2. **Исходники вне проекта:** `C:\1C_LLM\LoadDoc\` — документация и конфигурации
 3. **Все MCP-инструменты работают через `server.py`, `server_configurations_core.py`, `server_configurations_enrichment.py`, `server_configurations_export.py`** — не напрямую через mcp_tools.py; состав инструментов каждого сервера зафиксирован в `tools/check_mcp_tool_wiring.py`
-4. **psql.exe запускается правильно:** `$env:PGPASSWORD=(Get-Content .env | ConvertFrom-StringData).PGPASSWORD; C:\Postgres\bin\psql.exe` с флагами `-tA -P footer=off`  
+4. **psql.exe запускается по карточке правил:** полную строку с флагами `-tA -P footer=off`, путь к
+   бинарю, `-U postgres` и реквизиты подключения называет `rules:kb-rules:functional:db-access` —
+   читать `python tools/rules_read.py "rules:kb-rules:functional:db-access"`. Команда здесь не
+   повторяется: вторая копия правила расходится с первоисточником молча (замер 07.11.2026 — в этой
+   копии не хватало `-U postgres`, вызов падал на отсутствующей роли `Buh`)  
 5. **Никогда не запрашивать подтверждение** на продолжение вывода — команды выполняются автоматически
 6. **Фильтровать вывод:** использовать LIMIT, WHERE в SQL или [:10], head в Python
 7. **Дубликат — спрашивать, а не решать самому.** Получив `⚠️ уже загружено`, AI-ассистент
@@ -416,13 +420,16 @@ XML, флаги изменённых объектов, сборка XML по с�
 
 ## РАБОТА С ТЕРМИНАЛОМ
 
-Правильный запуск psql.exe:
+Запуск psql.exe — по карточке правил, её читают адресом:
 
 ```powershell
-$env:PGPASSWORD=(Get-Content .env | ConvertFrom-StringData).PGPASSWORD; C:\Postgres\bin\psql.exe -tA -P footer=off
+python tools/rules_read.py "rules:kb-rules:functional:db-access"
 ```
 
-с использованием флага `-tA` для тихого режима и footer=off для отключения постраничного вывода.
+В карточке — строка запуска с флагами `-tA` (тихий режим) и `-P footer=off` (выключенный
+постраничный вывод), путь к бинарю `C:\Postgres\bin\psql.exe` (в `PATH` его нет), `-U postgres`
+(роли `Buh` на сервере нет) и реквизиты подключения. Команда здесь не дублируется: две копии одного
+правила расходятся молча, и в этой копии `-U postgres` уже не было — замер 07.11.2026.
 
 Критические правила:
 

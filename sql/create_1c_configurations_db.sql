@@ -7,15 +7,18 @@
 -- и давала второй заголовок для того же понятия; для живой БД — migrate_v22_object_kind.sql.
 -- ============================================
 --
--- СОЗДАНИЕ БАЗЫ «С НУЛЯ» — ровно три шага после CREATE DATABASE (порядок фиксирован):
---   1) psql -v ON_ERROR_STOP=1 -d ckb_1c_configurations -f src/ddl_external_report.sql
+-- СОЗДАНИЕ БАЗЫ «С НУЛЯ» — ровно три шага после CREATE DATABASE (порядок фиксирован).
+--   Строку запуска целиком (путь к бинарю, -U postgres, пароль из .env) называет карточка правил
+--   rules:kb-rules:functional:db-access: в PATH бинаря psql нет, а роли Buh на сервере нет —
+--   вызов без -U postgres падает до первой строки файла.
+--   1) C:\Postgres\bin\psql.exe -U postgres -h localhost -d ckb_1c_configurations -v ON_ERROR_STOP=1 -f src/ddl_external_report.sql
 --        external_report + attributes, tabular_sections, forms, form_ext, templates
 --        + витрины анализа v_form_elements / v_form_events.
---   1b) psql -v ON_ERROR_STOP=1 -d ckb_1c_configurations -f src/ddl_enrichment.sql
+--   1b) C:\Postgres\bin\psql.exe -U postgres -h localhost -d ckb_1c_configurations -v ON_ERROR_STOP=1 -f src/ddl_enrichment.sql
 --        config_aliases, config_snippets, config_snippet_dependencies, config_cross_references
 --        + витрины v_enrichment_targets / v_enrichment_objects (узел V17). FK шага 1b смотрят
 --        в таблицы шага 1, поэтому порядок 1 -> 1b -> 2 обязателен.
---   2) psql -v ON_ERROR_STOP=1 -d ckb_1c_configurations -f create_1c_configurations_db.sql
+--   2) C:\Postgres\bin\psql.exe -U postgres -h localhost -d ckb_1c_configurations -v ON_ERROR_STOP=1 -f create_1c_configurations_db.sql
 --        configurations, config_extensions, bsl_modules, configuration_objects (этот файл).
 --        Таблица external_processing удалена узлом V22: заголовок обработки — строка
 --        external_report. configuration_objects добавлена узлом V33 (перечень объектов

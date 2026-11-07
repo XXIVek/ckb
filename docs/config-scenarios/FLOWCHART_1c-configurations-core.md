@@ -800,19 +800,22 @@ python validate_form_bin_decode.py --file <путь Form.bin> --uuid <uuid> --fo
                                           # ext_path указывает на Form.bin
 # SQL-сверки: обязателен -v ON_ERROR_STOP=1 (без него psql вернёт 0 при ошибке в середине файла,
 # и часть проверок молча не выполнится). Результаты — в _v*_out.txt (артефакты, в .gitignore).
-psql -f check_external_report_fill.sql      # наполнение по узлам V12/V13/V14/V15, секции 1-19
+# Полная строка запуска (путь к бинарю, -U postgres, пароль из .env) — карточка правил
+# rules:kb-rules:functional:db-access; ниже каждая команда названа явно, потому что в PATH
+# бинаря psql нет, а роли Buh на сервере нет и вызов без -U postgres падает до первой строки.
+C:\Postgres\bin\psql.exe -U postgres -h localhost -d ckb_1c_configurations -v ON_ERROR_STOP=1 -f check_external_report_fill.sql      # наполнение по узлам V12/V13/V14/V15, секции 1-19
                                           # (16 = дефект «Ordinary без ext_bin»,
                                           #  17 = инварианты V14 + пустых items у Ordinary = 0 и
                                           #      заполненные attributes/events/commands/auto_command_bar = 1,
                                           #  18 = витрины: ordinary 10 элементов / 3 источника /
                                           #      4 подписи / 1 событие)
-psql -f check_external_report_search.sql    # поиск по метаданным и содержимому, варианты 1-16
+C:\Postgres\bin\psql.exe -U postgres -h localhost -d ckb_1c_configurations -v ON_ERROR_STOP=1 -f check_external_report_search.sql    # поиск по метаданным и содержимому, варианты 1-16
                                           # (12-16 = элементы ordinary-формы, подписи, источники
                                           #  данных, события через витрины)
-psql -f check_external_report_inventory.sql # инвентарь «что видно из БД без распаковки»: формы и
+C:\Postgres\bin\psql.exe -U postgres -h localhost -d ckb_1c_configurations -v ON_ERROR_STOP=1 -f check_external_report_inventory.sql # инвентарь «что видно из БД без распаковки»: формы и
                                           # их наполнение, модули BSL и form_ext.ext, витрины,
                                           # слепые зоны, сироты
-psql -f migrate_v14_form_analysis_views.sql # витрины для УЖЕ созданной БД (на чистой их создаёт
+C:\Postgres\bin\psql.exe -U postgres -h localhost -d ckb_1c_configurations -v ON_ERROR_STOP=1 -f migrate_v14_form_analysis_views.sql # витрины для УЖЕ созданной БД (на чистой их создаёт
                                           # шаг 1 установки). CREATE OR REPLACE — повторно безопасно
 ```
 
@@ -983,9 +986,9 @@ $env:PGPASSWORD=(Get-Content .env | ConvertFrom-StringData).PGPASSWORD; $env:PGC
 $env:PGCLIENTENCODING='UTF8'; $env:PGPASSWORD=(Get-Content .env | ConvertFrom-StringData).PGPASSWORD
 C:\Postgres\bin\psql.exe -v ON_ERROR_STOP=1 -U postgres -h localhost -d ckb_1c_configurations -P pager=off `
   -f check_external_report_fill.sql -o _v15_fill_out.txt      # результат пишем в файл (-o),
-C:\Postgres\bin\psql.exe -v ON_ERROR_STOP=1 ... `
+C:\Postgres\bin\psql.exe -v ON_ERROR_STOP=1 -U postgres -h localhost -d ckb_1c_configurations -P pager=off `
   -f check_external_report_search.sql -o _v15_search_out.txt
-C:\Postgres\bin\psql.exe -v ON_ERROR_STOP=1 ... `
+C:\Postgres\bin\psql.exe -v ON_ERROR_STOP=1 -U postgres -h localhost -d ckb_1c_configurations -P pager=off `
   -f check_external_report_inventory.sql -o _v15_inventory_out.txt
 ```
 
