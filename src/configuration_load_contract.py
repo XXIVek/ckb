@@ -375,6 +375,7 @@ from configuration_position_spec import (
     all_tables as position_frame_tables,
     by_position,
     header_column,
+    incomplete_group as position_frame_incomplete_group,
     ordered_specs as position_frame_specs,
     property_columns,
     section_header,
@@ -906,6 +907,25 @@ STAGE_INCOMPLETE_GROUPS: Dict[str, str] = {
     STAGE_OBJECT_MODULES: "модули объектов конфигурации (группа C модели V38, Ext/)",
 }
 
+# ── узел V59 (десять плоских позиций регистрации): контур остановки ─────────────────
+# Записи двух словарей остановки выводятся строками пакета, а не выписываются десятью
+# копиями. Отсутствие ключа в `STAGE_FULL_RELOAD_ONLY` читается как «отдельный вход
+# есть» (об этом говорят строки 784–826 этого файла), отсутствие ключа в
+# `STAGE_INCOMPLETE_GROUPS` — как «состава остановка не касается». Ни того, ни другого
+# не видно ни в одной карточке, но оба ловятся стоп-пробой чужого узла числом: десять
+# стадий вошли в `STAGES` узлом V59, а контур остановки закрывается только здесь
+# (шаг П8 узла V58, 06.11.2026).
+#
+# `full_reload_required = True` для всех десяти — это состояние, а не допущение:
+# отдельного входа позиции нет, он снят узлом TOOL-DROP (05.11.2026), поэтому повторить
+# позицию можно только полной перезагрузкой единой точки входа. Незакрытая группа
+# называется позицией нормативного списка и её кругом — формулировку даёт строка
+# пакета (`incomplete_group`), второго описания круга в проекте нет.
+for _frame_spec in position_frame_specs():
+    STAGE_FULL_RELOAD_ONLY[_frame_spec["stage"]] = True
+    STAGE_INCOMPLETE_GROUPS[_frame_spec["stage"]] = position_frame_incomplete_group(
+        _frame_spec)
+
 # Обязательная строка ответа: остановка откатом не является. Заполняется загрузчиком по
 # факту выполненного — здесь каркас фразы, чтобы формулировка была одна.
 STOPPED_STAGE_WRITTEN_TEMPLATE = (
@@ -1019,7 +1039,11 @@ def stage_resume_hint(stage_id: str) -> str:
         return DEFINED_TYPES_REPEAT_HINT
     if stage_id == STAGE_OBJECT_MODULES:
         return OBJECT_MODULES_RELOAD_HINT
-    return "полная перезагрузка load_1c_catalog_tool(source_path=…, force=True)"
+    # Узел TOOL-DROP (05.11.2026) снял отдельный вход позиции, поэтому у стадии без
+    # собственной ветки — тот же текст повтора, что у всех остальных, а не своя
+    # формулировка по умолчанию: два текста об одном действии расходятся при первой же
+    # правке (правило одного места). Именно сюда попадают десять стадий пакета V59.
+    return STAGE_REPEAT_HINT
 
 
 def stopped_stage_defaults() -> Dict[str, Any]:
@@ -2192,6 +2216,13 @@ CHILD_NOT_IMPLEMENTED = (
     "четырьмя идентификаторами с состоянием и блок <Type> колонками строки вида — второй "
     "таблицы значений у узла нет осознанно (Q1, вариант A), а форм, макетов, команд, модулей "
     "и каталогов содержимого у вида нет ни в одной выгрузке — замер 1.2 плана V58) "
+    "свойства десяти видов общего состава — позиции "
+    + " / ".join(_frame_row["position"] for _frame_row in position_frame_specs())
+    + " нормативного списка (узел V59, стадии "
+    + ", ".join(_frame_row["stage"] for _frame_row in position_frame_specs())
+    + "); круг каждой позиции называется её строкой контракта "
+    "(`configuration_position_spec`), а незакрытая часть — полем `group_title` и "
+    "границей `boundary` той же строки, а не этим перечнем; "
     "и тексты модулей объектов "
     "конфигурации — шесть слотов Ext/ (узел V47, стадия S4b, раздел «"
     "МОДУЛИ ОБЪЕКТОВ КОНФИГУРАЦИИ» ниже); не реализованы реквизиты и "

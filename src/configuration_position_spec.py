@@ -136,7 +136,7 @@ OBSERVATION_KINDS: Tuple[str, ...] = (
 def _spec(position: str, title: str, container: str, kind_tag: str, table: str,
           stage: str, expected: Dict[str, int], *, properties=(), child_blocks=(),
           content: str = CONTENT_NONE, internal_info: bool = False,
-          boundary: str = "") -> Dict[str, Any]:
+          group_title: str = "", boundary: str = "") -> Dict[str, Any]:
     """Одна строка контракта позиции. Всё остальное выводится из неё."""
     return {
         "position": position,
@@ -151,6 +151,7 @@ def _spec(position: str, title: str, container: str, kind_tag: str, table: str,
         "child_blocks": tuple(child_blocks),
         "content": content,            # none | expected — наличие `Ext/` у вида по корпусу
         "internal_info": internal_info,
+        "group_title": group_title,      # родительный падеж: конструкция строки выводится
         "expected": dict(expected),
         "boundary": boundary,
     }
@@ -166,6 +167,7 @@ POSITION_SPECS: Tuple[Dict[str, Any], ...] = (
     _spec("2.18", "Общие макеты", "CommonTemplates", "CommonTemplate",
           "common_templates", "s4n_common_templates",
           {"BP3": 280, "ZUP31": 111, "UT11": 217, "MinCfg": 2},
+          group_title="общих макетов",
           properties=(("TemplateType", "template_type", KIND_ENUM),),
           content=CONTENT_EXPECTED,
           boundary="содержимое макета (Ext/Template.bin|.xml|.txt|.html) в круг узла не "
@@ -173,6 +175,7 @@ POSITION_SPECS: Tuple[Dict[str, Any], ...] = (
     _spec("2.19", "Общие картинки", "CommonPictures", "CommonPicture",
           "common_pictures", "s4o_common_pictures",
           {"BP3": 2029, "ZUP31": 1198, "UT11": 1834, "MinCfg": 2},
+          group_title="общих картинок",
           properties=(("AvailabilityForChoice", "availability_for_choice", KIND_FLAG),
                       ("AvailabilityForAppearance", "availability_for_appearance", KIND_FLAG)),
           content=CONTENT_EXPECTED,
@@ -181,12 +184,14 @@ POSITION_SPECS: Tuple[Dict[str, Any], ...] = (
     _spec("2.20", "XDTO-пакеты", "XDTOPackages", "XDTOPackage",
           "xdto_packages", "s4p_xdto_packages",
           {"BP3": 447, "ZUP31": 104, "UT11": 406, "MinCfg": 2},
+          group_title="XDTO-пакетов",
           properties=(("Namespace", "namespace", KIND_TEXT),),
           content=CONTENT_EXPECTED,
           boundary="Package.bin — двоичное содержимое пакета, в круг узла не входит"),
     _spec("2.23", "WS-ссылки", "WSReferences", "WSReference",
           "ws_references", "s4q_ws_references",
           {"BP3": 1, "ZUP31": 1, "UT11": 1, "MinCfg": 1},
+          group_title="WS-ссылок",
           properties=(("LocationURL", "location_url", KIND_TEXT),),
           content=CONTENT_EXPECTED, internal_info=True,
           boundary="WSDL-состав (types/message/portType/binding/service) лежит в "
@@ -194,6 +199,7 @@ POSITION_SPECS: Tuple[Dict[str, Any], ...] = (
     _spec("2.25", "Сервисы интеграции", "IntegrationServices", "IntegrationService",
           "integration_services", "s4r_integration_services",
           {"BP3": 1, "ZUP31": 1, "UT11": 1, "MinCfg": 1},
+          group_title="сервисов интеграции",
           properties=(("ExternalIntegrationServiceAddress",
                        "external_integration_service_address", KIND_TEXT),),
           child_blocks=(("IntegrationServiceChannel", "integration_service_channels"),),
@@ -203,23 +209,27 @@ POSITION_SPECS: Tuple[Dict[str, Any], ...] = (
     _spec("2.26", "Элементы стиля", "StyleItems", "StyleItem",
           "style_items", "s4s_style_items",
           {"BP3": 548, "ZUP31": 275, "UT11": 400, "MinCfg": 2},
+          group_title="элементов стиля",
           properties=(("Type", "style_item_type", KIND_ENUM),
                       ("Value", "style_item_value", KIND_TEXT)),
           boundary="содержимого у вида нет ни в одной выгрузке (замер: 0 файлов `Ext/`)"),
     _spec("2.27", "Стили", "Styles", "Style",
           "styles", "s4t_styles",
           {"BP3": 0, "ZUP31": 0, "UT11": 0, "MinCfg": 2},
+          group_title="стилей",
           boundary="контейнер есть только в MinCfg (2 файла); в BP3, ZUP31, UT11 каталога "
                    "нет — круг по этим выгрузкам пуст и называется числом 0"),
     _spec("2.28", "Языки", "Languages", "Language",
           "languages", "s4u_languages",
           {"BP3": 1, "ZUP31": 1, "UT11": 1, "MinCfg": 2},
+          group_title="языков",
           properties=(("LanguageCode", "language_code", KIND_TEXT),),
           boundary="словарём значений код языка не закрывается (XSD вида корпусом не "
                    "найден), поэтому значение читается текстом с состоянием разбора"),
     _spec("5.2", "Последовательности", "Sequences", "Sequence",
           "sequences", "s4v_sequences",
           {"BP3": 5, "ZUP31": 0, "UT11": 0, "MinCfg": 2},
+          group_title="последовательностей",
           properties=(("MoveBoundaryOnPosting", "move_boundary_on_posting", KIND_FLAG),
                       ("Documents", "documents_ref", KIND_REF),
                       ("RegisterRecords", "register_records_ref", KIND_REF),
@@ -232,6 +242,7 @@ POSITION_SPECS: Tuple[Dict[str, Any], ...] = (
     _spec("19", "Внешние источники данных", "ExternalDataSources", "ExternalDataSource",
           "external_data_sources", "s4w_external_data_sources",
           {"BP3": 0, "ZUP31": 0, "UT11": 0, "MinCfg": 1},
+          group_title="внешних источников данных",
           properties=(("DataLockControlMode", "data_lock_control_mode", KIND_ENUM),),
           internal_info=True,
           boundary="контейнер есть только в MinCfg (1 файл); содержимого у вида нет"),
@@ -468,6 +479,35 @@ def section_header(spec: Dict[str, Any]) -> str:
     """
     return (f"СВОЙСТВА {spec['title'].upper()} "
             f"(узел {FRAME_NODE}, позиция {spec['position']})")
+
+
+def incomplete_group(spec: Dict[str, Any]) -> str:
+    """Незакрытая группа состава, которую называет остановка конвейера на стадии позиции.
+
+    Строка выводится спецификацией, а не выписывается контрактом десятью копиями: круг у
+    всех десяти позиций один по замеру `probes/v59/_v59_p0_frame_probe.py` — файл
+    регистрации верхнего уровня с блоком `Properties`; записи `ChildObjects` считаются
+    числом; наличие `Ext/` различается полем `content`, блок `InternalInfo` — полем
+    `internal_info`. Отличия позиций читаются теми же полями, что читает их движок.
+
+    Родительный падеж названия вида полем `group_title` держится потому, что он вывестись
+    не может: это свойство позиции, а не форма строки.
+
+    Формат совпадает с записями `STAGE_INCOMPLETE_GROUPS` узлов V48…V58. Без записи
+    остановка на стадии оставила бы ответ без машиночитаемого признака неполноты:
+    `incomplete_groups` строится словарём контракта, а не текстом стадии (прецедент узла
+    V50, шаг П8).
+    """
+    parts = [f"позиция {spec['position']} нормативного списка",
+             "её свойства файла регистрации"]
+    if spec["child_blocks"]:
+        parts.append("записи `ChildObjects` вида (считаются числом)")
+    if spec["content"] == CONTENT_EXPECTED:
+        parts.append("содержимое каталога `Ext/` вида")
+    if spec["internal_info"]:
+        parts.append("блок `InternalInfo`")
+    name = spec["group_title"] or spec["title"]
+    return f"свойства {name} ({', '.join(parts)})"
 
 
 def header_column(kind_tag: str) -> Optional[str]:

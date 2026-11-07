@@ -555,6 +555,7 @@ from configuration_defined_types_loader import (
 from configuration_position_frame_loader import (
     load_position_frame,
     not_run_answer as position_frame_not_run,
+    remove_position_frames,
 )
 from configuration_position_spec import (
     ordered_specs as position_frame_specs,
@@ -1006,6 +1007,20 @@ def _remove_rows(cur, cfg_id, configuration_uuid=None):
     # мера M5.
     if configuration_uuid:
         children.update(remove_defined_types(cur, configuration_uuid))
+    # Узел V59 (десять позиций пакета): строки свойств позиций тоже адресуются uuid
+    # заголовка, внешнего ключа и каскада по нему в схеме нет осознанно (прецеденты
+    # V20.1…V58), поэтому снятие обязан выполнить этот же явный DELETE. Дефект назван
+    # регрессией стоп-проб (шаг П8 узла V58, 06.11.2026): очистка стояла только внутри
+    # самой стадии, значит при остановке конвейера на более ранней стадии прежний состав
+    # десяти видов оставался в базе — «стадия не выполнялась» читалось строками
+    # предыдущей загрузки, а не нулями (правило C2), и карточка неполной загрузки
+    # противоречила содержимому таблиц. Для MinCfg это 15 строк на десять таблиц (замер
+    # `_scratch/_v58_p8_orphan_measure.py`), на BP3 — десятки тысяч. Круг снятия задаёт
+    # строка пакета (`stage_remove_order` слоя), детей и каскадных внешних ключей у
+    # позиций нет (замер П0), поэтому порядок снятия тривиален, а число снятых строк
+    # возвращается по каждой таблице (мера M7). Строки `bsl_modules` не снимаются — M5.
+    if configuration_uuid:
+        children.update(remove_position_frames(cur, configuration_uuid))
     cur.execute("DELETE FROM configurations WHERE id = %s", [cfg_id])
     children["configurations"] = cur.rowcount
     return children

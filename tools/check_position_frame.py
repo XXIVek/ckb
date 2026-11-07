@@ -311,6 +311,130 @@ def main() -> int:
         note("FAIL", "генератор оглавления не выполнил свой прогон",
              f"{type(exc).__name__}: {exc}")
 
+    # 10. контур остановки замкнут каждой стадией детей (узел V58, шаг П8).
+    #     Десять стадий пакета вошли в `STAGES` узлом V59, но записей в двух словарях
+    #     остановки у них не было: отсутствие ключа в `STAGE_FULL_RELOAD_ONLY` читается
+    #     как «отдельный вход есть» (об этом говорит комментарий самого контракта),
+    #     отсутствие записи в `STAGE_INCOMPLETE_GROUPS` — как «состава остановка не
+    #     касается», а `stage_resume_hint` уходил в формулировку по умолчанию, минуя
+    #     единый текст повтора. Дефект не поймала ни одна проверка узла V59 — его нашла
+    #     стоп-проба чужого узла V48. Круг задаёт пакет, значит и проверка замкнутости
+    #     словарей круга живёт здесь, а не в карточке и не в памяти ведущего.
+    try:
+        from configuration_load_contract import (
+            STAGES as CONTRACT_STAGES, STAGE_FULL_RELOAD_ONLY,
+            STAGE_INCOMPLETE_GROUPS, STAGE_REPEAT_HINT, stage_resume_hint,
+        )
+    except Exception as exc:  # noqa: BLE001 — отказ импорта называется, не роняет прогон
+        note("FAIL", "реестр стадий контракта не прочитан", f"{type(exc).__name__}: {exc}")
+    else:
+        # Стадии заголовка (S1, S2) в контур не входят: их отказ — другой путь ответа
+        # (разбор каталога и запись заголовка останавливают загрузку до детей).
+        child_stages = [stage for stage, _title in CONTRACT_STAGES][2:]
+        frame_stages = [spec["stage"] for spec in specs]
+        check("стадий детей в реестре контракта", len(child_stages) >= len(frame_stages),
+              f"детских: {len(child_stages)}, позиций пакета: {len(frame_stages)}")
+        missing_reload = [s for s in child_stages if s not in STAGE_FULL_RELOAD_ONLY]
+        missing_group = [s for s in child_stages if s not in STAGE_INCOMPLETE_GROUPS]
+        check("словари контура остановки покрывают каждую стадию детей",
+              not missing_reload and not missing_group,
+              ("нет в `STAGE_FULL_RELOAD_ONLY`: " + ", ".join(missing_reload) if missing_reload
+               else "")
+              + ("; нет в `STAGE_INCOMPLETE_GROUPS`: " + ", ".join(missing_group)
+                 if missing_group else "")
+              or f"стадий: {len(child_stages)}, записей: "
+                 f"{len(STAGE_FULL_RELOAD_ONLY)}/{len(STAGE_INCOMPLETE_GROUPS)}")
+        check("полная перезагрузка заявлена обязательной для каждой стадии детей",
+              all(STAGE_FULL_RELOAD_ONLY.get(s) for s in child_stages),
+              "есть стадия без признака полной перезагрузки")
+        check("подсказка повтора одна для всех стадий без отдельного входа "
+              "(узел TOOL-DROP)",
+              all(stage_resume_hint(s) == STAGE_REPEAT_HINT for s in frame_stages),
+              ["подсказка расходится с `STAGE_REPEAT_HINT`: "
+               + ", ".join(s for s in frame_stages
+                           if stage_resume_hint(s) != STAGE_REPEAT_HINT)][:200])
+        unnamed = [spec["position"] for spec in specs
+                   if spec["position"] not in (STAGE_INCOMPLETE_GROUPS.get(
+                       spec["stage"], "") or "")]
+        check("незакрытая группа каждой позиции пакета называет её позицию списка",
+              not unnamed,
+              ", ".join(unnamed) if unnamed else "позиций: " + str(len(specs)))
+
+    # 11. снятие `force=True` покрывает каждую таблицу пакета (узел V58, шаг П8).
+    #     Внешнего ключа и каскада на `configurations` у таблиц пакета нет осознанно
+    #     (прецеденты V20.1…V58), поэтому прежний состав снимает явный `DELETE` в контуре
+    #     снятия заголовка. Его там не было: очистка стояла только внутри стадии, и при
+    #     остановке конвейера на более ранней стадии база сохраняла прежний состав видов,
+    #     а «стадия не выполнялась» читалось строками предыдущей загрузки (правило C2).
+    #     Исходники читаются текстом, а не импортом модулей: импорт внутри `main()`
+    #     сделал бы `inspect` локальным именем всей функции и сломал чужой контур
+    #     писателей (замер первого применения — `UnboundLocalError: cannot access local
+    #     variable 'inspect'`, 11 провалов). Круг задаёт пакет, второй копии круга нет.
+    loader_path = ROOT / "src" / "configuration_loader.py"
+    frame_loader_path = ROOT / "src" / "configuration_position_frame_loader.py"
+    if not loader_path.is_file() or not frame_loader_path.is_file():
+        note("FAIL", "исходники контура снятия не найдены",
+             f"{loader_path} / {frame_loader_path}")
+    else:
+        loader_text = loader_path.read_text(encoding="utf-8")
+        check("контур снятия заголовка вызывает снятие таблиц пакета",
+              "remove_position_frames(cur, configuration_uuid)" in loader_text,
+              "вызова `remove_position_frames` в `configuration_loader` нет — строки "
+              "пакета переживут снятие заголовка сиротами прежнего состава")
+        frame_text = frame_loader_path.read_text(encoding="utf-8")
+        _start = frame_text.find("def remove_position_frames(")
+        _next = frame_text.find("\ndef ", _start + 1)
+        remove_text = frame_text[_start:_next] if _start >= 0 else ""
+        check("круг снятия читается строками пакета, а не списком имён",
+              "ordered_specs()" in remove_text and "stage_remove_order" in remove_text,
+              "список таблиц, выписанный в функции снятия, разойдётся с пакетом незаметно")
+        check("число снятых строк возвращается по каждой таблице (мера M7)",
+              "removed[table] = int(cur.rowcount)" in remove_text
+              and "return removed" in remove_text,
+              "ответ снятия не называет число снятых строк по таблице")
+
+    # 12. текст незакрытой части стадии S4 называет каждую позицию, закрытую стадиями
+    #     конвейера (узел V58, шаг П8). Третий дефект того же прогона стоп-проб:
+    #     `CHILD_NOT_IMPLEMENTED` перечислял закрытые позиции до 2.13 (узел V58) и модули
+    #     `Ext/` (узел V47), а десяти позиций V59 — не называл. Ответ загрузки для общих
+    #     макетов, картинок, XDTO-пакетов, WS-ссылок, сервисов интеграции, элементов
+    #     стиля, стилей, языков, последовательностей и внешних источников данных
+    #     утверждал «не закрыто», хотя стадии `s4n…s4w` их пишут (правило C2: ответ не
+    #     отрицает сохранённое). Тот же класс дефекта повторялся узел за узлом: пробы
+    #     V54→V55→V56→V57 сдвигали границу «2.NN not in CHILD_NOT_IMPLEMENTED» вручную,
+    #     и узел V58 её не сдвинул. Поэтому проверяется не конкретная граница, а
+    #     инвариант: каждая позиция, закрытая стадией из реестра, названа текстом.
+    #     Позиции берутся словарём `STAGE_INCOMPLETE_GROUPS` и строками пакета — второй
+    #     копии круга нет.
+    try:
+        from configuration_load_contract import (
+            CHILD_NOT_IMPLEMENTED as boundary_text, STAGE_INCOMPLETE_GROUPS,
+        )
+    except Exception as exc:  # noqa: BLE001 — отказ импорта называется, не роняет прогон
+        note("FAIL", "текст незакрытой части не прочитан", f"{type(exc).__name__}: {exc}")
+    else:
+        # Позицию закрытой стадии называет словарь `STAGE_INCOMPLETE_GROUPS`: он же держит
+        # незакрытую часть каждой стадии и уже замкнут контуром 10. Замер первого
+        # применения: ни записи `STAGES`, ни `stage_title` позиции не содержат — из них
+        # извлекалось ровно десять позиций пакета, позиции V48…V58 пропадали.
+        position_in_group = re.compile(r"позиц\w*\s+(\d+(?:\.\d+)?)")
+        closed_positions: set[str] = set()
+        for _stage, group in STAGE_INCOMPLETE_GROUPS.items():
+            closed_positions.update(position_in_group.findall(group or ""))
+        closed_positions.update(spec["position"] for spec in specs)
+        missing_positions = sorted(p for p in closed_positions if p not in boundary_text)
+        check("текст незакрытой части называет каждую позицию, закрытую стадиями детей",
+              bool(closed_positions) and not missing_positions,
+              ("в `CHILD_NOT_IMPLEMENTED` нет позиций: " + ", ".join(missing_positions)
+               if missing_positions else f"закрытых позиций: {len(closed_positions)}"))
+        missing_stage_names = [spec["stage"] for spec in specs
+                               if spec["stage"] not in boundary_text]
+        check("текст незакрытой части называет каждую стадию пакета",
+              not missing_stage_names,
+              "в `CHILD_NOT_IMPLEMENTED` нет стадий: "
+              + (", ".join(missing_stage_names) if missing_stage_names
+                 else f"нет — стадий: {len(specs)}"))
+
     print("-" * 78)
     total = sum(_counters.values())
     print(f"ИТОГ: провер {total}, PASS {_counters['PASS']}, FAIL {_counters['FAIL']}, "

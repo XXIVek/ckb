@@ -55,6 +55,7 @@ from configuration_position_spec import (
     empty_answer,
     header_column,
     ordered_specs,
+    stage_remove_order,
     stage_tables,
 )
 from current_revision import CHANGED_BY_LOAD, FIRST_REVISION, stamp_revision_rows
@@ -191,6 +192,36 @@ def read_index_records(cur, configuration_id: int,
 
 def frame_positions() -> List[str]:
     return [spec["position"] for spec in ordered_specs()]
+
+
+def remove_position_frames(cur, configuration_uuid: str) -> Dict[str, int]:
+    """Снять строки свойств десяти позиций пакета этой конфигурации (шаг П8 узла V58).
+
+    Очистка обязана быть явной и стоять в контуре снятия заголовка: внешнего ключа и
+    каскада в схеме нет осознанно (прецеденты V20.1, V44, V46, V48…V58), и без неё
+    `force=True` оставил бы в базе прежний состав видов пакета — тот же дефект, который
+    назван в снятии каждого прежнего узла. Найдено регрессией стоп-проб (шаг П8 узла
+    V58, 06.11.2026): остановка конвейера на более ранней стадии оставляла строки
+    позиций от предыдущей загрузки, поэтому «стадия не выполнялась» читалась прежним
+    составом, а не нулями (правило C2), и карточка неполной загрузки противоречила базе.
+
+    Круг снятия задаёт строка пакета (`ordered_specs` + `stage_remove_order`), а не
+    список имён в этом файле: вторая копия круга разошлась бы с загрузчиком незаметно.
+    Детей и каскадных внешних ключей у позиций нет (замер П0), поэтому порядок «сначала
+    дети» здесь не нужен. Число снятых строк возвращается по каждой таблице: оператор
+    обязан видеть полное состояние, снятое `force=True` (мера M7), а не только индекс.
+
+    Строки `bsl_modules` этим фильтром НЕ снимаются намеренно, и это названо, а не
+    обойено (мера M5): их пишет узел V47, и снятие свойств вида не удаляет содержимое
+    чужого узла.
+    """
+    removed: Dict[str, int] = {}
+    for spec in ordered_specs():
+        for table in stage_remove_order(spec):
+            cur.execute(f"DELETE FROM {table} WHERE configuration_uuid = %s::uuid",
+                        [str(configuration_uuid)])
+            removed[table] = int(cur.rowcount)
+    return removed
 
 
 def load_position_frame(spec: Dict[str, Any], source_path: str,
