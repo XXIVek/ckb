@@ -22,7 +22,8 @@ import os
 import sys
 
 os.environ["PGUSER"] = "postgres"
-# PGPASSWORD берётся из окружения процесса (значение ведёт файл .env, карточка правил `rules:db-access`)
+# PGPASSWORD берётся из окружения процесса: значение ведёт файл .env, правило подключения —
+# карточка `rules:kb-rules:functional:db-access`
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "src"))
 
 from config_dump_info_parser import parse_config_dump_info  # noqa: E402

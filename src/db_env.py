@@ -21,7 +21,8 @@ scripts, sql, docs, probes) — то есть значение жило в ре�
 ------------------
 Он не держит список баз: база — аргумент `db_params()` (`local_doc` — правила и знания,
 `ckb_1c_configurations` — замеры узлов). Значения для прямой работы оператора в `psql` ведёт
-карточка правил `rules:db-access` (база `local_doc`); `psql.exe` файл `.env` не читает, поэтому
+карточка правил `rules:kb-rules:functional:db-access` (база `local_doc`); `psql.exe` файл `.env`
+не читает, поэтому
 для терминала значение называется в правиле, а не в файле. Держать одно значение в двух местах —
 осознанное решение оператора (узел V60): код читает файл, человек читает правило. Расхождение
 замечает `tools/check_db_credentials.py`.
@@ -48,8 +49,8 @@ DEFAULTS = {"PGHOST": "localhost", "PGPORT": "5432", "PGUSER": "postgres"}
 MISSING_PASSWORD_HINT = (
     "Пароль PostgreSQL не задан. Задайте его строкой PGPASSWORD=… в файле .env "
     "в корне проекта (файл вне репозитория) или переменной окружения PGPASSWORD; "
-    "значение для прямого psql ведёт карточка правил `rules:db-access` "
-    "(python tools/rules_read.py \"rules:db-access\")."
+    "значение для прямого psql ведёт карточка `rules:kb-rules:functional:db-access` "
+    "(python tools/rules_read.py \"rules:kb-rules:functional:db-access\")."
 )
 
 

@@ -10,20 +10,29 @@
 переделки одно и то же значение стояло в 53 отслеживаемых файлах и попадало в историю git.
 
 Проверяемое (каждый пункт — провал, а не предупреждение):
-  1. `.env` и `.env.example` на месте, `.env` исключён git'ом (`git check-ignore`);
-  2. `src/db_env.py` разбирает значения: `db_params()` даёт непустые host/user/password;
+  1. `.env` на месте и исключён git'ом (`git check-ignore`); отслеживаемого шаблона `.env.example`
+    в репозитории нет — файл удалён 07.11.2026 как тестовый, а его возврат означал бы второй
+    носитель значений, который расходится с правилом молча;
+  2. `src/db_env.py` разбирает значения: `db_params()` даёт непустые host/port/user/password;
   3. литерала пароля (значения из `.env`) нет ни в одном отслеживаемом файле репозитория;
   4. фолбэка пароля в коде нет — именно фолбэк держал секрет в реестре, даже когда окружение
-     было задано;
-  5. карточка `rules:kb-rules:functional:db-access` называет пароль (иначе правило, по которому
-     ассистент запускает `psql.exe`, не отвечает на вопрос «каким паролем»).
+    было задано;
+  5. карточка `rules:kb-rules:functional:db-access` называет все четыре значения подключения в
+    форме `PGHOST=`/`PGPORT=`/`PGUSER=`/`PGPASSWORD` (значение пароля включается в текст): правило,
+    по которому ассистент запускает `psql.exe`, обязано отвечать и на вопрос «куда», и на вопрос
+    «каким паролем» — иначе следующий прогон выдумывает порт и имя ключа (замер 07.11.2026:
+    вызовы с портом 5434 и с ключом `POSTGRES_PASSWORD`, которого в `.env` нет).
 
 Пароль в вывод не печатается: проверка называет длину и отпечаток, иначе сама проверка стала бы
-местом, где секрет попадает в протокол прогона (и в окно контекста).
+местом, где секрет попадает в протокол прогона (и в окно контекста). Отпечаток считается по
+sha256, а не встроенным `hash()`: последний солится на каждый процесс интерпретатора, поэтому
+«отпечаток» менялся бы между прогонами при неизменном значении и не находил бы расхождение
+(замер 07.11.2026: одно значение давало 3075e2 и c46973 в разных процессах).
 
 Запуск:
     python tools/check_db_credentials.py     # 0 - расхождений нет, 1 - есть
 """
+import hashlib
 import re
 import subprocess
 import sys
@@ -75,34 +84,41 @@ def main():
 
     print("=== узел V60: реквизиты подключения к PostgreSQL держит одно место ===")
 
-    # 1. Файл значений на месте, в репозиторий не попадает.
+    # 1. Файл значений на месте, в репозиторий не попадает; шаблона-двойника нет.
     env_path, example_path = ROOT / ".env", ROOT / ".env.example"
     check(env_path.exists(), "`.env` в корне проекта есть",
           "без файла код берёт значения из окружения процесса, а прогон в новой оболочке "
           "остаётся без пароля")
-    check(example_path.exists(), "`.env.example` есть",
-          "шаблон нужен, чтобы новый прогон не выводил значение из догадок")
+    check(not example_path.exists(), "`.env.example` в репозитории нет",
+          "шаблон удалён 07.11.2026 как тестовый файл: это второй носитель значений, который "
+          "расходится с карточкой правила молча")
     ignored = git("check-ignore", "-q", ".env")
     check(ignored.returncode == 0, "`.env` исключён git'ом",
           "файл со значением в истории git означает, что секрет снова в репозитории")
 
     # 2. Единственная точка чтения значений работает.
+    host = port = user = ""
     try:
         import db_env
         params = db_env.db_params("local_doc")
         secret = str(params.get("password") or "")
-        got = bool(params.get("host")) and bool(params.get("user")) and bool(secret)
-        check(got, "`src/db_env.py` разбирает host/user/password",
+        host = str(params.get("host") or "")
+        port = str(params.get("port") or "")
+        user = str(params.get("user") or "")
+        got = bool(host) and bool(port) and bool(user) and bool(secret)
+        check(got, "`src/db_env.py` разбирает host/port/user/password",
               "значения не получены - точка подключения нерабочая")
     except Exception as exc:
-        check(False, "`src/db_env.py` разбирает host/user/password", f"{type(exc).__name__}: {exc}")
+        check(False, "`src/db_env.py` разбирает host/port/user/password",
+              f"{type(exc).__name__}: {exc}")
         secret = ""
 
     if not secret:
         print("\nитог: значение пароля не получено - остальные проверки не имеют смысла")
         return 1
-    print(f"  значение: длина {len(secret)}, отпечаток {hash(secret) & 0xffffff:06x} "
-          "(сам пароль не печатается)")
+    digest = hashlib.sha256(secret.encode("utf-8")).hexdigest()[:6]
+    print(f"  значения: host={host} port={port} user={user}; пароль длина {len(secret)}, "
+          f"отпечаток {digest} (сам пароль не печатается)")
 
     # 3-4. Литерала значения и фолбэка в отслеживаемых файлах нет.
     files = tracked_files()
@@ -125,7 +141,7 @@ def main():
     check(not fallbacks, "фолбэка пароля в коде подключения нет (src/, tools/, корневые .py)",
           "фолбэк возвращает секрет в реестр: " + ", ".join(fallbacks[:8]))
 
-    # 5. Карточка правила называет пароль.
+    # 5. Карточка правила называет все четыре значения подключения.
     try:
         from database import get_cursor
         with get_cursor() as cur:
@@ -134,6 +150,9 @@ def main():
         answer = row["answer"] if row else ""
         check(bool(row), f"карточка `{CARD_ADDRESS}` существует",
               "правило предписывает запуск `psql.exe`, строки нет")
+        for token in (f"PGHOST={host}", f"PGPORT={port}", f"PGUSER={user}"):
+            check(token in answer, f"`{CARD_ADDRESS}` называет {token}",
+                  "без названного значения прогон выдумывает порт и имя ключа подключения")
         check(secret in answer, f"`{CARD_ADDRESS}` называет пароль",
               "правило о запуске psql без значения пароля не отвечает на вопрос «каким»")
     except Exception as exc:

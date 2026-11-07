@@ -59,7 +59,7 @@ CLASSES = [
     ("setdefault: подстановка секрета снимается",
      r"\nos\.environ\.setdefault\(\"PGPASSWORD\",\s*\"" + SECRET + "\"\\)",
      "\n# PGPASSWORD берётся из окружения процесса (значение ведёт файл .env, карточка правил "
-     "`rules:db-access`)"),
+     "`rules:kb-rules:functional:db-access`"),
     ("HOST/USER/PASSWORD: пароль из окружения",
      'HOST, USER, PASSWORD = "localhost", "postgres", "' + SECRET + '"',
      'HOST, USER, PASSWORD = "localhost", "postgres", os.environ["PGPASSWORD"]'),

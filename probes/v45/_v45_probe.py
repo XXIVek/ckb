@@ -28,7 +28,8 @@ import re
 import sys
 
 os.environ["PGUSER"] = "postgres"
-# PGPASSWORD берётся из окружения процесса (значение ведёт файл .env, карточка правил `rules:db-access`)
+# PGPASSWORD берётся из окружения процесса: значение ведёт файл .env, правило подключения —
+# карточка `rules:kb-rules:functional:db-access`
 HERE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(HERE, "src"))
 
