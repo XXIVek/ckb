@@ -62,6 +62,8 @@ from configuration_load_contract import (  # noqa: E402
     CHILD_TABLES,
     COMMON_ATTRIBUTES_SECTION_HEADER,
     COMMON_ATTRIBUTES_TABLES,
+    DEFINED_TYPES_SECTION_HEADER,
+    DEFINED_TYPES_TABLES,
     EVENT_SUBSCRIPTIONS_SECTION_HEADER,
     SCHEDULED_JOBS_SECTION_HEADER,
     BOTS_SECTION_HEADER,
@@ -84,8 +86,11 @@ from configuration_load_contract import (  # noqa: E402
     SESSION_PARAMETERS_SECTION_HEADER,
     SESSION_PARAMETER_TABLE,
     STAGES,
+    STAGE_FULL_RELOAD_ONLY,
+    STAGE_REPEAT_HINT,
     STAGE_CHILD_OBJECTS,
     STAGE_COMMON_ATTRIBUTES,
+    STAGE_DEFINED_TYPES,
     STAGE_EVENT_SUBSCRIPTIONS,
     STAGE_SCHEDULED_JOBS,
     STAGE_BOTS,
@@ -105,6 +110,7 @@ from configuration_load_contract import (  # noqa: E402
     build_stopped_stage,
     child_objects_defaults,
     common_attributes_defaults,
+    defined_types_defaults,
     event_subscriptions_defaults,
     scheduled_jobs_defaults,
     bots_defaults,
@@ -132,6 +138,19 @@ from configuration_filter_criteria_loader import (  # noqa: E402
     count_criterion_child_rows,
 )
 from configuration_object_modules_loader import object_modules_defaults  # noqa: E402
+# Узел V58 (шаг П8): десять позиций пакета V59 задаются строками контракта
+# `configuration_position_spec`; отдельной функции-стадии у них в загрузчике нет (цикл
+# `for frame_spec in position_frame_specs()`). Значения словарей пробы читаются тем же
+# пакетом — выписать их списком значило бы завести вторую копию круга, и именно вторая
+# копия рассинхронизировала пробу с `STAGES` на одиннадцать стадий.
+from configuration_position_frame_loader import (  # noqa: E402
+    not_run_answer as frame_not_run,
+)
+from configuration_position_spec import (  # noqa: E402
+    ordered_specs as frame_specs,
+    section_header as frame_section_header,
+    stage_tables as frame_stage_tables,
+)
 # Таблицы стадий — для проверки «осталось в базе»: перечень держит словарь слоя
 # (прецедент V44/V46), проба не имеет права придумывать свой.
 from configuration_root_modules import TABLES as ROOT_MODULE_TABLES  # noqa: E402
@@ -239,6 +258,48 @@ RESUME_MARKS = {
     STAGE_OBJECT_MODULES: "load_1c_catalog_tool",
 }
 
+
+# ── узел V58 (шаг П8, 06.11.2026): состав стадий дострается выводом ────────────────
+# Проба отстала от конвейера на одиннадцать стадий: S4m (узел V58) и десять позиций
+# пакета V59. Причина — ровно та, о которой этот файл пишет строками 146–154: состав
+# держался явным перечнем и словарями. Здесь он дострается выводом из реестра позиций;
+# второй копии круга проба не заводит.
+#
+# S4m — обычная стадия со своей функцией в загрузчике, поэтому входит и в словари, и в
+# живой перебор отказов. Десять позиций пакета выполняются ОДНИМ циклом загрузчика,
+# отдельной функции-стадии у них нет: они входят в перечень пропущенных, в словари
+# ответа и в подсчёт «что осталось в базе», но живой отказ позиции остаётся кругом
+# узла V59 — это названо проверкой 1.16а ниже, а не пропущено молча.
+FRAME_STAGES: tuple = ()
+for _frame_spec in frame_specs():
+    _stage = _frame_spec["stage"]
+    STAGE_KEYS[_stage] = _frame_spec["table"]
+    SECTION_HEADERS[_stage] = frame_section_header(_frame_spec)
+    DEFAULTS[_stage] = (lambda _s=_frame_spec: frame_not_run(_s))
+    FRAME_STAGES += (_stage,)
+STAGE_KEYS[STAGE_DEFINED_TYPES] = "defined_types"
+SECTION_HEADERS[STAGE_DEFINED_TYPES] = DEFINED_TYPES_SECTION_HEADER
+DEFAULTS[STAGE_DEFINED_TYPES] = defined_types_defaults
+STAGE_FUNCTIONS[STAGE_DEFINED_TYPES] = "load_defined_types"
+
+# Узел TOOL-DROP (05.11.2026) снял отдельный вход позиции: подсказка продолжения одна
+# на все стадии. Прежние значения `RESUME_MARKS` держали имена снятых инструментов, и
+# проверка 1.7 требовала текст, которого загрузчик уже не выдаёт (замер П8 — провал на
+# каждой стадии). Ожидание читает то, что говорит контракт, а не память о прежнем
+# реестре инструментов.
+for _stage in list(RESUME_MARKS):
+    RESUME_MARKS[_stage] = (OBJECT_MODULES_RELOAD_HINT if _stage == STAGE_OBJECT_MODULES
+                            else STAGE_REPEAT_HINT)
+# Словарь ожидания читается составом стадий, а не перечнем прежних узлов: без строк
+# новой стадии проверка 1.7 падает KeyError (замер П8 — `KeyError: 's4m_defined_types'`).
+for _stage in (STAGE_DEFINED_TYPES,) + FRAME_STAGES:
+    RESUME_MARKS[_stage] = STAGE_REPEAT_HINT
+
+# S4b остаётся последней стадией, потому что является второй транзакцией загрузки
+# (Q6 узла V46), а не позицией списка: новые стадии вставляются перед ней.
+CHILD_STAGES = (CHILD_STAGES[:-1] + (STAGE_DEFINED_TYPES,) + FRAME_STAGES
+                + (CHILD_STAGES[-1],))
+
 PASSED = 0
 FAILED = 0
 NOTES = []
@@ -270,10 +331,18 @@ def read_src(path):
 
 
 def function_defs(path):
-    """Имена `FunctionDef` модуля и строки определений (критерий 6б, позиция O9)."""
+    """Имена `FunctionDef` модуля верхнего уровня и строки их определений.
+
+    Критерий 6б, позиция O9: в модуле контракта не должно второго определения одной
+    функции того же уровня. Обход идёт по `tree.body`, а не `ast.walk`: вложенные
+    функции разных форматёров дублем уровня модуля не являются. `ast.walk` считал их
+    дублем, когда узел V59 добавил вторую вложенную `state_line` (форматёр пакета) рядом
+    с вложенной `state_line` форматёра V58 — проба провалилась на том, чего нет (шаг П8
+    узла V58, замер `measure_v48.txt`, проверка 1.14).
+    """
     tree = ast.parse(read_src(path))
     names = {}
-    for node in ast.walk(tree):
+    for node in tree.body:
         if isinstance(node, ast.FunctionDef):
             names.setdefault(node.name, []).append(node.lineno)
     return names
@@ -371,8 +440,9 @@ for stage in CHILD_STAGES:
     check(f"1.7 `{stage}`: подсказка называет допустимый способ продолжить (Q8 п. 4)",
           RESUME_MARKS[stage] in str(stopped["resume_with"]),
           str(stopped["resume_with"])[:70])
-    check(f"1.8 `{stage}`: «только полная перезагрузка» — признак одной стадии S4b (Q4.1)",
-          stopped["full_reload_required"] == (stage == STAGE_OBJECT_MODULES)
+    check(f"1.8 `{stage}`: признак полной перезагрузки совпадает со словарём контракта "
+          "(отдельные входы позиций сняты узлом TOOL-DROP)",
+          stopped["full_reload_required"] == bool(STAGE_FULL_RELOAD_ONLY.get(stage, False))
           and (OBJECT_MODULES_RELOAD_HINT in str(stopped["resume_with"])
                if stage == STAGE_OBJECT_MODULES else True))
     check(f"1.9 `{stage}`: строка о том, что осталось в базе, обязательна (Q8 п. 2)",
@@ -406,10 +476,22 @@ check("1.15 загрузчик кладёт ключ `stopped_stage` в отве
       '"stopped_stage"' in loader_src and "stopped_stage_defaults()" in loader_src)
 CONST_NAMES = {stage: "STAGE_" + stage.split("_", 1)[1].upper()
                for stage in CHILD_STAGES}
-check("1.16 загрузчик останавливает конвейер на каждой стадии детей (Q8 «ко всем стадиям»)",
-      all(f"_stop_here({CONST_NAMES[stage]}" in loader_src for stage in CHILD_STAGES),
-      [stage for stage in CHILD_STAGES
+# Стадии детей делятся на два доказательства, и различие названо, а не сглажено: у
+# стадии со своей функцией останов виден вызовом `_stop_here(STAGE_…)`, а десять позиций
+# пакета останавливаются общим циклом — отдельной функции-стадии у них нет (узел V59).
+# Прежнее ожидание требовало для них вызова, которого в загрузчике нет и быть не должно.
+OWN_FUNCTION_STAGES = tuple(s for s in CHILD_STAGES if s in STAGE_FUNCTIONS)
+check("1.16 загрузчик останавливает конвейер на каждой стадии детей со своей функцией "
+      "(Q8 «ко всем стадиям»)",
+      all(f"_stop_here({CONST_NAMES[stage]}" in loader_src
+          for stage in OWN_FUNCTION_STAGES),
+      [stage for stage in OWN_FUNCTION_STAGES
        if f"_stop_here({CONST_NAMES[stage]}" not in loader_src])
+check("1.16а десять позиций пакета останавливаются общим циклом `position_frame_specs()` "
+      "— отдельной функции-стадии у них нет (узел V59)",
+      "for frame_spec in position_frame_specs()" in loader_src
+      and '_stop_here(frame_spec["stage"]' in loader_src,
+      "цикла позиций или останова внутри него в загрузчике не найдено")
 check("1.17 итог конвейера больше не `success: True` безусловно (Q8 п. 1)",
       '"success": not stopped' in loader_src and loader_src.count('"success": True') == 1,
       f'строк `"success": True`: '
@@ -520,6 +602,22 @@ def scope_counts(cur, cfg_uuid):
         counts["s4l:" + table] = int(one(
             cur, f"SELECT count(*) FROM {table} WHERE configuration_uuid = %s::uuid",
             [str(cfg_uuid)]) or 0)
+    # Узел V58 (шаг П8): строки S4m входят в «что осталось в базе» по тому же правилу —
+    # пропущенная стадия не обязана заполнять свои таблицы, и проба обязана видеть это
+    # числом. Круг вида — одна таблица (Q1 плана V58, вариант A); перечень берётся из
+    # контракта, а не переписывается.
+    for table in DEFINED_TYPES_TABLES:
+        counts["s4m:" + table] = int(one(
+            cur, f"SELECT count(*) FROM {table} WHERE configuration_uuid = %s::uuid",
+            [str(cfg_uuid)]) or 0)
+    # Узел V59 (десять позиций пакета): круг каждой позиции — одна таблица, имя и
+    # порядок задаёт строка пакета. Выписать их здесь значило бы завести вторую копию
+    # круга; префикс строки — литера стадии, она же первая часть адреса стадии.
+    for _frame_spec in frame_specs():
+        for table in frame_stage_tables(_frame_spec):
+            counts[_frame_spec["stage"].split("_", 1)[0] + ":" + table] = int(one(
+                cur, f"SELECT count(*) FROM {table} WHERE configuration_uuid = %s::uuid",
+                [str(cfg_uuid)]) or 0)
     counts["s4b:bsl_modules"] = int(one(
         cur, "SELECT count(*) FROM bsl_modules WHERE configuration_uuid = %s::uuid "
              "AND parent_type = 'configuration_objects'", [str(cfg_uuid)]) or 0)
@@ -527,16 +625,41 @@ def scope_counts(cur, cfg_uuid):
 
 
 def stage_row_prefix(stage):
-    """Префикс строк стадии в `scope_counts` — тот же порядок, что в словаре."""
-    return {STAGE_ROOT_MODULES: "s3:", STAGE_CHILD_OBJECTS: "s4:",
-            STAGE_SESSION_PARAMETERS: "s4c:", STAGE_ROLES: "s4d:",
-            STAGE_COMMON_ATTRIBUTES: "s4e:", STAGE_EXCHANGE_PLANS: "s4f:",
-            STAGE_FILTER_CRITERIA: "s4g:", STAGE_EVENT_SUBSCRIPTIONS: "s4h:",
-            STAGE_SCHEDULED_JOBS: "s4i:",
-            STAGE_BOTS: "s4j:",
-            STAGE_FUNCTIONAL_OPTIONS: "s4k:",
-            STAGE_FUNCTIONAL_OPTIONS_PARAMETERS: "s4l:",
-            STAGE_OBJECT_MODULES: "s4b:"}[stage]
+    """Префикс строк стадии в `scope_counts`.
+
+    Литера стадии — первая часть её адреса (`s4c_session_parameters` → `s4c:`), поэтому
+    префикс выводится адресом. Словарь префиксов расходился с `STAGES` при каждом новом
+    узле — на нём пробы и отстают сейчас (шаг П8 узла V58).
+    """
+    return stage.split("_", 1)[0] + ":"
+
+
+def frame_replacement(calls, reason, target_stage):
+    """Подмена общей функции пакета: отказ возвращает только нужная позиция.
+
+    Отдельной функции-стадии у позиции нет (узел V59: десять позиций выполняются циклом
+    `for frame_spec in position_frame_specs()`), поэтому подменяется сама
+    `load_position_frame`. Счётчик ведётся по всем позициям круга: «последующие стадии
+    не вызывались» доказывается фактом вызова, а не совпадением со статусом `not_run`
+    (тот же приём, что `spy_stage` для стадий со своей функцией). Позиции до отказавшей
+    работают настоящим разбором — иначе конвейер остановился бы раньше, и проверка
+    «остановка на нужной стадии» ничего не проверяла бы.
+    """
+    original = CL.load_position_frame
+
+    def _wrapped(frame_spec, *args, **kwargs):
+        stage = frame_spec["stage"]
+        calls[stage] = calls.get(stage, 0) + 1
+        if stage != target_stage:
+            return original(frame_spec, *args, **kwargs)
+        answer = frame_not_run(frame_spec, reason)
+        answer["success"] = False
+        answer["status"] = STATUS_ERROR
+        answer["error"] = reason
+        answer["reason"] = reason
+        return answer
+
+    return _wrapped
 
 
 def run_stage_failure(dump_dir, stage, baseline, cur, cfg_uuid):
@@ -552,7 +675,17 @@ def run_stage_failure(dump_dir, stage, baseline, cur, cfg_uuid):
     originals = {}
     position = CHILD_STAGES.index(stage)
     print(f"\n=== конвейер: отказ стадии {stage} ({Path(dump_dir).name}, force=True) ===")
+    # Подмена общей функции пакета ставится ПРИ ЛЮБОЙ отказавшей стадии, а не только
+    # когда отказала позиция: обёртка ведёт счётчик вызовов всех десяти позиций, и этим
+    # счётчиком доказывается и «конвейер дошёл до s4b» (замер `_v58_p8_logs/v48_after3.txt`
+    # — 10 расхождений вида «до s4n_common_templates конвейер дошёл, она отработала:
+    # вызовов: None»), и «последующие позиции не вызывались». Без счётчика позиция
+    # остаётся слепой зоной: её состояние читалось бы только статусом ответа.
+    frame_original = CL.load_position_frame
+    CL.load_position_frame = frame_replacement(calls, reason, stage)
     for other in CHILD_STAGES:
+        if other not in STAGE_FUNCTIONS:
+            continue
         originals[other] = getattr(CL, STAGE_FUNCTIONS[other])
         if other == stage:
             replacement = broken_stage(stage, reason, calls)
@@ -566,6 +699,8 @@ def run_stage_failure(dump_dir, stage, baseline, cur, cfg_uuid):
     try:
         result = load_catalog(str(dump_dir), force=True)
     finally:
+        if frame_original is not None:
+            CL.load_position_frame = frame_original
         for other, fn in originals.items():
             setattr(CL, STAGE_FUNCTIONS[other], fn)
     return result, calls, reason
@@ -681,8 +816,8 @@ def main() -> int:
               final["header"] == baseline["header"]
               and final["index"] == baseline["index"]
               and all(final[key] >= baseline[key] for key in final
-                      if key.startswith(("s3:", "s4:", "s4c:", "s4d:", "s4e:", "s4f:",
-                                         "s4g:", "s4b:"))),
+                      if key.startswith(
+                              tuple(stage_row_prefix(s) for s in CHILD_STAGES))),
               {key: (baseline[key], final[key]) for key in final
                if final[key] < baseline[key]})
         check("3.4 карточка успешной загрузки раздела остановки не содержит",

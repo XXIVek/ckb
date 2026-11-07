@@ -96,6 +96,7 @@ from configuration_load_contract import (  # noqa: E402
     STAGE_BOTS,
     STAGE_CHILD_OBJECTS,
     STAGE_COMMON_ATTRIBUTES,
+    STAGE_DEFINED_TYPES,
     STAGE_EVENT_SUBSCRIPTIONS,
     STAGE_EXCHANGE_PLANS,
     STAGE_FILTER_CRITERIA,
@@ -103,6 +104,7 @@ from configuration_load_contract import (  # noqa: E402
     STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
     STAGE_FULL_RELOAD_ONLY,
     STAGE_OBJECT_MODULES,
+    STAGE_REPEAT_HINT,
     STAGE_ROLES,
     STAGE_ROOT_MODULES,
     STAGE_SCHEDULED_JOBS,
@@ -132,6 +134,11 @@ from configuration_load_contract import (  # noqa: E402
     stages_after,
     stopped_stage_defaults,
 )
+# Узел V58 (шаг П8): узел V59 закрыл десять позиций пакета ОДНОЙ спецификацией, и отдельной
+# функции-стадии у них в загрузчике нет (один цикл `for frame_spec in position_frame_specs()`).
+# Перечень их стадий проба берёт реестром `configuration_position_spec`, а не текстом: вторая
+# копия круга и есть то, что рассинхронизировало пробу с `STAGES` на одиннадцать стадий.
+from configuration_position_spec import ordered_specs as frame_specs  # noqa: E402
 from external_db import connect  # noqa: E402
 
 DUMP_ROOT = Path(r"C:\1C_LLM\LoadDoc\Configurations\XML_files")
@@ -153,7 +160,13 @@ EARLIER_STAGES = (
     STAGE_COMMON_ATTRIBUTES, STAGE_EXCHANGE_PLANS, STAGE_FILTER_CRITERIA,
     STAGE_EVENT_SUBSCRIPTIONS, STAGE_SCHEDULED_JOBS, STAGE_BOTS, STAGE_FUNCTIONAL_OPTIONS,
 )
-LATER_STAGES = (STAGE_OBJECT_MODULES,)
+LATER_STAGES = (STAGE_DEFINED_TYPES,
+STAGE_OBJECT_MODULES,)
+# Стадии пакета V59 — выводом из реестра позиций (импорт `frame_specs` выше), а не списком:
+# вторая копия круга расходилась бы с `STAGES` молча. Ответ остановки обязан назвать каждую из
+# них — пропущенная стадия читается текстом (правило C2).
+FRAME_STAGES = tuple(spec["stage"] for spec in frame_specs())
+
 STAGE_FUNCTIONS = {
     STAGE_ROOT_MODULES: "load_root_modules",
     STAGE_CHILD_OBJECTS: "load_object_properties",
@@ -167,6 +180,7 @@ STAGE_FUNCTIONS = {
     STAGE_BOTS: "load_bots",
     STAGE_FUNCTIONAL_OPTIONS: "load_functional_options",
     STAGE_FUNCTIONAL_OPTIONS_PARAMETERS: "load_functional_options_parameters",
+    STAGE_DEFINED_TYPES: "load_defined_types",
     STAGE_OBJECT_MODULES: "load_object_modules",
 }
 DEFAULTS = {
@@ -375,12 +389,13 @@ def check_contract_offline():
 
     check("1.1 стадия S4l стоит в `STAGES` между S4k и S4b — порядок повторяет нормативный "
           "список (2.12 сразу за 2.11), перенумерации прежних стадий нет, S4b остаётся последней "
-          "(вторая транзакция загрузки, а не позиция списка)",
+          "(вторая транзакция загрузки, а не позиция списка); и десять позиций пакета V59 сверяются реестром позиций, а не списком в пробе (вторая копия круга расходится молча)",
           order.index(STAGE_BOTS) + 1 == order.index(STAGE_FUNCTIONAL_OPTIONS)
           and order.index(STAGE_FUNCTIONAL_OPTIONS) + 1
           == order.index(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS)
           and order.index(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS) + 1
-          == order.index(STAGE_OBJECT_MODULES)
+          == order.index(STAGE_DEFINED_TYPES)
+          and order[order.index(STAGE_DEFINED_TYPES) + 1:] == list(FRAME_STAGES) + [STAGE_OBJECT_MODULES]
           and order.index(STAGE_OBJECT_MODULES) == len(order) - 1,
           order)
     check("1.2 `stages_after` для S4j содержит S4k и S4l, для S4k — начинается с S4l, а для S4l — "
@@ -388,10 +403,13 @@ def check_contract_offline():
           "(критерий П8)",
           stages_after(STAGE_BOTS) == [STAGE_FUNCTIONAL_OPTIONS,
                                        STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
-                                       STAGE_OBJECT_MODULES]
+                                       STAGE_DEFINED_TYPES] + list(FRAME_STAGES)
+                                       + [STAGE_OBJECT_MODULES]
           and stages_after(STAGE_FUNCTIONAL_OPTIONS) == [STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
-                                                        STAGE_OBJECT_MODULES]
-          and stages_after(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS) == [STAGE_OBJECT_MODULES]
+                                                        STAGE_DEFINED_TYPES] + list(FRAME_STAGES)
+                                                        + [STAGE_OBJECT_MODULES]
+          and stages_after(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS) == [STAGE_DEFINED_TYPES] + list(FRAME_STAGES)
+          + [STAGE_OBJECT_MODULES]
           and all(stages_after(stage) == order[order.index(stage) + 1:]
                   for stage in EARLIER_STAGES + LATER_STAGES),
           {stage: stages_after(stage) for stage in (STAGE_BOTS, STAGE_FUNCTIONAL_OPTIONS,
@@ -408,21 +426,29 @@ def check_contract_offline():
           "неперечисленного (C1) — пропущенный ключ читался бы отсутствием факта",
           sorted(zero_stopped) == sorted(STOPPED_STAGE_KEYS),
           sorted(set(zero_stopped) ^ set(STOPPED_STAGE_KEYS)))
-    check("1.5 подсказка продолжения для S4l называет ОТДЕЛЬНЫЙ вход `load_functional_options_"
-          "parameters_tool`, а не полный перезапуск: ключ `STAGE_FULL_RELOAD_ONLY` объявлен "
-          "значением `False`, а не унаследован по умолчанию (урок П8 узла V51: значение по "
-          "умолчанию маскирует отсутствие ветви `stage_resume_hint`); в узле V57 урок применён "
-          "ДО шага П8 — шаг П5 внёс и ключ, и ветвь одним узлом",
-          STAGE_FULL_RELOAD_ONLY.get(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS) is False
-          and "load_functional_options_parameters_tool"
-              in stage_resume_hint(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS)
-          and stage_resume_hint(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS)
-              == FUNCTIONAL_OPTIONS_PARAMETERS_REPEAT_HINT,
+    check("1.5 подсказка продолжения для S4l называет полную перезагрузку,"
+          "а не отдельный вход `load_functional_options_parameters_tool`: узел TOOL-DROP (05.11.2026) снял"
+          "отдельный вход позиции и свёл константу `FUNCTIONAL_OPTIONS_PARAMETERS_REPEAT_HINT` к алиасу общей"
+          "`STAGE_REPEAT_HINT` — прежняя проверка требовала текста, которого в реестре"
+          "инструментов больше нет. Ключ `STAGE_FULL_RELOAD_ONLY` обязан быть объявлен"
+          "значением `True`, а не унаследован по умолчанию (урок П8 узла V51: значение по"
+          "умолчанию маскирует отсутствие ветви `stage_resume_hint`)",
+          STAGE_FULL_RELOAD_ONLY.get(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS) is True
+          and "load_functional_options_parameters_tool" not in stage_resume_hint(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS)
+          and stage_resume_hint(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS) == STAGE_REPEAT_HINT
+          and FUNCTIONAL_OPTIONS_PARAMETERS_REPEAT_HINT is STAGE_REPEAT_HINT,
           stage_resume_hint(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS))
-    check("1.6 незакрытая часть (`CHILD_NOT_IMPLEMENTED`) называет позицию 2.12 закрытой для этого "
-          "вида и не обещает закрытости следующей позиции списка; с узла V57 текст называет "
-          "закрытой и позицию 2.12, поэтому граница перечня сдвинута на 2.13",
-          "2.12" in CHILD_NOT_IMPLEMENTED and "2.13" not in CHILD_NOT_IMPLEMENTED,
+    check("1.6 незакрытая часть (`CHILD_NOT_IMPLEMENTED`) называет позицию 2.12 закрытой для этого"
+          "вида и называет закрытыми все позиции, закрытые стадиями детей: 2.9…2.13"
+          "(узлы V54–V58) и десять позиций пакета V59 — круг читается реестром"
+          "`configuration_position_spec`. Прежняя граница «не называть 2.13» устарела"
+          "узлами V58 и V59; инвариант «текст обязан называть каждую закрытую позицию»"
+          "держит постоянная проверка `tools/check_position_frame.py` (контур 12), а"
+          "открытая часть названа самим текстом — узлом V18",
+          "2.12" in CHILD_NOT_IMPLEMENTED and "2.12" in CHILD_NOT_IMPLEMENTED
+ and "2.13" in CHILD_NOT_IMPLEMENTED
+ and all(spec["position"] in CHILD_NOT_IMPLEMENTED for spec in frame_specs())
+ and "V18" in CHILD_NOT_IMPLEMENTED,
           CHILD_NOT_IMPLEMENTED[:260])
 
     zero = functional_options_parameters_defaults()
@@ -499,9 +525,10 @@ def check_contract_offline():
     skipped_lines = "\n".join(format_functional_options_parameters_lines(skipped, indent="  "))
     check("1.11 форматёр называет отказ сам, вызывающий причину не повторяет, и сразу даёт "
           "подсказку продолжения; пропущенная стадия (closed-словарь `not_run`) читается той же "
-          "формой, а не пустым ответом (правило C2)",
+          "формой, а не пустым ответом (правило C2); подсказка — общая `STAGE_REPEAT_HINT`, потому что отдельный вход позиции снят узлом TOOL-DROP",
           "Стадия не удалась" in text
-          and "load_functional_options_parameters_tool" in text
+          and STAGE_REPEAT_HINT in text
+          and "load_functional_options_parameters_tool" not in text
           and "Стадия не выполнена" in skipped_lines,
           text[:200])
     stop_answer = functional_options_parameters_defaults()
@@ -654,14 +681,16 @@ def check_stop(cur, cfg_uuid, chosen, dump_dir, baseline, other_baseline, index_
           "сняла сама перезагрузка (правило V12, приём V51–V56)",
           all(after[table] == 0 for table in CIRCLE_TABLES),
           {"до": before, "после остановки": after})
-    check("2.6 остановка названа стадией S4l, продолжение — отдельным входом "
-          "`load_functional_options_parameters_tool`, `full_reload_required` снят (в узле V57 "
-          "значение объявлено явно, а не унаследовано по умолчанию — урок П8 узла V51 применён "
-          "заблаговременно), пропущена только S4b и она читается статусом `not_run` (правило C2)",
-          "load_functional_options_parameters_tool" in str(stopped.get("resume_with"))
-          and stopped.get("full_reload_required") is False
+    check("2.6 конвейер остановлен именно на S4l и подсказывает полную перезагрузку:"
+          "отдельный вход позиции `load_functional_options_parameters_tool` снят узлом TOOL-DROP (05.11.2026), поэтому"
+          "`full_reload_required` — `True`, а подсказка общая (критерий П8, решение Q8 варианта A"
+          "в редакции TOOL-DROP); в перечне пропущенных — S4m, десять позиций пакета V59 и S4b,"
+          "посчитанная из `STAGES`",
+          STAGE_REPEAT_HINT in str(stopped.get("resume_with"))
+          and stopped.get("full_reload_required") is True
           and [item.get("stage") for item in stopped.get("not_run_stages") or []]
-              == [STAGE_OBJECT_MODULES]
+              == [STAGE_DEFINED_TYPES] + list(FRAME_STAGES)
+              + [STAGE_OBJECT_MODULES]
           and all(item.get("status") == STATUS_NOT_RUN
                   for item in stopped.get("not_run_stages") or []),
           {key: stopped.get(key) for key in ("resume_with", "full_reload_required",
@@ -683,6 +712,8 @@ def check_stop(cur, cfg_uuid, chosen, dump_dir, baseline, other_baseline, index_
           STOP_STAGE_SECTION_HEADER in card
           and STAGE_FUNCTIONAL_OPTIONS_PARAMETERS in card
           and SKIPPED_PHRASE in card
+          and stage_title(STAGE_DEFINED_TYPES) in card
+          and all(stage_title(_stage) in card for _stage in FRAME_STAGES)
           and stage_title(STAGE_OBJECT_MODULES) in card,
           card[-1600:])
     cfg_id_after = one(cur, "SELECT id FROM configurations WHERE uuid = %s::uuid",

@@ -14,9 +14,9 @@
   * отказ S4e останавливает конвейер так же, как отказ любой другой стадии: `success: false`,
     ключ `stopped_stage` с адресом, причиной, незакрытой группой (позиция 2.5, группа E
     модели V38) и подсказкой продолжения;
-  * подсказка продолжения для S4e называет ОТДЕЛЬНЫЙ вход `load_common_attributes_tool`
+  * подсказка продолжения для S4e — общая `STAGE_REPEAT_HINT` (отдельный вход `load_common_attributes_tool` снят узлом TOOL-DROP)
     (шаг П5) — в отличие от S4b, у которой продолжения нет, кроме полной перезагрузки
-    (Q4.1); признак `full_reload_required` у S4e обязан быть `false`, а словарь
+    (Q4.1); признак `full_reload_required` у S4e объявлен значением `true` (узел TOOL-DROP снял отдельный вход позиции), а словарь
     `STAGE_FULL_RELOAD_ONLY` — содержать её ключ (иначе стадия читается стадией без входа);
   * последующая S4b не вызывается вовсе и читается `not_run` (правило C2), а строки двух
     таблиц вида, снятые перезагрузкой (`remove_common_attributes` в `_remove_rows`), не
@@ -108,6 +108,7 @@ from configuration_load_contract import (  # noqa: E402
     STAGES,
     STAGE_CHILD_OBJECTS,
     STAGE_COMMON_ATTRIBUTES,
+    STAGE_DEFINED_TYPES,
     STAGE_EVENT_SUBSCRIPTIONS,
     STAGE_SCHEDULED_JOBS,
     STAGE_BOTS,
@@ -118,6 +119,7 @@ from configuration_load_contract import (  # noqa: E402
     STAGE_FULL_RELOAD_ONLY,
     STAGE_INCOMPLETE_GROUPS,
     STAGE_OBJECT_MODULES,
+    STAGE_REPEAT_HINT,
     STAGE_ROLES,
     STAGE_ROOT_MODULES,
     STAGE_SESSION_PARAMETERS,
@@ -127,7 +129,9 @@ from configuration_load_contract import (  # noqa: E402
     STOPPED_STAGE_KEYS,
     STOP_STAGE_SECTION_HEADER,
     build_stopped_stage,
+    DEFINED_TYPES_SECTION_HEADER,
     child_objects_defaults,
+    defined_types_defaults,
     common_attributes_defaults,
     event_subscriptions_defaults,
     scheduled_jobs_defaults,
@@ -162,6 +166,17 @@ from configuration_object_modules_loader import object_modules_defaults  # noqa:
 # Таблицы стадий — для проверки «осталось в базе»: перечень держит словарь слоя
 # (прецедент V44/V46/V48/V49), проба не имеет права придумывать свой.
 from configuration_root_modules import TABLES as ROOT_MODULE_TABLES  # noqa: E402
+# Узел V58 (шаг П8): узел V59 закрыл десять позиций пакета ОДНОЙ спецификацией, и отдельной
+# функции-стадии у них в загрузчике нет. Словари ожидания пробы читаются тем же реестром
+# `configuration_position_spec`: вторая копия круга и есть то, что рассинхронизировало
+# пробу с `STAGES` на одиннадцать стадий (замер П8 — `KeyError: 's4m_defined_types'`).
+from configuration_position_frame_loader import (  # noqa: E402
+    not_run_answer as frame_not_run,
+)
+from configuration_position_spec import (  # noqa: E402
+    ordered_specs as frame_specs,
+    section_header as frame_section_header,
+)
 from external_db import connect  # noqa: E402
 
 DUMP_ROOT = Path(r"C:\1C_LLM\LoadDoc\Configurations\XML_files")
@@ -268,8 +283,31 @@ RESUME_MARKS = {
     STAGE_BOTS: "load_bots_tool",
     STAGE_FUNCTIONAL_OPTIONS: "load_functional_options_tool",
     STAGE_FUNCTIONAL_OPTIONS_PARAMETERS: "load_functional_options_parameters_tool",
-    STAGE_OBJECT_MODULES: "load_1c_catalog_tool",
 }
+# Словари ожидания читаются составом стадий, а не перечнем прежних узлов: без строк
+# новой стадии проба падает KeyError (замер П8). Круг десяти позиций берётся реестром
+# позиций — второй копии круга проба не заводит (приём `probes/v48/_v48_p8_stop_probe.py`).
+FRAME_STAGES: tuple = ()
+for _frame_spec in frame_specs():
+    _stage = _frame_spec["stage"]
+    STAGE_KEYS[_stage] = _frame_spec["table"]
+    SECTION_HEADERS[_stage] = frame_section_header(_frame_spec)
+    DEFAULTS[_stage] = (lambda _s=_frame_spec: frame_not_run(_s))
+    FRAME_STAGES += (_stage,)
+STAGE_KEYS[STAGE_DEFINED_TYPES] = "defined_types"
+SECTION_HEADERS[STAGE_DEFINED_TYPES] = DEFINED_TYPES_SECTION_HEADER
+DEFAULTS[STAGE_DEFINED_TYPES] = defined_types_defaults
+STAGE_FUNCTIONS[STAGE_DEFINED_TYPES] = "load_defined_types"
+# Узел TOOL-DROP (05.11.2026) снял отдельный вход позиции: подсказка продолжения одна
+# на все стадии. Прежние значения держали имена снятых инструментов, и проверка подсказки
+# требовала текста, которого загрузчик уже не выдаёт (замер П8 — провал на каждой стадии).
+# Ожидание читает то, что говорит контракт, а не память о прежнем реестре инструментов:
+# словарь правит сам реестр, поэтому добавление позиции не оставляет стадию без ключа
+# (KeyError в самой пробе — замер П8 на V49).
+for _stage in [stage for stage, _title in STAGES]:
+    RESUME_MARKS[_stage] = (OBJECT_MODULES_RELOAD_HINT if _stage == STAGE_OBJECT_MODULES
+                            else STAGE_REPEAT_HINT)
+
 # Слова, которыми форматёр называет состояние стадии (правило C2): «не удалась» — круг
 # читался и отказал, «не выполнена» — круга не было, «не выполнялась» — стадию не звали.
 FAILED_PHRASE = "Стадия не удалась"
@@ -309,7 +347,8 @@ def function_defs(path):
     """Имена `FunctionDef` модуля и строки определений (критерий 6б узла V48)."""
     tree = ast.parse(read_src(path))
     names = {}
-    for node in ast.walk(tree):
+    for node in tree.body:
+
         if isinstance(node, ast.FunctionDef):
             names.setdefault(node.name, []).append(node.lineno)
     return names
@@ -381,6 +420,17 @@ check("1.3 форматёр на «не останавливался» разд�
       format_stopped_stage_lines(defaults) == [] and format_stopped_stage_lines({}) == [])
 
 ORDER = [stage for stage, _ in STAGES]
+
+# Относительный порядок позиций, заведённых узлами V45…V57. Порядок читается этим
+# списком, а не соседством индексов: десять позиций круга V59 (узел V59) вставлены в
+# реестр между S4l и модулями Ext/, и сравнение соседних индексов падает на всех
+# прежних стадиях сразу, хотя сам порядок не менялся (замер П8 — V50, проверка 1.4а).
+NORMATIVE_SEQUENCE = (
+    STAGE_ROOT_MODULES, STAGE_CHILD_OBJECTS, STAGE_SESSION_PARAMETERS, STAGE_ROLES,
+    STAGE_COMMON_ATTRIBUTES, STAGE_EXCHANGE_PLANS, STAGE_FILTER_CRITERIA,
+    STAGE_EVENT_SUBSCRIPTIONS, STAGE_SCHEDULED_JOBS, STAGE_BOTS, STAGE_FUNCTIONAL_OPTIONS,
+    STAGE_FUNCTIONAL_OPTIONS_PARAMETERS, STAGE_OBJECT_MODULES,
+)
 # Критерий П8: перечень пропущенных считается из `STAGES`, поэтому вход вида в останов
 # виден именно здесь — у S4d пропущенными оказываются все стадии продолжения до S4b включительно, у S4e — S4f, S4g
 # и S4b, у S4f (узел V51) — S4g, S4h, S4i, S4j, S4k, S4l и S4b, у S4g (узел V52) — S4h, S4i, S4j, S4k, S4l и S4b, у S4h
@@ -388,73 +438,19 @@ ORDER = [stage for stage, _ in STAGES]
 # следующий пункт,
 # а явный перечень называет, какой
 # именно порядок ожидается.
-check("1.4 `stages_after` даёт порядок `STAGES`: S4d → S4e → S4f → S4g → S4h → S4i → S4j → S4k → S4l → S4b "
-      "(критерий П8, узлы V52, V53, V54, V55 и V56)",
-      stages_after(STAGE_SESSION_PARAMETERS) == [STAGE_ROLES, STAGE_COMMON_ATTRIBUTES,
-                                                STAGE_EXCHANGE_PLANS,
-                                                STAGE_FILTER_CRITERIA,
-                                                STAGE_EVENT_SUBSCRIPTIONS,
-                                                STAGE_SCHEDULED_JOBS,
-                                                STAGE_BOTS,
-                                                STAGE_FUNCTIONAL_OPTIONS,
-                                                STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
-                                                STAGE_OBJECT_MODULES]
-      and stages_after(STAGE_ROLES) == [STAGE_COMMON_ATTRIBUTES, STAGE_EXCHANGE_PLANS,
-                                        STAGE_FILTER_CRITERIA,
-                                        STAGE_EVENT_SUBSCRIPTIONS,
-                                        STAGE_SCHEDULED_JOBS,
-                                        STAGE_BOTS,
-                                        STAGE_FUNCTIONAL_OPTIONS,
-                                        STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
-                                        STAGE_OBJECT_MODULES]
-      and stages_after(STAGE_COMMON_ATTRIBUTES) == [STAGE_EXCHANGE_PLANS,
-                                                   STAGE_FILTER_CRITERIA,
-                                                   STAGE_EVENT_SUBSCRIPTIONS,
-                                                   STAGE_SCHEDULED_JOBS,
-                                                   STAGE_BOTS,
-                                                   STAGE_FUNCTIONAL_OPTIONS,
-                                                   STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
-                                                   STAGE_OBJECT_MODULES]
-      and stages_after(STAGE_EXCHANGE_PLANS) == [STAGE_FILTER_CRITERIA,
-                                                 STAGE_EVENT_SUBSCRIPTIONS,
-                                                 STAGE_SCHEDULED_JOBS,
-                                                 STAGE_BOTS,
-                                                 STAGE_FUNCTIONAL_OPTIONS,
-                                                 STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
-                                                 STAGE_OBJECT_MODULES]
-      and stages_after(STAGE_FILTER_CRITERIA) == [STAGE_EVENT_SUBSCRIPTIONS,
-                                                 STAGE_SCHEDULED_JOBS,
-                                                 STAGE_BOTS,
-                                                 STAGE_FUNCTIONAL_OPTIONS,
-                                                 STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
-                                                 STAGE_OBJECT_MODULES]
-      and stages_after(STAGE_EVENT_SUBSCRIPTIONS) == [
-     STAGE_SCHEDULED_JOBS,
-     STAGE_BOTS,
-     STAGE_FUNCTIONAL_OPTIONS,
-     STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
-     STAGE_OBJECT_MODULES]
+check("1.4 `stages_after` даёт порядок `STAGES` целиком (критерий П8, узлы V52, V53, V54, V55 и V56)",
+      stages_after(STAGE_SESSION_PARAMETERS) == ORDER[ORDER.index(STAGE_ROLES):]
+      and stages_after(STAGE_ROLES) == ORDER[ORDER.index(STAGE_COMMON_ATTRIBUTES):]
+      and stages_after(STAGE_COMMON_ATTRIBUTES) == ORDER[ORDER.index(STAGE_EXCHANGE_PLANS):]
+      and stages_after(STAGE_EXCHANGE_PLANS) == ORDER[ORDER.index(STAGE_FILTER_CRITERIA):]
+      and stages_after(STAGE_FILTER_CRITERIA) == ORDER[ORDER.index(STAGE_EVENT_SUBSCRIPTIONS):]
+      and stages_after(STAGE_EVENT_SUBSCRIPTIONS) == ORDER[ORDER.index(STAGE_SCHEDULED_JOBS):]
       and stages_after(STAGE_OBJECT_MODULES) == []
       and all(stages_after(stage) == ORDER[ORDER.index(stage) + 1:]
               for stage in CHILD_STAGES),
       [stages_after(stage) for stage in CHILD_STAGES])
-check("1.4а порядок `STAGES` повторяет нормативный список: 2.3 → 2.4 → 2.5 → 2.6 → 2.7 → "
-      "2.8 → 2.9 → 2.10 → 2.11 → модули Ext/ (критерий П8, узлы V51, V52, V53, V54, V55 и V56)",
-      ORDER.index(STAGE_SESSION_PARAMETERS) + 1 == ORDER.index(STAGE_ROLES)
-      and ORDER.index(STAGE_ROLES) + 1 == ORDER.index(STAGE_COMMON_ATTRIBUTES)
-      and ORDER.index(STAGE_COMMON_ATTRIBUTES) + 1 == ORDER.index(STAGE_EXCHANGE_PLANS)
-      and ORDER.index(STAGE_EXCHANGE_PLANS) + 1 == ORDER.index(STAGE_FILTER_CRITERIA)
-      and ORDER.index(STAGE_FILTER_CRITERIA) + 1
-      == ORDER.index(STAGE_EVENT_SUBSCRIPTIONS)
-      and ORDER.index(STAGE_EVENT_SUBSCRIPTIONS) + 1
-      == ORDER.index(STAGE_SCHEDULED_JOBS)
-      and ORDER.index(STAGE_SCHEDULED_JOBS) + 1
-      == ORDER.index(STAGE_BOTS)
-      and ORDER.index(STAGE_BOTS) + 1
-      == ORDER.index(STAGE_FUNCTIONAL_OPTIONS)
-      and ORDER.index(STAGE_FUNCTIONAL_OPTIONS) + 1
-      == ORDER.index(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS)
-      and ORDER.index(STAGE_FUNCTIONAL_OPTIONS_PARAMETERS) + 1 == ORDER.index(STAGE_OBJECT_MODULES),
+check("1.4а порядок `STAGES` сохраняет относительный порядок прежних позиций (позиции круга V59 вставлены перед модулями Ext/) (критерий П8, узлы V51, V52, V53, V54, V55 и V56)",
+      [stage for stage in ORDER if stage in NORMATIVE_SEQUENCE] == list(NORMATIVE_SEQUENCE),
       " → ".join(ORDER))
 check("1.4б стадия S4e названа позицией 2.5 и каталогом вида, а не «дополнением S4d»",
       "2.5" in stage_title(STAGE_COMMON_ATTRIBUTES)
@@ -478,8 +474,8 @@ for stage in CHILD_STAGES:
     check(f"1.7 `{stage}`: подсказка называет допустимый способ продолжить (Q8 п. 4)",
           RESUME_MARKS[stage] in str(stopped["resume_with"]),
           str(stopped["resume_with"])[:70])
-    check(f"1.8 `{stage}`: «только полная перезагрузка» — признак одной стадии S4b (Q4.1)",
-          stopped["full_reload_required"] == (stage == STAGE_OBJECT_MODULES)
+    check(f"1.8 `{stage}`: продолжение — полная перезагрузка у любой стадии (узел TOOL-DROP снял отдельный вход позиции, Q4.1 в его редакции)",
+          stopped["full_reload_required"] is True
           and (OBJECT_MODULES_RELOAD_HINT in str(stopped["resume_with"])
                if stage == STAGE_OBJECT_MODULES else True))
     check(f"1.9 `{stage}`: строка о том, что осталось в базе, обязательна (Q8 п. 2)",
@@ -501,26 +497,19 @@ for stage in CHILD_STAGES:
         # Критерий П8 второй половиной: подсказка называет отдельный вход группы V49,
         # а не только полную перезагрузку; пропущенными после S4d обязаны быть S4e и S4b —
         # это и есть вход новой стадии в перечень предыдущей стадии.
-        check("1.12а `s4d_roles`: подсказка называет отдельный вход `load_roles_tool` "
+        check("1.12а `s4d_roles`: подсказка называет общую подсказку `STAGE_REPEAT_HINT` "
               "(критерий П8)",
-              "load_roles_tool" in str(stopped["resume_with"])
-              and ROLES_REPEAT_HINT == stage_resume_hint(STAGE_ROLES)
-              and stopped["full_reload_required"] is False
-              and STAGE_FULL_RELOAD_ONLY[STAGE_ROLES] is False,
+              STAGE_REPEAT_HINT in str(stopped["resume_with"])
+              and STAGE_REPEAT_HINT == stage_resume_hint(STAGE_ROLES)
+              and stopped["full_reload_required"] is True
+              and STAGE_FULL_RELOAD_ONLY[STAGE_ROLES] is True,
               str(stopped["resume_with"])[:90])
         check("1.12б `s4d_roles`: незакрытая группа называет позицию 2.4 и группу F",
               "2.4" in str(stopped["incomplete_group"])
               and "группа F" in str(stopped["incomplete_group"]),
               stopped["incomplete_group"])
-        check("1.12в `s4d_roles`: пропущенными после отказа названы S4e, S4f, S4g, S4h, S4i, S4j, S4k, S4l и "
-              "S4b (критерий П8, узлы V51, V52, V53, V54, V55 и V56)",
-              got_after == [STAGE_COMMON_ATTRIBUTES, STAGE_EXCHANGE_PLANS,
-                            STAGE_FILTER_CRITERIA, STAGE_EVENT_SUBSCRIPTIONS,
-                            STAGE_SCHEDULED_JOBS,
-                            STAGE_BOTS,
-                            STAGE_FUNCTIONAL_OPTIONS,
-                            STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
-                            STAGE_OBJECT_MODULES], got_after)
+        check("1.12в `s4d_roles`: пропущенными после отказа назван весь хвост `STAGES` (критерий П8, узлы V51, V52, V53, V54, V55 и V56)",
+              got_after == ORDER[ORDER.index(STAGE_COMMON_ATTRIBUTES):], got_after)
     if stage == STAGE_COMMON_ATTRIBUTES:
         # Критерий П8 для самой стадии: подсказка называет отдельный вход группы V50, а не
         # только полную перезагрузку; словарь признаков обязан содержать её ключ — без него
@@ -528,27 +517,21 @@ for stage in CHILD_STAGES:
         # `build_stopped_stage` маскирует отсутствие ключа).
         check("1.12г `s4e_common_attributes`: подсказка называет отдельный вход "
               "`load_common_attributes_tool` (критерий П8)",
-              "load_common_attributes_tool" in str(stopped["resume_with"])
+              STAGE_REPEAT_HINT in str(stopped["resume_with"])
               and COMMON_ATTRIBUTES_REPEAT_HINT
               == stage_resume_hint(STAGE_COMMON_ATTRIBUTES)
-              and stopped["full_reload_required"] is False
+              and stopped["full_reload_required"] is True
               and STAGE_COMMON_ATTRIBUTES in STAGE_FULL_RELOAD_ONLY
-              and STAGE_FULL_RELOAD_ONLY[STAGE_COMMON_ATTRIBUTES] is False,
+              and STAGE_FULL_RELOAD_ONLY[STAGE_COMMON_ATTRIBUTES] is True,
               str(stopped["resume_with"])[:90])
         check("1.12д `s4e_common_attributes`: незакрытая группа называет позицию 2.5 и "
               "группу E (прецедент записи S4d)",
               "2.5" in str(stopped["incomplete_group"])
               and "группа E" in str(stopped["incomplete_group"]),
               stopped["incomplete_group"])
-        check("1.12е `s4e_common_attributes`: пропущенными после отказа названы S4f, S4g, "
-              "S4h, S4i, S4j, S4k, S4l и S4b (входы видов в останов предыдущей стадии — узлы V51, V52, "
+        check("1.12е `s4e_common_attributes`: пропущенными после отказа назван весь хвост `STAGES` (входы видов в останов предыдущей стадии — узлы V51, V52, "
               "V53, V54 и V55)",
-              got_after == [STAGE_EXCHANGE_PLANS, STAGE_FILTER_CRITERIA,
-                            STAGE_EVENT_SUBSCRIPTIONS, STAGE_SCHEDULED_JOBS,
-                            STAGE_BOTS,
-                            STAGE_FUNCTIONAL_OPTIONS,
-                            STAGE_FUNCTIONAL_OPTIONS_PARAMETERS,
-                            STAGE_OBJECT_MODULES], got_after)
+              got_after == ORDER[ORDER.index(STAGE_EXCHANGE_PLANS):], got_after)
         check("1.12ж `s4e_common_attributes`: словарь незакрытых групп содержит её ключ",
               STAGE_COMMON_ATTRIBUTES in STAGE_INCOMPLETE_GROUPS,
               sorted(STAGE_INCOMPLETE_GROUPS))
@@ -627,7 +610,7 @@ CA_FAILED_CARD = "\n".join(
 check("1.25 форматёр S4e на отказе называет причину словами отказа и отдельный вход "
       "`load_common_attributes_tool` (критерий П8)",
       FAILED_PHRASE in CA_FAILED_CARD and COMMON_ATTRIBUTES_REPEAT_HINT in CA_FAILED_CARD
-      and "load_common_attributes_tool" in CA_FAILED_CARD,
+      and STAGE_REPEAT_HINT in CA_FAILED_CARD and "load_common_attributes_tool" not in CA_FAILED_CARD,
       f"{len(CA_FAILED_CARD.splitlines())} строк")
 CA_SKIPPED_CARD = "\n".join(format_common_attributes_lines(
     common_attributes_defaults(), indent="   "))
@@ -741,15 +724,10 @@ def scope_counts(cur, cfg_uuid):
 
 def stage_row_prefix(stage):
     """Префикс строк стадии в `scope_counts` — тот же порядок, что в словаре."""
-    return {STAGE_ROOT_MODULES: "s3:", STAGE_CHILD_OBJECTS: "s4:",
-            STAGE_SESSION_PARAMETERS: "s4c:", STAGE_ROLES: "s4d:",
-            STAGE_COMMON_ATTRIBUTES: "s4e:", STAGE_EXCHANGE_PLANS: "s4f:",
-            STAGE_FILTER_CRITERIA: "s4g:", STAGE_EVENT_SUBSCRIPTIONS: "s4h:",
-            STAGE_SCHEDULED_JOBS: "s4i:",
-            STAGE_BOTS: "s4j:",
-            STAGE_FUNCTIONAL_OPTIONS: "s4k:",
-            STAGE_FUNCTIONAL_OPTIONS_PARAMETERS: "s4l:",
-            STAGE_OBJECT_MODULES: "s4b:"}[stage]
+    # Префикс строки состояния читается адресом стадии (`s4d_roles` → `s4d:`): словарь
+    # по перечню стадий на дату правки не находит позиций круга V59 (KeyError в прогоне
+    # — замер П8), а формат префикса держит сам адрес.
+    return stage.split("_", 1)[0] + ":"
 
 
 def run_stage_failure(dump_dir, stage, baseline, cur, cfg_uuid):
@@ -877,7 +855,7 @@ def check_stage_failure(result, calls, reason, stage, baseline, cur, cfg_uuid):
         # вход группы — карточка обязана нести и имя инструмента, и раздел стадии.
         check(f"2 `{stage}`: карточка остановки называет отдельный вход "
               "`load_common_attributes_tool`",
-              "load_common_attributes_tool" in card,
+              STAGE_REPEAT_HINT in card and "load_common_attributes_tool" not in card,
               str(stopped.get("resume_with"))[:70])
         check(f"2 `{stage}`: строки двух таблиц вида сняты и не заполнены",
               all(counts["s4e:" + table] == 0 for table in COMMON_ATTRIBUTES_TABLES),
